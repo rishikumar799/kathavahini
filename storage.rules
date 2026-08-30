@@ -1,0 +1,65 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Helper authentication functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && (
+        request.auth.token.email == 'kathavahini@gmail.com' ||
+        request.auth.token.role == 'admin'
+      );
+    }
+
+    // File validation: safe image MIME types and max 5MB file size
+    function isValidImage() {
+      return request.resource != null
+        && request.resource.contentType.matches('image/(jpeg|jpg|png|webp|gif|svg\\+xml)')
+        && request.resource.size <= 5 * 1024 * 1024;
+    }
+
+    // User Profile Avatars: users/{userId}/profile/{fileName}
+    match /users/{userId}/profile/{fileName} {
+      allow read: if true;
+      allow write: if (isOwner(userId) || isAdmin()) && isValidImage();
+    }
+
+    // Writer Profile Images: writers/{writerId}/profile/{fileName}
+    match /writers/{writerId}/profile/{fileName} {
+      allow read: if true;
+      allow write: if (isOwner(writerId) || isAdmin()) && isValidImage();
+    }
+
+    // Story Cover Images: stories/{storyId}/cover/{fileName}
+    match /stories/{storyId}/cover/{fileName} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isValidImage();
+    }
+
+    // Novel Cover Images: novels/{novelId}/cover/{fileName}
+    match /novels/{novelId}/cover/{fileName} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isValidImage();
+    }
+
+    // Knowledge Article Cover Images: knowledge/{knowledgeId}/cover/{fileName}
+    match /knowledge/{knowledgeId}/cover/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidImage();
+    }
+
+    // Fallback: deny non-admin writes to unmanaged paths
+    match /{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}

@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-telugu-sans: 'Noto Sans Telugu', 'Plus Jakarta Sans', sans-serif;
+    --font-telugu-serif: 'Noto Serif Telugu', Georgia, serif;
+    
+    /* Light Theme Defaults */
+    --bg-primary: #FAF7F2;
+    --bg-surface: #FFFFFF;
+    --bg-elevated: #F3EEE7;
+    --text-primary: #17151A;
+    --text-secondary: #6F6970;
+    --text-muted: #9E96A0;
+    --border-color: #E8E1DA;
+    --accent-primary: #7A284B;
+    --accent-hover: #631F3C;
+    --accent-amber: #D99A3D;
+  }
+
+  .dark {
+    --bg-primary: #101014;
+    --bg-surface: #18181D;
+    --bg-elevated: #222229;
+    --text-primary: #F7F3EE;
+    --text-secondary: #AAA4AC;
+    --text-muted: #78727B;
+    --border-color: #2E2D36;
+    --accent-primary: #D87591;
+    --accent-hover: #EA8DA7;
+    --accent-amber: #E2AC5A;
+  }
+
+  .sepia {
+    --bg-primary: #F5EFEB;
+    --bg-surface: #EFE6DD;
+    --bg-elevated: #E4D8CC;
+    --text-primary: #2B231D;
+    --text-secondary: #6B5D52;
+    --text-muted: #928376;
+    --border-color: #DFD2C4;
+    --accent-primary: #8C3827;
+    --accent-hover: #722B1D;
+    --accent-amber: #C27D2B;
+  }
+}
+
+body {
+  font-family: var(--font-telugu-sans);
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.font-serif-telugu {
+  font-family: var(--font-telugu-serif);
+}
+
+.font-sans-telugu {
+  font-family: var(--font-telugu-sans);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Smooth Reader Column */
+.reader-content {
+  font-family: var(--font-telugu-serif);
+  line-height: 2.1;
+  word-spacing: 0.05em;
+  letter-spacing: 0.01em;
+}
+
+.reader-content p {
+  margin-bottom: 1.8rem;
+  font-size: var(--reader-font-size, 1.125rem);
+}

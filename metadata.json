@@ -1,0 +1,6 @@
+{
+  "name": "Kathavahini",
+  "description": "A premium Telugu-first storytelling, novel reading, and author publishing platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

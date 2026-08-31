@@ -119,7 +119,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
               <ShieldCheck className="w-3 h-3 text-[#7A284B] dark:text-[#D87591]" />
             </div>
             <span className="text-[10px] text-[#6F6970] dark:text-[#A29CA6] block leading-tight">
-              {currentUser?.email || 'kathavahini@gmail.com'}
+              {currentUser?.email || 'thekathavahini@gmail.com'}
             </span>
           </div>
 

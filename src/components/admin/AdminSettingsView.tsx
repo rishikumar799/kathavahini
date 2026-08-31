@@ -49,7 +49,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ currentUse
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-[#6F6970] dark:text-[#A29CA6]">
               <div>
-                అడ్మిన్ ఇమెయిల్: <strong className="text-[#17151A] dark:text-[#F7F3EE]">kathavahini@gmail.com</strong>
+                అడ్మిన్ ఇమెయిల్: <strong className="text-[#17151A] dark:text-[#F7F3EE]">thekathavahini@gmail.com</strong>
               </div>
               <div>
                 ద్వితీయ ఖాతా: <strong className="text-[#17151A] dark:text-[#F7F3EE]">rishikumarvadada@gmail.com</strong>

@@ -165,7 +165,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   }, []);
 
   const adminUid = currentUser?.id || 'admin_session';
-  const adminEmail = currentUser?.email || 'kathavahini@gmail.com';
+  const adminEmail = currentUser?.email || 'thekathavahini@gmail.com';
 
   // Application Actions
   const handleApproveApplication = async (app: WriterApplication) => {

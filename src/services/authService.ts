@@ -4,6 +4,10 @@ import {
   signOut,
   updateProfile as updateFirebaseProfile,
   onAuthStateChanged,
+  sendPasswordResetEmail,
+  verifyPasswordResetCode,
+  confirmPasswordReset,
+  ActionCodeSettings,
   User as FirebaseUser,
   AuthError
 } from 'firebase/auth';
@@ -86,7 +90,7 @@ class AuthService {
   private buildFallbackUser(firebaseUser: FirebaseUser): User {
     const displayName = firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'తెలుగు పాఠకుడు');
     const avatar = firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(firebaseUser.uid)}`;
-    const isAdminEmail = firebaseUser.email === 'kathavahini@gmail.com';
+    const isAdminEmail = firebaseUser.email === 'thekathavahini@gmail.com';
 
     return {
       id: firebaseUser.uid,
@@ -118,7 +122,7 @@ class AuthService {
   private async syncFirestoreUserProfile(firebaseUser: FirebaseUser, customName?: string): Promise<User> {
     const userDocRef = doc(db, 'users', firebaseUser.uid);
     const docSnap = await getDoc(userDocRef);
-    const isAdminEmail = firebaseUser.email === 'kathavahini@gmail.com';
+    const isAdminEmail = firebaseUser.email === 'thekathavahini@gmail.com';
 
     if (docSnap.exists()) {
       const data = docSnap.data();
@@ -451,7 +455,7 @@ class AuthService {
       throw new Error('దయచేసి సరైన ఈమెయిల్ అడ్రస్‌ను నమోదు చేయండి.');
     }
 
-    const isAdminEmail = trimmedEmail === 'kathavahini@gmail.com';
+    const isAdminEmail = trimmedEmail === 'thekathavahini@gmail.com';
     let userCredential;
 
     try {
@@ -571,6 +575,69 @@ class AuthService {
   }
 
   /**
+   * Helper to derive the base URL for ActionCodeSettings
+   */
+  public getAppBaseUrl(): string {
+    const metaEnv = (import.meta as any)?.env;
+    const envUrl = (metaEnv?.VITE_APP_URL || metaEnv?.APP_URL || '') as string;
+    if (envUrl && typeof envUrl === 'string' && envUrl.startsWith('http')) {
+      return envUrl.replace(/\/$/, '');
+    }
+    if (typeof window !== 'undefined' && window.location && window.location.origin) {
+      return window.location.origin;
+    }
+    return 'https://kathavahini.org';
+  }
+
+  /**
+   * Send Password Reset Email with official Firebase ActionCodeSettings and automatic fallback
+   */
+  public async sendPasswordReset(email: string): Promise<void> {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      throw new Error('దయచేసి సరైన ఈమెయిల్ అడ్రస్‌ను నమోదు చేయండి.');
+    }
+
+    try {
+      const appBaseUrl = this.getAppBaseUrl();
+      const actionCodeSettings: ActionCodeSettings = {
+        url: `${appBaseUrl}/reset-password`,
+        handleCodeInApp: true,
+      };
+      await sendPasswordResetEmail(auth, trimmedEmail, actionCodeSettings);
+    } catch (err: any) {
+      console.warn('ActionCodeSettings reset failed or unauthorized continue URI, falling back to standard Firebase reset email:', err);
+      // Fallback: standard sendPasswordResetEmail without ActionCodeSettings is always authorized
+      await sendPasswordResetEmail(auth, trimmedEmail);
+    }
+  }
+
+  /**
+   * Verify the password reset oobCode from Firebase
+   */
+  public async verifyPasswordResetCode(oobCode: string): Promise<string> {
+    const trimmedCode = oobCode ? oobCode.trim() : '';
+    if (!trimmedCode) {
+      throw new Error('చెల్లుబాటు అయ్యే రీసెట్ కోడ్ కనుగొనబడలేదు.');
+    }
+    return await verifyPasswordResetCode(auth, trimmedCode);
+  }
+
+  /**
+   * Confirm password reset with Firebase Authentication
+   */
+  public async confirmPasswordReset(oobCode: string, newPass: string): Promise<void> {
+    const trimmedCode = oobCode ? oobCode.trim() : '';
+    if (!trimmedCode) {
+      throw new Error('చెల్లుబాటు అయ్యే రీసెట్ కోడ్ కనుగొనబడలేదు.');
+    }
+    if (!newPass || newPass.length < 6) {
+      throw new Error('పాస్‌వర్డ్ కనీసం 6 అక్షరాలు ఉండాలి.');
+    }
+    await confirmPasswordReset(auth, trimmedCode, newPass);
+  }
+
+  /**
    * Translate Firebase Auth error codes into helpful Telugu / user-friendly messages
    */
   public getErrorMessage(error: any): string {
@@ -596,6 +663,12 @@ class AuthService {
         return 'నెట్‌వర్క్ సమస్య ఏర్పడింది. మీ ఇంటర్నెట్ కనెక్షన్‌ను సరిచూసుకోండి.';
       case 'auth/user-disabled':
         return 'ఈ ఖాతా నిలిపివేయబడింది.';
+      case 'auth/invalid-action-code':
+        return 'ఈ పాస్వర్డ్ రీసెట్ లింక్ చెల్లదు లేదా గడువు ముగిసింది. దయచేసి కొత్త రీసెట్ లింక్ను అభ్యర్థించండి.';
+      case 'auth/expired-action-code':
+        return 'ఈ పాస్వర్డ్ రీసెట్ లింక్ గడువు ముగిసింది. దయచేసి కొత్త రీసెట్ లింక్ను అభ్యర్థించండి.';
+      case 'auth/missing-action-code':
+        return 'పాస్వర్డ్ రీసెట్ కోడ్ కనుగొనబడలేదు. దయచేసి ఈమెయిల్‌లోని పూర్తి లింక్‌ను ఉపయోగించండి.';
       default:
         return error.message || 'ప్రవేశంలో లోపం జరిగింది. దయచేసి మళ్లీ ప్రయత్నించండి.';
     }

@@ -138,7 +138,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                 roleFilter === 'admin' ? 'bg-[#7A284B] text-white shadow-sm' : 'text-[#6F6970] dark:text-[#A29CA6]'
               }`}
             >
-              అడ్మిన్ ({users.filter(u => u.role === 'admin' || u.role === 'superadmin' || u.email === 'kathavahini@gmail.com').length})
+              అడ్మిన్ ({users.filter(u => u.role === 'admin' || u.role === 'superadmin' || u.email === 'thekathavahini@gmail.com').length})
             </button>
           </div>
         </div>
@@ -169,7 +169,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                   const normalizedRole = user.role === 'author' ? 'writer' : (user.role === 'superadmin' ? 'admin' : (user.role || 'reader'));
                   const isReader = normalizedRole === 'reader';
                   const isWriter = normalizedRole === 'writer';
-                  const isAdmin = normalizedRole === 'admin' || user.email === 'kathavahini@gmail.com';
+                  const isAdmin = normalizedRole === 'admin' || user.email === 'thekathavahini@gmail.com';
                   const isSuspended = user.status === 'suspended' || user.status === 'banned';
 
                   return (

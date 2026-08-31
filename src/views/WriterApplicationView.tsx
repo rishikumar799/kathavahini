@@ -15,7 +15,9 @@ import {
   Phone,
   MapPin,
   HelpCircle,
-  ScrollText
+  ScrollText,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { User, WriterApplication, StoryCategory } from '../types';
 import { writerService } from '../services/writerService';
@@ -60,6 +62,8 @@ export const WriterApplicationView: React.FC<WriterApplicationViewProps> = ({
   const [email, setEmail] = useState(user?.email || '');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [username, setUsername] = useState('');
   const [mobileNumber, setMobileNumber] = useState('');
   const [city, setCity] = useState('');
@@ -506,28 +510,50 @@ export const WriterApplicationView: React.FC<WriterApplicationViewProps> = ({
                 <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE] mb-1.5 font-serif-telugu">
                   పాస్‌వర్డ్ (కనీసం 6 అక్షరాలు) *
                 </label>
-                <input
-                  type="password"
-                  required
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full px-4 py-2.5 rounded-2xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm focus:outline-none focus:ring-2 focus:ring-[#7A284B]"
-                />
+                <div className="relative">
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full px-4 pr-11 py-2.5 rounded-2xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm focus:outline-none focus:ring-2 focus:ring-[#7A284B]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-2.5 p-1 text-[#6F6970] dark:text-[#A29CA6] hover:text-[#17151A] dark:hover:text-[#F7F3EE] transition-colors cursor-pointer"
+                    title={showPassword ? 'పాస్‌వర్డ్‌ను దాచండి (Hide password)' : 'పాస్‌వర్డ్‌ను చూపించండి (Show password)'}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE] mb-1.5 font-serif-telugu">
                   పాస్‌వర్డ్ నిర్ధారణ (Confirm Password) *
                 </label>
-                <input
-                  type="password"
-                  required
-                  value={confirmPassword}
-                  onChange={e => setConfirmPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full px-4 py-2.5 rounded-2xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm focus:outline-none focus:ring-2 focus:ring-[#7A284B]"
-                />
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    required
+                    value={confirmPassword}
+                    onChange={e => setConfirmPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full px-4 pr-11 py-2.5 rounded-2xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm focus:outline-none focus:ring-2 focus:ring-[#7A284B]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-3 top-2.5 p-1 text-[#6F6970] dark:text-[#A29CA6] hover:text-[#17151A] dark:hover:text-[#F7F3EE] transition-colors cursor-pointer"
+                    title={showConfirmPassword ? 'పాస్‌వర్డ్‌ను దాచండి (Hide password)' : 'పాస్‌వర్డ్‌ను చూపించండి (Show password)'}
+                    aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
             </div>
           )}

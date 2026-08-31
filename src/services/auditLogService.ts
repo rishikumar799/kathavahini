@@ -30,7 +30,7 @@ export class AuditLogService {
     const docRef = await addDoc(collection(db, 'adminAuditLogs'), {
       ...logData,
       adminUid: adminUser?.uid || 'system_admin',
-      adminEmail: adminUser?.email || 'kathavahini@gmail.com',
+      adminEmail: adminUser?.email || 'thekathavahini@gmail.com',
       createdAt: serverTimestamp(),
     });
     return docRef.id;

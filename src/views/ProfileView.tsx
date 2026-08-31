@@ -76,7 +76,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     onSelectTab('home');
   };
 
-  const isAdmin = user.role === 'admin' && user.email === 'kathavahini@gmail.com';
+  const isAdmin = user.role === 'admin' && user.email === 'thekathavahini@gmail.com';
   const isWriter = user.role === 'writer';
   const isReader = !isAdmin && !isWriter;
 

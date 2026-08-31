@@ -46,6 +46,7 @@ import { FaqView } from './views/FaqView';
 import { HelpView } from './views/HelpView';
 import { WriterApplicationView } from './views/WriterApplicationView';
 import { AdminDashboardView } from './views/AdminDashboardView';
+import { ResetPasswordView } from './views/ResetPasswordView';
 import { AdminTopBanner } from './components/admin/AdminTopBanner';
 
 export default function App() {
@@ -62,7 +63,7 @@ export default function App() {
   const [isWriteOpen, setIsWriteOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [authCustomPrompt, setAuthCustomPrompt] = useState<string | undefined>();
-  const [authInitialMode, setAuthInitialMode] = useState<'login' | 'register'>('login');
+  const [authInitialMode, setAuthInitialMode] = useState<'login' | 'register' | 'forgot-password'>('login');
 
   // Data state from service layer
   const [user, setUser] = useState<User | null>(authService.getCurrentUser());
@@ -99,7 +100,7 @@ export default function App() {
       setUser(u);
       setAuthLoading(loading);
       // Strict Admin Route Guard: If a non-admin is currently on 'admin' tab, redirect to 'home' immediately
-      if (currentTab === 'admin' && !(u && u.role === 'admin' && u.email === 'kathavahini@gmail.com')) {
+      if (currentTab === 'admin' && !(u && u.role === 'admin' && u.email === 'thekathavahini@gmail.com')) {
         setCurrentTab('home');
       }
     });
@@ -109,7 +110,7 @@ export default function App() {
   // Strict route guard when tab changes to admin
   useEffect(() => {
     if (currentTab === 'admin') {
-      const isAuthorizedAdmin = Boolean(user && user.role === 'admin' && user.email === 'kathavahini@gmail.com');
+      const isAuthorizedAdmin = Boolean(user && user.role === 'admin' && user.email === 'thekathavahini@gmail.com');
       if (!isAuthorizedAdmin) {
         setCurrentTab('home');
       }
@@ -145,10 +146,28 @@ export default function App() {
 
   useEffect(() => {
     loadData();
+
+    // Check if initial URL or hash contains password reset route or Firebase oobCode
+    if (typeof window !== 'undefined') {
+      const path = window.location.pathname;
+      const search = window.location.search;
+      const hash = window.location.hash;
+      
+      const params = new URLSearchParams(search);
+      const hashParams = hash.includes('?') ? new URLSearchParams(hash.substring(hash.indexOf('?'))) : null;
+      
+      const isResetPath = path === '/reset-password' || path.endsWith('/reset-password') || hash === '#/reset-password' || hash.startsWith('#/reset-password');
+      const hasResetMode = params.get('mode') === 'resetPassword' || hashParams?.get('mode') === 'resetPassword';
+      const hasOobCode = params.has('oobCode') || hashParams?.has('oobCode');
+
+      if (isResetPath || hasResetMode || hasOobCode) {
+        setCurrentTab('reset-password');
+      }
+    }
   }, []);
 
   // Auth prompt helper
-  const handleRequireAuth = (prompt?: string, mode: 'login' | 'register' = 'login') => {
+  const handleRequireAuth = (prompt?: string, mode: 'login' | 'register' | 'forgot-password' = 'login') => {
     setAuthCustomPrompt(prompt);
     setAuthInitialMode(mode);
     setIsAuthOpen(true);
@@ -515,6 +534,21 @@ export default function App() {
           />
         );
 
+      case 'reset-password':
+        return (
+          <ResetPasswordView
+            onOpenLogin={() => {
+              handleRequireAuth(undefined, 'login');
+              setCurrentTab('home');
+            }}
+            onOpenForgotPassword={() => {
+              handleRequireAuth(undefined, 'forgot-password');
+              setCurrentTab('home');
+            }}
+            onBackToHome={() => setCurrentTab('home')}
+          />
+        );
+
       default:
         return (
           <HomeView
@@ -541,7 +575,7 @@ export default function App() {
   };
 
   const isReaderView = currentTab === 'story-reader';
-  const isAuthorizedAdmin = Boolean(user && user.role === 'admin' && user.email === 'kathavahini@gmail.com');
+  const isAuthorizedAdmin = Boolean(user && user.role === 'admin' && user.email === 'thekathavahini@gmail.com');
   const isAdminView = currentTab === 'admin' && isAuthorizedAdmin;
 
   // If on Admin tab AND authorized as Admin, render the dedicated Full-Screen Admin Control Center
@@ -641,7 +675,7 @@ export default function App() {
         onSuccess={() => {
           loadData();
           const currentUserNow = authService.getCurrentUser();
-          if (currentUserNow?.role === 'admin' && currentUserNow?.email === 'kathavahini@gmail.com') {
+          if (currentUserNow?.role === 'admin' && currentUserNow?.email === 'thekathavahini@gmail.com') {
             setCurrentTab('admin');
           } else {
             // Readers and Writers remain on the public website

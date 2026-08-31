@@ -1072,7 +1072,7 @@ class AdminService {
       const list: User[] = snap.docs.map(docSnap => {
         const d = docSnap.data();
         let role = d.role || 'reader';
-        if (role === 'superadmin' || docSnap.id === 'kathavahini@gmail.com') role = 'admin';
+        if (role === 'superadmin' || docSnap.id === 'thekathavahini@gmail.com' || d.email === 'thekathavahini@gmail.com') role = 'admin';
         if (role === 'author') role = 'writer';
 
         return {

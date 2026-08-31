@@ -11,7 +11,9 @@ import {
   Feather, 
   CheckCircle2, 
   AlertCircle,
-  FileText
+  FileText,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { authService } from '../../services/authService';
 import { StoryCategory } from '../../types';
@@ -22,7 +24,7 @@ interface AuthModalProps {
   onSuccess: () => void;
   onNavigateToWriterApp?: () => void;
   customPrompt?: string;
-  initialMode?: 'login' | 'register';
+  initialMode?: 'login' | 'register' | 'forgot-password';
 }
 
 const CATEGORY_OPTIONS: StoryCategory[] = [
@@ -48,7 +50,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   customPrompt,
   initialMode = 'login',
 }) => {
-  const [mode, setMode] = useState<'login' | 'register'>(initialMode);
+  const [mode, setMode] = useState<'login' | 'register' | 'forgot-password'>(initialMode);
   const [signupTab, setSignupTab] = useState<'reader' | 'writer'>('reader');
 
   // Common Login & Reader fields
@@ -56,6 +58,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [name, setName] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // Forgot password state
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetSent, setResetSent] = useState(false);
 
   // Writer Specific Registration Fields
   const [penName, setPenName] = useState('');
@@ -85,6 +93,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setError('');
       setPassword('');
       setConfirmPassword('');
+      setShowPassword(false);
+      setShowConfirmPassword(false);
+      setResetSent(false);
+      setResetEmail(email || '');
       setWriterSuccessNotice(false);
       setDecOriginality(false);
       setDecNoCopy(false);
@@ -140,6 +152,36 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       console.error('Login error:', err);
       setError(authService.getErrorMessage(err));
       setLoading(false);
+    }
+  };
+
+  const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+
+    const targetEmail = resetEmail.trim() || email.trim();
+    if (!targetEmail) {
+      setError('దయచేసి మీ ఈమెయిల్ అడ్రస్‌ను నమోదు చేయండి.');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await authService.sendPasswordReset(targetEmail);
+      setLoading(false);
+      setResetSent(true);
+    } catch (err: any) {
+      console.error('Password reset error:', err);
+      setLoading(false);
+      if (err?.code === 'auth/invalid-email') {
+        setError('సరైన ఈమెయిల్ అడ్రస్‌ను నమోదు చేయండి.');
+      } else if (err?.code === 'auth/network-request-failed') {
+        setError('నెట్‌వర్క్ సమస్య ఏర్పడింది. మీ ఇంటర్నెట్ కనెక్షన్‌ను సరిచూసుకోండి.');
+      } else if (err?.code === 'auth/user-not-found') {
+        setError('ఈ ఈమెయిల్‌తో Firebase Authentication లో ఇంకా ఖాతా సృష్టించబడలేదు. దయచేసి "నమోదు (Register)" ట్యాబ్ ద్వారా కొత్త పాస్‌వర్డ్‌తో ఖాతాను సృష్టించండి.');
+      } else {
+        setError(authService.getErrorMessage(err));
+      }
     }
   };
 
@@ -263,10 +305,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </div>
           
           <h2 className="text-xl font-bold font-serif-telugu text-[#17151A] dark:text-[#F7F3EE]">
-            {mode === 'login' ? 'కథావాహినికి స్వాగతం (Login)' : 'ఖాతాను సృష్టించండి (Register)'}
+            {mode === 'login' 
+              ? 'కథావాహినికి స్వాగతం (Login)' 
+              : mode === 'forgot-password'
+              ? 'పాస్వర్డ్ రీసెట్ (Reset Password)'
+              : 'ఖాతాను సృష్టించండి (Register)'}
           </h2>
 
-          {customPrompt ? (
+          {customPrompt && mode !== 'forgot-password' ? (
             <p className="text-xs font-semibold text-[#7A284B] dark:text-[#D87591] mt-2 bg-[#7A284B]/10 dark:bg-[#D87591]/10 py-1 px-3 rounded-full inline-block">
               {customPrompt}
             </p>
@@ -274,45 +320,63 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] mt-1 font-serif-telugu">
               {mode === 'login' 
                 ? 'మీ ఈమెయిల్ మరియు పాస్‌వర్డ్‌తో ప్రవేశించండి' 
+                : mode === 'forgot-password'
+                ? 'మీ ఖాతా ఈమెయిల్ అడ్రస్‌ను నమోదు చేయండి. పాస్వర్డ్ రీసెట్ లింక్ పంపబడుతుంది.'
                 : 'తెలుగు కథలు, నవలలు చదవడానికి లేదా రాయడానికి ఖాతా ఎంచుకోండి'}
             </p>
           )}
         </div>
 
-        {/* Top-Level Mode Selector: Login vs Register */}
-        <div className="flex rounded-2xl bg-[#FAF7F2] dark:bg-[#222229] p-1 mb-5 border border-[#E8E1DA] dark:border-[#2E2D36]">
-          <button
-            type="button"
-            onClick={() => {
-              setMode('login');
-              setError('');
-            }}
-            className={`flex-1 py-2 rounded-xl text-xs font-bold font-serif-telugu transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-              mode === 'login'
-                ? 'bg-[#7A284B] text-white shadow-sm'
-                : 'text-[#6F6970] dark:text-[#AAA4AC] hover:text-[#17151A]'
-            }`}
-          >
-            <LogIn className="w-3.5 h-3.5" />
-            <span>లాగిన్ (Login)</span>
-          </button>
-          
-          <button
-            type="button"
-            onClick={() => {
-              setMode('register');
-              setError('');
-            }}
-            className={`flex-1 py-2 rounded-xl text-xs font-bold font-serif-telugu transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-              mode === 'register'
-                ? 'bg-[#7A284B] text-white shadow-sm'
-                : 'text-[#6F6970] dark:text-[#AAA4AC] hover:text-[#17151A]'
-            }`}
-          >
-            <UserPlus className="w-3.5 h-3.5" />
-            <span>నమోదు (Register)</span>
-          </button>
-        </div>
+        {/* Top-Level Mode Selector: Login vs Register (Hidden on forgot password) */}
+        {mode !== 'forgot-password' ? (
+          <div className="flex rounded-2xl bg-[#FAF7F2] dark:bg-[#222229] p-1 mb-5 border border-[#E8E1DA] dark:border-[#2E2D36]">
+            <button
+              type="button"
+              onClick={() => {
+                setMode('login');
+                setError('');
+              }}
+              className={`flex-1 py-2 rounded-xl text-xs font-bold font-serif-telugu transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                mode === 'login'
+                  ? 'bg-[#7A284B] text-white shadow-sm'
+                  : 'text-[#6F6970] dark:text-[#AAA4AC] hover:text-[#17151A]'
+              }`}
+            >
+              <LogIn className="w-3.5 h-3.5" />
+              <span>లాగిన్ (Login)</span>
+            </button>
+            
+            <button
+              type="button"
+              onClick={() => {
+                setMode('register');
+                setError('');
+              }}
+              className={`flex-1 py-2 rounded-xl text-xs font-bold font-serif-telugu transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                mode === 'register'
+                  ? 'bg-[#7A284B] text-white shadow-sm'
+                  : 'text-[#6F6970] dark:text-[#AAA4AC] hover:text-[#17151A]'
+              }`}
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>నమోదు (Register)</span>
+            </button>
+          </div>
+        ) : (
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={() => {
+                setMode('login');
+                setError('');
+                setResetSent(false);
+              }}
+              className="text-xs font-bold text-[#7A284B] dark:text-[#D87591] hover:underline font-serif-telugu flex items-center gap-1 cursor-pointer"
+            >
+              ← తిరిగి లాగిన్‌కు వెళ్లండి (Back to Login)
+            </button>
+          </div>
+        )}
 
         {/* Error message */}
         {error && (
@@ -356,26 +420,49 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE] mb-1 font-serif-telugu">
-                పాస్‌వర్డ్ (Password)
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE] font-serif-telugu">
+                  పాస్‌వర్డ్ (Password)
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('forgot-password');
+                    setResetEmail(email);
+                    setError('');
+                    setResetSent(false);
+                  }}
+                  className="text-xs font-medium text-[#7A284B] dark:text-[#D87591] hover:underline font-serif-telugu cursor-pointer"
+                >
+                  పాస్వర్డ్ మర్చిపోయారా? (Forgot Password?)
+                </button>
+              </div>
               <div className="relative">
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   required
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm text-[#17151A] dark:text-[#F7F3EE] focus:outline-none focus:ring-2 focus:ring-[#7A284B]"
+                  className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm text-[#17151A] dark:text-[#F7F3EE] focus:outline-none focus:ring-2 focus:ring-[#7A284B]"
                 />
                 <Lock className="w-4 h-4 text-[#6F6970] absolute left-3.5 top-3" />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 top-2.5 p-1 text-[#6F6970] dark:text-[#A29CA6] hover:text-[#17151A] dark:hover:text-[#F7F3EE] transition-colors cursor-pointer"
+                  title={showPassword ? 'పాస్‌వర్డ్‌ను దాచండి (Hide password)' : 'పాస్‌వర్డ్‌ను చూపించండి (Show password)'}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
             </div>
 
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 rounded-xl bg-[#7A284B] hover:bg-[#631F3C] dark:bg-[#D87591] dark:hover:bg-[#EA8DA7] text-white text-sm font-bold shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
+              className="w-full py-3 rounded-xl bg-[#7A284B] hover:bg-[#631F3C] dark:bg-[#D87591] dark:hover:bg-[#EA8DA7] text-white text-sm font-bold shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60"
             >
               <LogIn className="w-4 h-4" />
               <span>{loading ? 'వేచి ఉండండి...' : 'లాగిన్ (Login)'}</span>
@@ -395,6 +482,102 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </button>
             </p>
           </form>
+        )}
+
+        {/* ========================================================================= */}
+        {/* MODE: FORGOT PASSWORD FORM */}
+        {/* ========================================================================= */}
+        {mode === 'forgot-password' && (
+          <div className="space-y-4">
+            {resetSent ? (
+              <div className="p-4 rounded-2xl bg-[#3E8065]/10 border border-[#3E8065]/25 text-center space-y-3 animate-in fade-in duration-200">
+                <CheckCircle2 className="w-10 h-10 mx-auto text-[#3E8065]" />
+                <h3 className="font-bold text-sm text-[#17151A] dark:text-[#F7F3EE] font-serif-telugu">
+                  పాస్వర్డ్ రీసెట్ అభ్యర్థన పంపబడింది
+                </h3>
+                <p className="text-xs font-serif-telugu text-[#6F6970] dark:text-[#AAA4AC] leading-relaxed">
+                  ఈ ఇమెయిల్‌కు సంబంధించిన ఖాతా Firebase Authentication లో ఉంటే, పాస్వర్డ్ రీసెట్ లింక్ పంపబడుతుంది.
+                </p>
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-left text-xs text-[#8A5000] dark:text-amber-300 font-serif-telugu space-y-1">
+                  <p className="font-bold">⚠️ ఈమెయిల్ రాలేదా?</p>
+                  <p>1. మీ ఈమెయిల్ <strong>Spam / Junk</strong> మరియు <strong>Promotions</strong> ఫోల్డర్‌లను తనిఖీ చేయండి (noreply@kathavahini-9a9c1.firebaseapp.com నుండి వస్తుంది).</p>
+                  <p>2. ఈ ఈమెయిల్‌తో ఇంకా ఖాతా నమోదు చేయకపోతే, మీరు నేరుగా <strong>నమోదు (Register)</strong> ద్వారా కొత్త పాస్‌వర్డ్‌తో ఖాతాను సృష్టించవచ్చు.</p>
+                </div>
+                <div className="pt-2 flex flex-col gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('login');
+                      setError('');
+                      setResetSent(false);
+                    }}
+                    className="w-full py-2.5 rounded-xl bg-[#7A284B] hover:bg-[#631F3C] dark:bg-[#D87591] dark:hover:bg-[#EA8DA7] text-white text-xs font-bold shadow-sm transition-all cursor-pointer"
+                  >
+                    లాగిన్ పేజీకి వెళ్లండి (Go to Login)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail(resetEmail || 'thekathavahini@gmail.com');
+                      setMode('register');
+                      setError('');
+                      setResetSent(false);
+                    }}
+                    className="w-full py-2.5 rounded-xl bg-[#FAF7F2] hover:bg-[#EFEAE2] dark:bg-[#222229] dark:hover:bg-[#2A2A33] text-[#17151A] dark:text-[#F7F3EE] text-xs font-bold border border-[#E8E1DA] dark:border-[#2E2D36] transition-all cursor-pointer font-serif-telugu"
+                  >
+                    ఖాతా ఇంకా లేకపోతే నమోదు చేయండి (Register Account)
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleForgotPasswordSubmit} className="space-y-4">
+                <div className="p-3 rounded-2xl bg-[#7A284B]/5 dark:bg-[#D87591]/10 border border-[#7A284B]/15 text-xs text-[#7A284B] dark:text-[#D87591] font-serif-telugu leading-relaxed">
+                  ℹ️ మీ రిజిస్టర్డ్ ఈమెయిల్ అడ్రస్‌ను నమోదు చేయండి. మేము అధికారిక Firebase పాస్‌వర్డ్ రీసెట్ లింక్‌ను పంపుతాము.
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE] mb-1 font-serif-telugu">
+                    ఈమెయిల్ అడ్రస్ (Email) *
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="email"
+                      required
+                      placeholder="your.email@example.com"
+                      value={resetEmail}
+                      onChange={(e) => setResetEmail(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm text-[#17151A] dark:text-[#F7F3EE] focus:outline-none focus:ring-2 focus:ring-[#7A284B]"
+                    />
+                    <Mail className="w-4 h-4 text-[#6F6970] absolute left-3.5 top-3" />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3 rounded-xl bg-[#7A284B] hover:bg-[#631F3C] dark:bg-[#D87591] dark:hover:bg-[#EA8DA7] text-white text-sm font-bold shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  <Mail className="w-4 h-4" />
+                  <span>{loading ? 'పంపుతోంది...' : 'రీసెట్ లింక్ పంపండి (Send Reset Link)'}</span>
+                </button>
+
+                <p className="text-center text-xs text-[#6F6970] dark:text-[#AAA4AC] pt-1 font-serif-telugu">
+                  గుర్తుకు వచ్చిందా?{' '}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMode('login');
+                      setError('');
+                      setResetSent(false);
+                    }}
+                    className="font-bold text-[#7A284B] dark:text-[#D87591] hover:underline cursor-pointer"
+                  >
+                    లాగిన్ చేయండి (Login)
+                  </button>
+                </p>
+              </form>
+            )}
+          </div>
         )}
 
         {/* ========================================================================= */}
@@ -496,14 +679,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </label>
                   <div className="relative">
                     <input
-                      type="password"
+                      type={showPassword ? 'text' : 'password'}
                       required
                       placeholder="••••••••"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm text-[#17151A] dark:text-[#F7F3EE] focus:outline-none focus:ring-2 focus:ring-[#7A284B]"
+                      className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm text-[#17151A] dark:text-[#F7F3EE] focus:outline-none focus:ring-2 focus:ring-[#7A284B]"
                     />
                     <Lock className="w-4 h-4 text-[#6F6970] absolute left-3.5 top-3" />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-2.5 p-1 text-[#6F6970] dark:text-[#A29CA6] hover:text-[#17151A] dark:hover:text-[#F7F3EE] transition-colors cursor-pointer"
+                      title={showPassword ? 'పాస్‌వర్డ్‌ను దాచండి (Hide password)' : 'పాస్‌వర్డ్‌ను చూపించండి (Show password)'}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
                   </div>
                 </div>
 
@@ -513,14 +705,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </label>
                   <div className="relative">
                     <input
-                      type="password"
+                      type={showConfirmPassword ? 'text' : 'password'}
                       required
                       placeholder="••••••••"
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm text-[#17151A] dark:text-[#F7F3EE] focus:outline-none focus:ring-2 focus:ring-[#7A284B]"
+                      className="w-full pl-10 pr-10 py-2.5 rounded-xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm text-[#17151A] dark:text-[#F7F3EE] focus:outline-none focus:ring-2 focus:ring-[#7A284B]"
                     />
                     <ShieldCheck className="w-4 h-4 text-[#6F6970] absolute left-3.5 top-3" />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      className="absolute right-3 top-2.5 p-1 text-[#6F6970] dark:text-[#A29CA6] hover:text-[#17151A] dark:hover:text-[#F7F3EE] transition-colors cursor-pointer"
+                      title={showConfirmPassword ? 'పాస్‌వర్డ్‌ను దాచండి (Hide password)' : 'పాస్‌వర్డ్‌ను చూపించండి (Show password)'}
+                      aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                    >
+                      {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
                   </div>
                 </div>
 
@@ -602,28 +803,50 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE] mb-1 font-serif-telugu">
                       పాస్‌వర్డ్ (కనీసం 6 అక్షరాలు) *
                     </label>
-                    <input
-                      type="password"
-                      required
-                      placeholder="••••••••"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-xs sm:text-sm text-[#17151A] dark:text-[#F7F3EE] focus:outline-none focus:ring-2 focus:ring-[#7A284B]"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        placeholder="••••••••"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="w-full px-3.5 pr-9 py-2 rounded-xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-xs sm:text-sm text-[#17151A] dark:text-[#F7F3EE] focus:outline-none focus:ring-2 focus:ring-[#7A284B]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-2 top-2 p-1 text-[#6F6970] dark:text-[#A29CA6] hover:text-[#17151A] dark:hover:text-[#F7F3EE] transition-colors cursor-pointer"
+                        title={showPassword ? 'పాస్‌వర్డ్‌ను దాచండి (Hide password)' : 'పాస్‌వర్డ్‌ను చూపించండి (Show password)'}
+                        aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
                   </div>
 
                   <div>
                     <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE] mb-1 font-serif-telugu">
                       పాస్‌వర్డ్ నిర్ధారణ *
                     </label>
-                    <input
-                      type="password"
-                      required
-                      placeholder="••••••••"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      className="w-full px-3.5 py-2 rounded-xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-xs sm:text-sm text-[#17151A] dark:text-[#F7F3EE] focus:outline-none focus:ring-2 focus:ring-[#7A284B]"
-                    />
+                    <div className="relative">
+                      <input
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        required
+                        placeholder="••••••••"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        className="w-full px-3.5 pr-9 py-2 rounded-xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-xs sm:text-sm text-[#17151A] dark:text-[#F7F3EE] focus:outline-none focus:ring-2 focus:ring-[#7A284B]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-2 top-2 p-1 text-[#6F6970] dark:text-[#A29CA6] hover:text-[#17151A] dark:hover:text-[#F7F3EE] transition-colors cursor-pointer"
+                        title={showConfirmPassword ? 'పాస్‌వర్డ్‌ను దాచండి (Hide password)' : 'పాస్‌వర్డ్‌ను చూపించండి (Show password)'}
+                        aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showConfirmPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
 

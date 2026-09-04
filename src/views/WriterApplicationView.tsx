@@ -272,8 +272,8 @@ export const WriterApplicationView: React.FC<WriterApplicationViewProps> = ({
     );
   }
 
-  // Already an approved writer
-  if (user && (user.role === 'writer' || user.role === 'author' || user.role === 'superadmin')) {
+  // Already an approved active writer
+  if (user && ((user.role === 'writer' && user.status === 'active') || user.role === 'admin')) {
     return (
       <div className="max-w-xl mx-auto py-12 px-4 text-center space-y-6">
         <div className="w-20 h-20 rounded-full bg-[#3E8065]/10 text-[#3E8065] flex items-center justify-center mx-auto shadow-md">
@@ -304,8 +304,8 @@ export const WriterApplicationView: React.FC<WriterApplicationViewProps> = ({
     );
   }
 
-  // Pending Application Banner for existing Reader
-  if (existingApp && existingApp.status === 'pending') {
+  // Pending Application Banner for existing Reader or pending writer
+  if ((existingApp && existingApp.status === 'pending') || (user && user.role === 'writer' && user.status === 'pending')) {
     return (
       <div className="max-w-2xl mx-auto py-10 px-4 space-y-6">
         <button

@@ -34,7 +34,12 @@ import {
   StoryCategory,
   AccountStatus,
   ContentStatus,
-  ContentVisibility
+  ContentVisibility,
+  ImageMetadata,
+  StoryContentType,
+  ContentBlock,
+  StoryImagePage,
+  SourceDocumentInfo
 } from '../types';
 import { MOCK_STORIES, MOCK_NOVELS, MOCK_JOKES, MOCK_CATEGORIES, MOCK_KNOWLEDGE_ARTICLES } from './mockData';
 import { auditLogService } from './auditLogService';
@@ -251,11 +256,20 @@ class AdminService {
   public async createStory(storyData: {
     title: string;
     teluguTitle?: string;
+    subtitle?: string;
+    teluguSubtitle?: string;
     category: StoryCategory;
     coverImage?: string;
+    coverImageUrl?: string;
+    coverImagePath?: string;
+    coverImageMetadata?: ImageMetadata;
     excerpt?: string;
     teluguExcerpt?: string;
     content: string[];
+    contentType?: StoryContentType;
+    contentBlocks?: ContentBlock[];
+    imagePages?: StoryImagePage[];
+    sourceDocument?: SourceDocumentInfo;
     tags?: string[];
     status?: ContentStatus;
     visibility?: ContentVisibility;
@@ -269,16 +283,26 @@ class AdminService {
     const status: ContentStatus = storyData.status || 'published';
     const visibility: ContentVisibility = storyData.visibility || 'public';
     const authorName = storyData.authorName || 'కథావాహిని సంపాదక విభాగం';
+    const finalCover = storyData.coverImage || storyData.coverImageUrl || (storyData.imagePages && storyData.imagePages[0]?.imageUrl) || 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800';
 
     const newStory: Story = {
       id: storyId,
       title: storyData.title.trim() || 'Untitled Story',
       teluguTitle: storyData.teluguTitle?.trim() || storyData.title.trim() || 'శీర్షిక లేని కథ',
+      subtitle: storyData.subtitle?.trim(),
+      teluguSubtitle: storyData.teluguSubtitle?.trim() || storyData.subtitle?.trim(),
       slug: (storyData.title || 'story').toLowerCase().replace(/\s+/g, '-'),
-      coverImage: storyData.coverImage || 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800',
+      coverImage: finalCover,
+      coverImageUrl: finalCover,
+      coverImagePath: storyData.coverImagePath,
+      coverImageMetadata: storyData.coverImageMetadata,
       excerpt,
       teluguExcerpt: excerpt,
       content: paragraphs,
+      contentType: storyData.contentType || 'rich_text',
+      contentBlocks: storyData.contentBlocks,
+      imagePages: storyData.imagePages,
+      sourceDocument: storyData.sourceDocument,
       authorId: adminUid,
       writerId: adminUid,
       authorName,
@@ -560,6 +584,9 @@ class AdminService {
     teluguDescription?: string;
     category: StoryCategory;
     coverImage?: string;
+    coverImageUrl?: string;
+    coverImagePath?: string;
+    coverImageMetadata?: ImageMetadata;
     tags?: string[];
     status?: 'ongoing' | 'completed' | ContentStatus;
     visibility?: ContentVisibility;
@@ -567,12 +594,16 @@ class AdminService {
   }, adminUid: string, adminEmail?: string): Promise<Novel> {
     const novelId = `novel-${Date.now()}`;
     const authorName = novelData.authorName || 'కథావాహిని సంపాదక వర్గం';
+    const finalCover = novelData.coverImage || novelData.coverImageUrl || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=80&w=800';
     const newNovel: Novel = {
       id: novelId,
       title: novelData.title.trim(),
       teluguTitle: novelData.teluguTitle?.trim() || novelData.title.trim(),
       slug: (novelData.title || 'novel').toLowerCase().replace(/\s+/g, '-'),
-      coverImage: novelData.coverImage || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=80&w=800',
+      coverImage: finalCover,
+      coverImageUrl: finalCover,
+      coverImagePath: novelData.coverImagePath,
+      coverImageMetadata: novelData.coverImageMetadata,
       description: novelData.description,
       teluguDescription: novelData.teluguDescription || novelData.description,
       authorId: adminUid,
@@ -904,12 +935,16 @@ class AdminService {
     content: string[];
     tags?: string[];
     coverImage?: string;
+    coverImageUrl?: string;
+    coverImagePath?: string;
+    coverImageMetadata?: ImageMetadata;
     status?: ContentStatus;
     visibility?: ContentVisibility;
     scheduledAt?: string;
     authorName?: string;
   }, adminUid: string, adminEmail?: string): Promise<KnowledgeArticle> {
     const kId = `knowledge-${Date.now()}`;
+    const finalCover = data.coverImage || data.coverImageUrl || 'https://images.unsplash.com/photo-1455390582262-044cdead277a?w=800';
     const newArticle: KnowledgeArticle = {
       id: kId,
       title: data.title,
@@ -921,7 +956,10 @@ class AdminService {
       authorId: adminUid,
       readTimeMinutes: Math.max(1, Math.ceil(data.content.join(' ').length / 300)),
       publishedAt: new Date().toISOString().split('T')[0],
-      coverImage: data.coverImage || 'https://images.unsplash.com/photo-1455390582262-044cdead277a?w=800',
+      coverImage: finalCover,
+      coverImageUrl: finalCover,
+      coverImagePath: data.coverImagePath,
+      coverImageMetadata: data.coverImageMetadata,
       tags: data.tags || ['సాహిత్యం'],
       status: data.status || 'published',
       visibility: data.visibility || 'public',
@@ -1071,9 +1109,10 @@ class AdminService {
       const snap = await getDocs(collection(db, 'users'));
       const list: User[] = snap.docs.map(docSnap => {
         const d = docSnap.data();
-        let role = d.role || 'reader';
-        if (role === 'superadmin' || docSnap.id === 'thekathavahini@gmail.com' || d.email === 'thekathavahini@gmail.com') role = 'admin';
-        if (role === 'author') role = 'writer';
+        let role: 'reader' | 'writer' | 'admin' = 'reader';
+        if (d.role === 'admin') role = 'admin';
+        else if (d.role === 'writer' || d.role === 'author') role = 'writer';
+        else role = 'reader';
 
         return {
           id: docSnap.id,

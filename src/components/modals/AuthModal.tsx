@@ -388,11 +388,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Writer Application Success Splash */}
         {writerSuccessNotice && (
-          <div className="p-4 mb-4 rounded-2xl bg-[#3E8065]/15 border border-[#3E8065]/30 text-[#3E8065] text-center space-y-2 animate-in zoom-in-95 duration-200">
-            <CheckCircle2 className="w-8 h-8 mx-auto text-[#3E8065]" />
+          <div className="p-4 mb-4 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-center space-y-2 animate-in zoom-in-95 duration-200">
+            <CheckCircle2 className="w-8 h-8 mx-auto text-amber-600" />
             <p className="font-bold text-sm font-serif-telugu">మీ రచయిత దరఖాస్తు విజయవంతంగా సమర్పించబడింది!</p>
             <p className="text-xs font-serif-telugu text-[#6F6970] dark:text-[#AAA4AC]">
-              మీ ఖాతా సృష్టించబడింది మరియు దరఖాస్తు పరిశీలనలో ఉంది. అడ్మిన్ ఆమోదం పొందిన తర్వాత రచయిత అధికారాలు లభిస్తాయి.
+              కథావాహిని అడ్మిన్ మీ దరఖాస్తు మరియు నమూనాను సమీక్షిస్తారు. ఆమోదం లభించిన తర్వాత కథల సమర్పణ సదుపాయం ప్రారంభించబడుతుంది.
             </p>
           </div>
         )}
@@ -625,7 +625,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <span>2. రచయితగా నమోదు</span>
                 </div>
                 <span className={`text-[10px] font-normal ${signupTab === 'writer' ? 'text-white/80' : 'text-[#6F6970]'}`}>
-                  అడ్మిన్ పరిశీలన & ఆమోదం
+                  దరఖాస్తు & అడ్మిన్ సమీక్ష
                 </span>
               </button>
             </div>

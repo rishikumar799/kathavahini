@@ -150,10 +150,15 @@ export const AdminApplicationsView: React.FC<AdminApplicationsViewProps> = ({
                         ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
                         : 'bg-red-500/10 text-red-700 dark:text-red-400'
                     }`}>
-                      {isPending ? 'సమీక్షలో ఉంది' : isApproved ? 'ఆమోదించబడింది' : 'తిరస్కరించబడింది'}
+                      {isPending ? 'సమీక్షలో ఉంది (Pending)' : isApproved ? 'ఆమోదించబడింది (Approved)' : 'తిరస్కరించబడింది (Rejected)'}
                     </span>
                     <span className="text-xs text-[#6F6970] dark:text-[#A29CA6]">
-                      తేదీ: {new Date(app.createdAt).toLocaleDateString('te-IN')}
+                      తేదీ: {(() => {
+                        const ts = (app as any).submittedAt || (app as any).createdAt;
+                        if (!ts) return new Date().toLocaleDateString('te-IN');
+                        const d = ts.toDate ? ts.toDate() : new Date(ts);
+                        return isNaN(d.getTime()) ? new Date().toLocaleDateString('te-IN') : d.toLocaleDateString('te-IN');
+                      })()}
                     </span>
                   </div>
 
@@ -162,7 +167,7 @@ export const AdminApplicationsView: React.FC<AdminApplicationsViewProps> = ({
                       {app.fullName || app.displayName}
                     </h4>
                     <p className="text-xs text-[#7A284B] dark:text-[#D87591] font-bold">
-                      కలం పేరు (Pen Name): {app.penName}
+                      కలం పేరు (Pen Name): {app.penName || app.displayName || app.fullName}
                     </p>
                   </div>
 
@@ -171,19 +176,19 @@ export const AdminApplicationsView: React.FC<AdminApplicationsViewProps> = ({
                       <Mail className="w-3 h-3" />
                       {app.email}
                     </span>
-                    {app.phone && (
+                    {(app.mobileNumber || app.phone) && (
                       <span className="flex items-center gap-1">
                         <Phone className="w-3 h-3" />
-                        {app.phone}
+                        {app.mobileNumber || app.phone}
                       </span>
                     )}
-                    <span>• ఇష్టపడే విభాగాలు: {app.preferredGenres?.join(', ') || 'సాధారణ'}</span>
+                    <span>• విభాగాలు: {(app.genres || app.categories || (app as any).preferredGenres || []).join(', ') || 'సాధారణ'}</span>
                   </div>
 
                   {/* Sample preview snippet */}
-                  {app.sampleStory && (
+                  {(app.sampleWriting || app.sampleText || (app as any).sampleStory) && (
                     <div className="p-3 rounded-2xl bg-[#FAF7F2] dark:bg-[#121118] border border-[#E8E1DA] dark:border-[#26242E] text-xs font-serif-telugu text-[#6F6970] dark:text-[#A29CA6] line-clamp-2">
-                      రచనా నమూనా: "{app.sampleStory}"
+                      రచనా నమూనా: "{app.sampleWriting || app.sampleText || (app as any).sampleStory}"
                     </div>
                   )}
 
@@ -266,31 +271,35 @@ export const AdminApplicationsView: React.FC<AdminApplicationsViewProps> = ({
                   {selectedAppForReview.email}
                 </span>
               </div>
-              {selectedAppForReview.phone && (
+              {(selectedAppForReview.mobileNumber || selectedAppForReview.phone) && (
                 <div>
                   <span className="text-[#6F6970] dark:text-[#A29CA6] block">ఫోన్ నంబర్:</span>
                   <span className="font-bold text-[#17151A] dark:text-[#F7F3EE]">
-                    {selectedAppForReview.phone}
+                    {selectedAppForReview.mobileNumber || selectedAppForReview.phone}
                   </span>
                 </div>
               )}
               <div>
-                <span className="text-[#6F6970] dark:text-[#A29CA6] block">రచనా శైలులు:</span>
+                <span className="text-[#6F6970] dark:text-[#A29CA6] block">రచనా శైలులు / విభాగాలు:</span>
                 <span className="font-bold text-[#17151A] dark:text-[#F7F3EE]">
-                  {selectedAppForReview.preferredGenres?.join(', ') || 'సాధారణ'}
+                  {(selectedAppForReview.genres || selectedAppForReview.categories || (selectedAppForReview as any).preferredGenres || []).join(', ') || 'సాధారణ'}
                 </span>
               </div>
             </div>
 
             {/* Experience / Bio */}
-            {selectedAppForReview.writingExperience && (
+            {(selectedAppForReview.writingExperience || selectedAppForReview.experience || selectedAppForReview.bio) && (
               <div className="space-y-1">
                 <h4 className="text-xs font-bold text-[#17151A] dark:text-[#F7F3EE] font-serif-telugu">
-                  రచనా అనుభవం (Writing Experience):
+                  రచనా అనుభవం / బయో (Writing Experience & Bio):
                 </h4>
-                <p className="text-xs text-[#6F6970] dark:text-[#A29CA6] bg-[#FAF7F2] dark:bg-[#121118] p-3 rounded-2xl border border-[#E8E1DA] dark:border-[#26242E]">
-                  {selectedAppForReview.writingExperience}
-                </p>
+                <div className="text-xs text-[#6F6970] dark:text-[#A29CA6] bg-[#FAF7F2] dark:bg-[#121118] p-3 rounded-2xl border border-[#E8E1DA] dark:border-[#26242E] space-y-1">
+                  {selectedAppForReview.bio && <p><strong>బయో:</strong> {selectedAppForReview.bio}</p>}
+                  {(selectedAppForReview.writingExperience || selectedAppForReview.experience) && (
+                    <p><strong>అనుభవం:</strong> {selectedAppForReview.writingExperience || selectedAppForReview.experience}</p>
+                  )}
+                  {selectedAppForReview.city && <p><strong>ప్రాంతం:</strong> {selectedAppForReview.city}</p>}
+                </div>
               </div>
             )}
 
@@ -300,7 +309,7 @@ export const AdminApplicationsView: React.FC<AdminApplicationsViewProps> = ({
                 రచనా నమూనా (Sample Story / Writing Sample):
               </h4>
               <div className="p-4 rounded-2xl bg-[#FAF7F2] dark:bg-[#121118] border border-[#E8E1DA] dark:border-[#26242E] text-xs font-serif-telugu leading-relaxed text-[#17151A] dark:text-[#F7F3EE] max-h-60 overflow-y-auto whitespace-pre-wrap">
-                {selectedAppForReview.sampleStory || 'నమూనా పాఠ్యం అందించబడలేదు.'}
+                {selectedAppForReview.sampleWriting || selectedAppForReview.sampleText || (selectedAppForReview as any).sampleStory || 'నమూనా పాఠ్యం అందించబడలేదు.'}
               </div>
             </div>
 

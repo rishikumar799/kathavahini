@@ -39,15 +39,70 @@ export interface Author {
   location?: string;
 }
 
+export type StoryContentType = 'rich_text' | 'document_import' | 'image_pages' | 'mixed';
+
+export type ContentBlockType = 'text' | 'paragraph' | 'heading' | 'quote' | 'image' | 'list' | 'divider';
+
+export interface ContentBlock {
+  id: string;
+  type: ContentBlockType;
+  content?: string;
+  level?: 2 | 3;
+  imageUrl?: string;
+  imagePath?: string;
+  imageMetadata?: ImageMetadata;
+  caption?: string;
+  align?: 'left' | 'center' | 'right' | 'justify';
+  listItems?: string[];
+  listStyle?: 'bullet' | 'ordered';
+}
+
+export interface StoryImagePage {
+  id: string;
+  pageNumber: number;
+  imageUrl: string;
+  imagePath?: string;
+  imageMetadata?: ImageMetadata;
+  caption?: string;
+  altText?: string;
+}
+
+export interface SourceDocumentInfo {
+  name: string;
+  type: 'pdf' | 'docx' | 'txt' | string;
+  size: number;
+  storageUrl?: string;
+  storagePath?: string;
+  isScanned?: boolean;
+  uploadedAt: string;
+  extractedWordCount?: number;
+}
+
+export interface ImageMetadata {
+  fileName?: string;
+  contentType?: string;
+  size?: number;
+  uploadedAt?: string;
+}
+
 export interface Story {
   id: string;
   title: string;
   teluguTitle: string;
+  subtitle?: string;
+  teluguSubtitle?: string;
   slug: string;
   coverImage: string;
+  coverImageUrl?: string;
+  coverImagePath?: string;
+  coverImageMetadata?: ImageMetadata;
   excerpt: string;
   teluguExcerpt: string;
-  content: string[]; // Paragraphs in Telugu
+  content: string[]; // Paragraphs in Telugu (backward compatible)
+  contentType?: StoryContentType;
+  contentBlocks?: ContentBlock[];
+  imagePages?: StoryImagePage[];
+  sourceDocument?: SourceDocumentInfo;
   authorId: string;
   authorName?: string;
   writerId?: string;
@@ -116,6 +171,9 @@ export interface Novel {
   teluguTitle: string;
   slug: string;
   coverImage: string;
+  coverImageUrl?: string;
+  coverImagePath?: string;
+  coverImageMetadata?: ImageMetadata;
   description: string;
   teluguDescription: string;
   authorId: string;
@@ -166,13 +224,14 @@ export interface Comment {
     id: string;
     name: string;
     avatar: string;
+    role?: UserRole;
   };
   content: string;
   createdAt: string;
   likes: number;
 }
 
-export type UserRole = 'reader' | 'writer' | 'admin' | 'superadmin' | 'user' | 'author';
+export type UserRole = 'reader' | 'writer' | 'admin';
 export type CanonicalUserRole = 'reader' | 'writer' | 'admin';
 export type AccountStatus = 'active' | 'pending' | 'suspended' | 'banned' | 'rejected';
 
@@ -183,6 +242,7 @@ export interface User {
   displayName?: string;
   email: string;
   photoURL?: string;
+  photoPath?: string;
   teluguName?: string;
   avatar: string;
   bio?: string;
@@ -208,6 +268,7 @@ export interface ReaderProfile {
   displayName: string;
   email: string;
   photoURL?: string;
+  photoPath?: string;
   preferences?: {
     theme?: ReadingTheme;
     fontSize?: number;
@@ -227,6 +288,7 @@ export interface WriterProfile {
   penName: string;
   email: string;
   photoURL?: string;
+  photoPath?: string;
   bio: string;
   genres: string[];
   writingExperience: string;
@@ -243,7 +305,7 @@ export interface AdminProfile {
   uid: string;
   email: string;
   displayName: string;
-  role: 'admin' | 'superadmin';
+  role: 'admin';
   status: 'active';
   createdAt?: any;
   updatedAt?: any;
@@ -350,6 +412,9 @@ export interface KnowledgeArticle {
   readTimeMinutes: number;
   publishedAt: string;
   coverImage: string;
+  coverImageUrl?: string;
+  coverImagePath?: string;
+  coverImageMetadata?: ImageMetadata;
   tags: string[];
   status?: ContentStatus;
   visibility?: ContentVisibility;

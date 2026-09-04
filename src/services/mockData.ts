@@ -356,7 +356,7 @@ export const MOCK_USER: User = {
   avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=300',
   bio: 'Passionate reader of Telugu literature & aspiring short story writer.',
   teluguBio: 'తెలుగు కథలు, కవిత్వం మరియు సాహిత్యాభిమాని. స్వయంగా చిన్న కథలు రాసే ప్రయత్నం.',
-  role: 'author',
+  role: 'writer',
   followersCount: 340,
   followingCount: 48,
   savedStoriesCount: 12,

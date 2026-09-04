@@ -14,6 +14,7 @@ service firebase.storage {
 
     function isAdmin() {
       return isAuthenticated() && (
+        request.auth.token.email == 'thekathavahini@gmail.com' ||
         request.auth.token.email == 'kathavahini@gmail.com' ||
         request.auth.token.role == 'admin'
       );
@@ -24,6 +25,16 @@ service firebase.storage {
       return request.resource != null
         && request.resource.contentType.matches('image/(jpeg|jpg|png|webp|gif|svg\\+xml)')
         && request.resource.size <= 5 * 1024 * 1024;
+    }
+
+    // Document validation: PDF, DOCX, TXT and max 20MB file size
+    function isValidDocument() {
+      return request.resource != null
+        && (
+          request.resource.contentType.matches('application/(pdf|vnd.openxmlformats-officedocument.wordprocessingml.document|msword|octet-stream)') ||
+          request.resource.contentType.matches('text/plain')
+        )
+        && request.resource.size <= 20 * 1024 * 1024;
     }
 
     // User Profile Avatars: users/{userId}/profile/{fileName}
@@ -38,10 +49,20 @@ service firebase.storage {
       allow write: if (isOwner(writerId) || isAdmin()) && isValidImage();
     }
 
-    // Story Cover Images: stories/{storyId}/cover/{fileName}
+    // Story Assets (Cover, Content Images, Document attachments)
     match /stories/{storyId}/cover/{fileName} {
       allow read: if true;
       allow write: if isAuthenticated() && isValidImage();
+    }
+
+    match /stories/{storyId}/content/{fileName} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isValidImage();
+    }
+
+    match /stories/{storyId}/documents/{fileName} {
+      allow read: if true;
+      allow write: if isAuthenticated() && (isValidDocument() || isAdmin());
     }
 
     // Novel Cover Images: novels/{novelId}/cover/{fileName}

@@ -171,7 +171,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const handleApproveApplication = async (app: WriterApplication) => {
     setActionLoading(true);
     try {
-      await adminService.approveWriterApplication(app.id, adminUid, adminEmail);
+      const targetUid = app.applicantUid || (app as any).uid || (app as any).userId || app.id || '';
+      await adminService.approveWriterApplication(app.id || '', targetUid, adminUid, adminEmail);
       await loadAdminData();
     } catch (err) {
       console.error('Error approving application:', err);
@@ -183,7 +184,8 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const handleRejectApplication = async (app: WriterApplication, reason: string) => {
     setActionLoading(true);
     try {
-      await adminService.rejectWriterApplication(app.id, reason, adminUid, adminEmail);
+      const targetUid = app.applicantUid || (app as any).uid || (app as any).userId || app.id || '';
+      await adminService.rejectWriterApplication(app.id || '', targetUid, adminUid, reason, adminEmail);
       await loadAdminData();
     } catch (err) {
       console.error('Error rejecting application:', err);

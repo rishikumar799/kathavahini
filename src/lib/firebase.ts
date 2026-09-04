@@ -25,3 +25,8 @@ export const db = getFirestore(app);
 // Initialize Firebase Storage
 export const storage = getStorage(app);
 
+// Configure realistic timeouts (20 seconds for upload retry, 15 seconds for operations)
+// This prevents infinite 10-minute retry hangs when network drops or bucket is uninitialized
+storage.maxUploadRetryTime = 20000;
+storage.maxOperationRetryTime = 15000;
+

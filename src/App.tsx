@@ -100,7 +100,7 @@ export default function App() {
       setUser(u);
       setAuthLoading(loading);
       // Strict Admin Route Guard: If a non-admin is currently on 'admin' tab, redirect to 'home' immediately
-      if (currentTab === 'admin' && !(u && u.role === 'admin' && u.email === 'thekathavahini@gmail.com')) {
+      if (currentTab === 'admin' && !(u && u.role === 'admin')) {
         setCurrentTab('home');
       }
     });
@@ -110,7 +110,7 @@ export default function App() {
   // Strict route guard when tab changes to admin
   useEffect(() => {
     if (currentTab === 'admin') {
-      const isAuthorizedAdmin = Boolean(user && user.role === 'admin' && user.email === 'thekathavahini@gmail.com');
+      const isAuthorizedAdmin = Boolean(user && user.role === 'admin');
       if (!isAuthorizedAdmin) {
         setCurrentTab('home');
       }
@@ -675,7 +675,7 @@ export default function App() {
         onSuccess={() => {
           loadData();
           const currentUserNow = authService.getCurrentUser();
-          if (currentUserNow?.role === 'admin' && currentUserNow?.email === 'thekathavahini@gmail.com') {
+          if (currentUserNow?.role === 'admin') {
             setCurrentTab('admin');
           } else {
             // Readers and Writers remain on the public website

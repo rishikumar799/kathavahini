@@ -31,9 +31,12 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
   const [loading, setLoading] = useState(false);
 
   const isWriter = currentUser && (
-    currentUser.role === 'writer' || 
-    currentUser.role === 'superadmin' || 
-    currentUser.role === 'author'
+    (currentUser.role === 'writer' && currentUser.status === 'active') || 
+    currentUser.role === 'admin'
+  );
+
+  const isPendingWriter = currentUser && (
+    currentUser.role === 'writer' && currentUser.status === 'pending'
   );
 
   useEffect(() => {
@@ -91,6 +94,11 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
             <Plus className="w-4 h-4" />
             <span>కొత్త కథను సమర్పించండి</span>
           </button>
+        ) : isPendingWriter ? (
+          <div className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30 text-xs font-bold">
+            <Clock className="w-4 h-4 animate-spin-slow" />
+            <span>దరఖాస్తు పరిశీలనలో ఉంది</span>
+          </div>
         ) : (
           <button
             onClick={onApplyWriter}
@@ -102,8 +110,26 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
         )}
       </div>
 
-      {/* Reader Prompt if not a writer */}
-      {!isWriter && (
+      {/* Pending Application Notice */}
+      {isPendingWriter && (
+        <div className="p-6 rounded-3xl bg-amber-500/10 border border-amber-500/20 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 font-bold text-sm font-serif-telugu">
+              <Clock className="w-4 h-4" />
+              <span>మీ రచయిత దరఖాస్తు ప్రస్తుతం పరిశీలనలో ఉంది (Application Under Review)</span>
+            </div>
+            <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] font-serif-telugu leading-relaxed">
+              కథావాహిని అడ్మిన్ మీ దరఖాస్తును మరియు నమూనా రచనను సమీక్షిస్తున్నారు. ఆమోదం పొందిన తర్వాత మీకు రచనలను సమర్పించే సదుపాయం ప్రారంభించబడుతుంది.
+            </p>
+          </div>
+          <div className="px-4 py-2 rounded-2xl bg-amber-500/15 text-amber-700 dark:text-amber-300 text-xs font-bold shrink-0">
+            స్థితి: పరిశీలనలో ఉంది (Pending)
+          </div>
+        </div>
+      )}
+
+      {/* Reader Prompt if not a writer and not pending */}
+      {!isWriter && !isPendingWriter && (
         <div className="p-6 rounded-3xl bg-gradient-to-r from-[#FAF7F2] to-white dark:from-[#222229] dark:to-[#18181D] border border-[#E8E1DA] dark:border-[#2E2D36] shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="space-y-1">
             <h3 className="font-bold text-base font-serif-telugu text-[#17151A] dark:text-[#F7F3EE]">

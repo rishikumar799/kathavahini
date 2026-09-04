@@ -47,7 +47,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
     const uidMatch = (u.id || '').toLowerCase().includes(searchQuery.toLowerCase());
     const matchesSearch = nameMatch || emailMatch || uidMatch;
 
-    const normalizedRole = u.role === 'author' ? 'writer' : (u.role === 'superadmin' ? 'admin' : (u.role || 'reader'));
+    const normalizedRole = u.role === 'writer' || u.role === 'author' ? 'writer' : (u.role === 'admin' ? 'admin' : 'reader');
     const matchesRole = roleFilter === 'all' || normalizedRole === roleFilter;
     const matchesStatus = statusFilter === 'all' || u.status === statusFilter;
 
@@ -138,7 +138,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                 roleFilter === 'admin' ? 'bg-[#7A284B] text-white shadow-sm' : 'text-[#6F6970] dark:text-[#A29CA6]'
               }`}
             >
-              అడ్మిన్ ({users.filter(u => u.role === 'admin' || u.role === 'superadmin' || u.email === 'thekathavahini@gmail.com').length})
+              అడ్మిన్ ({users.filter(u => u.role === 'admin').length})
             </button>
           </div>
         </div>
@@ -166,10 +166,10 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                 </tr>
               ) : (
                 filteredUsers.map(user => {
-                  const normalizedRole = user.role === 'author' ? 'writer' : (user.role === 'superadmin' ? 'admin' : (user.role || 'reader'));
+                  const normalizedRole = user.role === 'writer' || user.role === 'author' ? 'writer' : (user.role === 'admin' ? 'admin' : 'reader');
                   const isReader = normalizedRole === 'reader';
                   const isWriter = normalizedRole === 'writer';
-                  const isAdmin = normalizedRole === 'admin' || user.email === 'thekathavahini@gmail.com';
+                  const isAdmin = normalizedRole === 'admin';
                   const isSuspended = user.status === 'suspended' || user.status === 'banned';
 
                   return (
@@ -202,9 +202,13 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                           </span>
                         )}
                         {isWriter && (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600 border border-amber-500/20 inline-flex items-center gap-1 font-serif-telugu">
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold border inline-flex items-center gap-1 font-serif-telugu ${
+                            user.status === 'pending'
+                              ? 'bg-amber-500/10 text-amber-600 border-amber-500/20'
+                              : 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+                          }`}>
                             <Feather className="w-3 h-3" />
-                            Writer (రచయిత)
+                            Writer {user.status === 'pending' ? '(దరఖాస్తు పెండింగ్)' : '(ఆమోదించబడింది)'}
                           </span>
                         )}
                         {isReader && (
@@ -217,7 +221,11 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
 
                       {/* Status */}
                       <td className="py-3.5 px-4">
-                        {isSuspended ? (
+                        {user.status === 'pending' ? (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-700 dark:text-amber-400">
+                            పరిశీలనలో ఉంది (Pending)
+                          </span>
+                        ) : isSuspended ? (
                           <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-red-500/10 text-red-600">
                             సస్పెండ్ చేయబడింది
                           </span>
@@ -236,6 +244,19 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                       {/* Actions */}
                       <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end gap-2">
+                          {/* Pending Writer Quick Approval */}
+                          {isWriter && user.status === 'pending' && (
+                            <button
+                              onClick={() => onToggleStatus(user, 'active')}
+                              disabled={actionLoading}
+                              className="px-2.5 py-1 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-700 dark:text-emerald-300 text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                              title="రచయిత దరఖాస్తును ఆమోదించి యాక్టివ్ చేయండి"
+                            >
+                              <UserCheck className="w-3.5 h-3.5" />
+                              <span>ఆమోదించు</span>
+                            </button>
+                          )}
+
                           {/* Reader to Writer Promotion Action */}
                           {isReader && onPromoteToWriter && (
                             <button

@@ -13,7 +13,17 @@ import {
   runTransaction
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
-import { WriterApplication, Story, User, StoryCategory } from '../types';
+import { 
+  WriterApplication, 
+  Story, 
+  User, 
+  StoryCategory, 
+  ImageMetadata,
+  StoryContentType,
+  ContentBlock,
+  StoryImagePage,
+  SourceDocumentInfo
+} from '../types';
 
 class WriterService {
   /**
@@ -242,20 +252,33 @@ class WriterService {
   public async submitStory(storyData: {
     title: string;
     teluguTitle?: string;
+    subtitle?: string;
+    teluguSubtitle?: string;
     category: StoryCategory;
     coverImage?: string;
+    coverImageUrl?: string;
+    coverImagePath?: string;
+    coverImageMetadata?: ImageMetadata;
     excerpt?: string;
     teluguExcerpt?: string;
     content: string[];
+    contentType?: StoryContentType;
+    contentBlocks?: ContentBlock[];
+    imagePages?: StoryImagePage[];
+    sourceDocument?: SourceDocumentInfo;
     tags?: string[];
   }, writer: User): Promise<Story> {
     // 1. Enforce Writer / Admin Role Check
-    const isWriter = writer.role === 'writer' || writer.role === 'admin' || writer.role === 'superadmin' || writer.role === 'author';
+    const isWriter = writer.role === 'writer' || writer.role === 'admin';
     if (!isWriter) {
       throw new Error('కథలను సమర్పించడానికి మీరు ఆమోదించబడిన రచయిత (Writer) అయి ఉండాలి.');
     }
 
-    const isAdmin = writer.role === 'admin' || writer.role === 'superadmin';
+    if (writer.role === 'writer' && writer.status !== 'active') {
+      throw new Error('మీ రచయిత దరఖాస్తు ప్రస్తుతం పరిశీలనలో ఉంది. కథావాహిని అడ్మిన్ ఆమోదం తర్వాత మాత్రమే రచనలను సమర్పించగలరు.');
+    }
+
+    const isAdmin = writer.role === 'admin';
     
     // Authoritative calendar day in Asia/Kolkata timezone
     const todayString = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Kolkata' }).format(new Date());
@@ -271,16 +294,26 @@ class WriterService {
     const storyId = `story-${Date.now()}`;
     const paragraphs = storyData.content.length > 0 ? storyData.content : ['కథ కంటెంట్...'];
     const excerpt = storyData.teluguExcerpt || storyData.excerpt || paragraphs[0]?.slice(0, 120) || 'కథ వివరణ';
+    const finalCover = storyData.coverImage || storyData.coverImageUrl || (storyData.imagePages && storyData.imagePages[0]?.imageUrl) || 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800';
 
-    const newStoryData = {
+    const newStoryData: Story = {
       id: storyId,
       title: storyData.title.trim() || 'Untitled Story',
       teluguTitle: storyData.teluguTitle?.trim() || storyData.title.trim() || 'శీర్షిక లేని కథ',
+      subtitle: storyData.subtitle?.trim(),
+      teluguSubtitle: storyData.teluguSubtitle?.trim() || storyData.subtitle?.trim(),
       slug: (storyData.title || 'story').toLowerCase().replace(/\s+/g, '-'),
-      coverImage: storyData.coverImage || 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800',
+      coverImage: finalCover,
+      coverImageUrl: finalCover,
+      coverImagePath: storyData.coverImagePath,
+      coverImageMetadata: storyData.coverImageMetadata,
       excerpt,
       teluguExcerpt: excerpt,
       content: paragraphs,
+      contentType: storyData.contentType || 'rich_text',
+      contentBlocks: storyData.contentBlocks,
+      imagePages: storyData.imagePages,
+      sourceDocument: storyData.sourceDocument,
       authorId: writer.id,
       writerId: writer.id,
       authorName: writer.teluguName || writer.displayName || writer.name,

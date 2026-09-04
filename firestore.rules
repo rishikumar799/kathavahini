@@ -18,7 +18,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && (
-        request.auth.token.email == 'thekathavahini@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          getUserData().role == 'admin')
       );
@@ -29,8 +29,7 @@ service cloud.firestore {
         isAdmin() ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          getUserData().role == 'writer' &&
-         getUserData().status != 'suspended' &&
-         getUserData().status != 'banned')
+         getUserData().status == 'active')
       );
     }
 
@@ -38,7 +37,8 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if true;
       allow create: if (isOwner(userId)
-        && (request.resource.data.role == 'reader' || (request.auth.token.email == 'thekathavahini@gmail.com' && request.resource.data.role == 'admin'))
+        && ((request.resource.data.role == 'reader' && request.resource.data.status == 'active') || 
+            (request.resource.data.role == 'writer' && request.resource.data.status == 'pending'))
         && request.resource.data.uid == userId) || isAdmin();
       allow update: if isAdmin() || (
         isOwner(userId) && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status', 'uid', 'createdAt']))
@@ -72,7 +72,9 @@ service cloud.firestore {
 
     match /writers/{writerId} {
       allow read: if true;
-      allow write: if isAdmin() || (isOwner(writerId) && isWriter());
+      allow create: if isOwner(writerId) || isAdmin();
+      allow update: if isAdmin() || (isOwner(writerId) && isWriter() && request.resource.data.status == resource.data.status);
+      allow delete: if isAdmin();
 
       // Daily Submission Limit Tracker subcollection
       match /dailySubmissions/{dateDoc} {
@@ -88,7 +90,9 @@ service cloud.firestore {
 
     match /authors/{authorId} {
       allow read: if true;
-      allow write: if isAdmin() || (isOwner(authorId) && isWriter());
+      allow create: if isOwner(authorId) || isAdmin();
+      allow update: if isAdmin() || (isOwner(authorId) && isWriter());
+      allow delete: if isAdmin();
     }
 
     // Writer Applications

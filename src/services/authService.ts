@@ -90,7 +90,6 @@ class AuthService {
   private buildFallbackUser(firebaseUser: FirebaseUser): User {
     const displayName = firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'తెలుగు పాఠకుడు');
     const avatar = firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(firebaseUser.uid)}`;
-    const isAdminEmail = firebaseUser.email === 'thekathavahini@gmail.com';
 
     return {
       id: firebaseUser.uid,
@@ -101,7 +100,7 @@ class AuthService {
       photoURL: avatar,
       teluguName: displayName,
       avatar,
-      role: isAdminEmail ? 'admin' : 'reader',
+      role: 'reader', // Fallback role is always reader, never promoted by email
       status: 'active',
       followersCount: 0,
       followingCount: 0,
@@ -118,20 +117,20 @@ class AuthService {
 
   /**
    * Fetches or creates the user profile document in Firestore (`users/{uid}`)
+   * Authoritative role source is strictly the secure backend user record.
    */
   private async syncFirestoreUserProfile(firebaseUser: FirebaseUser, customName?: string): Promise<User> {
     const userDocRef = doc(db, 'users', firebaseUser.uid);
     const docSnap = await getDoc(userDocRef);
-    const isAdminEmail = firebaseUser.email === 'thekathavahini@gmail.com';
 
     if (docSnap.exists()) {
       const data = docSnap.data();
       const displayName = data.displayName || data.name || firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'తెలుగు పాఠకుడు');
       const avatarUrl = data.photoURL || data.avatar || firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(firebaseUser.uid)}`;
 
-      // Resolve role: exactly 3 roles (reader | writer | admin)
+      // Resolve role: STRICTLY from Firestore document (admin | writer | reader)
       let resolvedRole: 'reader' | 'writer' | 'admin' = 'reader';
-      if (isAdminEmail) {
+      if (data.role === 'admin') {
         resolvedRole = 'admin';
       } else if (data.role === 'writer' || data.role === 'author') {
         resolvedRole = 'writer';
@@ -139,11 +138,11 @@ class AuthService {
         resolvedRole = 'reader';
       }
 
-      // Check if migration update is needed for Firestore document (e.g. correcting any rogue admin/superadmin flags on non-admin accounts)
-      if (data.role !== resolvedRole) {
+      // Check if obsolete role normalization update is needed
+      if (data.role === 'author') {
         try {
           await updateDoc(userDocRef, {
-            role: resolvedRole,
+            role: 'writer',
             updatedAt: serverTimestamp(),
           });
         } catch (err) {
@@ -179,8 +178,7 @@ class AuthService {
       };
       return user;
     } else {
-      // First-time user creation: Default role is 'reader' (or 'admin' only for official admin email)
-      const initialRole: 'reader' | 'admin' = isAdminEmail ? 'admin' : 'reader';
+      // First-time user creation if doc does not exist: Default role is strictly 'reader'
       const chosenName = customName || firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'తెలుగు పాఠకుడు');
       const avatarUrl = firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(firebaseUser.uid)}`;
 
@@ -195,8 +193,8 @@ class AuthService {
         avatar: avatarUrl,
         bio: '',
         teluguBio: '',
-        role: initialRole, // 'reader' by default, never allows client self-promotion to 'writer' or 'admin'
-        status: 'active', // Default status is 'active'
+        role: 'reader' as const, // Strict default role is reader
+        status: 'active' as const,
         followersCount: 0,
         followingCount: 0,
         savedStoriesCount: 0,
@@ -224,7 +222,7 @@ class AuthService {
         avatar: avatarUrl,
         bio: '',
         teluguBio: '',
-        role: initialRole,
+        role: 'reader',
         status: 'active',
         followersCount: 0,
         followingCount: 0,
@@ -256,7 +254,8 @@ class AuthService {
   }
 
   /**
-   * Option A: Register as Reader with Email & Password
+   * Option A: Register as Reader with Email & Password (Dedicated Reader Signup Flow)
+   * Creates Firebase Auth account, sets role: 'reader', status: 'active', and logs in.
    */
   public async register(name: string, email: string, pass: string): Promise<User> {
     const trimmedEmail = email.trim();
@@ -283,15 +282,46 @@ class AuthService {
       }
     }
 
-    const userProfile = await this.syncFirestoreUserProfile(userCredential.user, trimmedName);
+    const avatarUrl = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(userCredential.user.uid)}`;
+
+    // Create user document with role: 'reader', status: 'active'
+    const userDocRef = doc(db, 'users', userCredential.user.uid);
+    const newUserData = {
+      uid: userCredential.user.uid,
+      id: userCredential.user.uid,
+      name: trimmedName,
+      displayName: trimmedName,
+      email: trimmedEmail,
+      photoURL: avatarUrl,
+      teluguName: trimmedName,
+      avatar: avatarUrl,
+      bio: '',
+      teluguBio: '',
+      role: 'reader' as const, // STRICTLY 'reader'
+      status: 'active' as const,
+      followersCount: 0,
+      followingCount: 0,
+      savedStoriesCount: 0,
+      publishedCount: 0,
+      preferences: {
+        theme: 'light' as const,
+        fontSize: 18,
+        fontFamily: 'serif' as const,
+        notifications: true,
+      },
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    await setDoc(userDocRef, newUserData);
 
     // Maintain readers/{uid} document
     try {
       await setDoc(doc(db, 'readers', userCredential.user.uid), {
         uid: userCredential.user.uid,
-        displayName: trimmedName || userProfile.name,
+        displayName: trimmedName,
         email: trimmedEmail,
-        photoURL: userProfile.photoURL,
+        photoURL: avatarUrl,
         bookmarksCount: 0,
         followingCount: 0,
         commentsCount: 0,
@@ -302,15 +332,195 @@ class AuthService {
       console.warn('Could not initialize readers collection document:', err);
     }
 
+    const userProfile: User = {
+      id: userCredential.user.uid,
+      uid: userCredential.user.uid,
+      name: trimmedName,
+      displayName: trimmedName,
+      email: trimmedEmail,
+      photoURL: avatarUrl,
+      teluguName: trimmedName,
+      avatar: avatarUrl,
+      bio: '',
+      teluguBio: '',
+      role: 'reader',
+      status: 'active',
+      followersCount: 0,
+      followingCount: 0,
+      savedStoriesCount: 0,
+      publishedCount: 0,
+      preferences: {
+        theme: 'light',
+        fontSize: 18,
+        fontFamily: 'serif',
+        notifications: true,
+      },
+    };
+
     this.currentUser = userProfile;
     this.notify();
     return userProfile;
   }
 
   /**
-   * Option B: Register & Submit Writer Application (New Writer Registration)
-   * Creates Firebase Auth account with status: 'pending' and submits a pending WriterApplication to Firestore.
-   * Immediately signs out until Super Admin approves.
+   * Option B: Register as Writer with Email & Password (Dedicated Writer Signup Flow)
+   * Creates Firebase Auth account, sets role: 'writer', status: 'active',
+   * creates writers/{uid} and writerApplications entries, and logs in immediately.
+   */
+  public async registerWriter(data: {
+    fullName: string;
+    penName?: string;
+    displayName?: string;
+    email: string;
+    pass: string;
+    bio?: string;
+    writingExperience?: string;
+    genres?: string[];
+    sampleText?: string;
+    signatureName?: string;
+  }): Promise<User> {
+    const trimmedEmail = data.email.trim();
+    const trimmedName = data.fullName.trim();
+    const trimmedPenName = data.penName?.trim() || data.displayName?.trim() || trimmedName;
+    const resolvedGenres = data.genres && data.genres.length > 0 ? data.genres : ['జీవితం', 'కుటుంబం'];
+
+    if (!trimmedEmail) {
+      throw new Error('దయచేసి సరైన ఈమెయిల్ అడ్రస్‌ను నమోదు చేయండి.');
+    }
+    if (data.pass.length < 6) {
+      throw new Error('పాస్‌వర్డ్ కనీసం 6 అక్షరాలు ఉండాలి.');
+    }
+    if (!trimmedPenName) {
+      throw new Error('దయచేసి రచయిత కలం పేరు (Pen Name) నమోదు చేయండి.');
+    }
+
+    // 1. Create Firebase Auth Account
+    const userCredential = await createUserWithEmailAndPassword(auth, trimmedEmail, data.pass);
+    
+    try {
+      await updateFirebaseProfile(userCredential.user, {
+        displayName: trimmedPenName,
+        photoURL: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(userCredential.user.uid)}`,
+      });
+    } catch (err) {
+      console.warn('Could not update Auth profile displayName:', err);
+    }
+
+    const avatarUrl = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(userCredential.user.uid)}`;
+
+    // 2. Create Canonical User Profile in Firestore with role: 'writer', status: 'pending'
+    const userDocRef = doc(db, 'users', userCredential.user.uid);
+    const newUserData = {
+      uid: userCredential.user.uid,
+      id: userCredential.user.uid,
+      name: trimmedName,
+      displayName: trimmedPenName,
+      penName: trimmedPenName,
+      email: trimmedEmail,
+      photoURL: avatarUrl,
+      teluguName: trimmedPenName,
+      avatar: avatarUrl,
+      bio: data.bio?.trim() || '',
+      teluguBio: data.bio?.trim() || '',
+      role: 'writer' as const, // STRICTLY 'writer'
+      status: 'pending' as const, // Strictly 'pending' until Admin approval
+      writingExperience: data.writingExperience?.trim() || 'బ్లాగులు & సోషల్ మీడియా',
+      genres: resolvedGenres,
+      followersCount: 0,
+      followingCount: 0,
+      savedStoriesCount: 0,
+      publishedCount: 0,
+      preferences: {
+        theme: 'light' as const,
+        fontSize: 18,
+        fontFamily: 'serif' as const,
+        notifications: true,
+      },
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
+
+    await setDoc(userDocRef, newUserData);
+
+    // 3. Create Writer Document in writers collection (pending status)
+    try {
+      await setDoc(doc(db, 'writers', userCredential.user.uid), {
+        uid: userCredential.user.uid,
+        id: userCredential.user.uid,
+        displayName: trimmedName,
+        penName: trimmedPenName,
+        email: trimmedEmail,
+        photoURL: avatarUrl,
+        bio: data.bio?.trim() || '',
+        genres: resolvedGenres,
+        writingExperience: data.writingExperience?.trim() || '',
+        sampleWriting: data.sampleText?.trim() || '',
+        agreementAcceptedName: data.signatureName?.trim() || trimmedName,
+        agreementAccepted: true,
+        status: 'pending',
+        publishedStoriesCount: 0,
+        totalStoriesSubmitted: 0,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    } catch (err) {
+      console.warn('Could not initialize writers collection document:', err);
+    }
+
+    // 4. Record application/agreement in writerApplications collection with status: 'pending'
+    try {
+      await addDoc(collection(db, 'writerApplications'), {
+        applicantUid: userCredential.user.uid,
+        applicantType: 'new_registration',
+        fullName: trimmedName,
+        penName: trimmedPenName,
+        displayName: trimmedPenName,
+        email: trimmedEmail,
+        bio: data.bio?.trim() || '',
+        writingExperience: data.writingExperience?.trim() || '',
+        genres: resolvedGenres,
+        sampleWriting: data.sampleText?.trim() || '',
+        agreementAccepted: true,
+        agreementAcceptedName: data.signatureName?.trim() || trimmedName,
+        status: 'pending',
+        submittedAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.warn('Could not record writer application:', err);
+    }
+
+    const userProfile: User = {
+      id: userCredential.user.uid,
+      uid: userCredential.user.uid,
+      name: trimmedName,
+      displayName: trimmedPenName,
+      email: trimmedEmail,
+      photoURL: avatarUrl,
+      teluguName: trimmedPenName,
+      avatar: avatarUrl,
+      bio: data.bio?.trim() || '',
+      teluguBio: data.bio?.trim() || '',
+      role: 'writer',
+      status: 'pending',
+      followersCount: 0,
+      followingCount: 0,
+      savedStoriesCount: 0,
+      publishedCount: 0,
+      preferences: {
+        theme: 'light',
+        fontSize: 18,
+        fontFamily: 'serif',
+        notifications: true,
+      },
+    };
+
+    this.currentUser = userProfile;
+    this.notify();
+    return userProfile;
+  }
+
+  /**
+   * Option C: Register & Submit Writer Application (For review workflow)
    */
   public async registerWriterApplicant(data: {
     fullName: string;
@@ -329,120 +539,24 @@ class AuthService {
     reasonForApplying?: string;
     sampleText: string;
     agreementAcceptedName: string;
-  }): Promise<{ user: null; applicationId: string; message: string }> {
-    const trimmedEmail = data.email.trim();
-    const trimmedName = data.fullName.trim();
-    const trimmedPenName = data.penName?.trim() || data.displayName?.trim() || trimmedName;
-    const resolvedGenres = data.genres && data.genres.length > 0 ? data.genres : (data.categories || ['జీవితం']);
-
-    if (!trimmedEmail) {
-      throw new Error('దయచేసి సరైన ఈమెయిల్ అడ్రస్‌ను నమోదు చేయండి.');
-    }
-    if (data.pass.length < 6) {
-      throw new Error('పాస్‌వర్డ్ కనీసం 6 అక్షరాలు ఉండాలి.');
-    }
-    if (!data.bio.trim()) {
-      throw new Error('దయచేసి రచయిత పరిచయం / బయో రాయండి.');
-    }
-    if (!data.sampleText.trim() || data.sampleText.trim().length < 50) {
-      throw new Error('రచన యొక్క నమూనా (కనీసం 50 అక్షరాలు) రాయండి.');
-    }
-    if (!data.agreementAcceptedName.trim()) {
-      throw new Error('డిజిటల్ అంగీకారం కోసం దయచేసి మీ పేరును టైప్ చేయండి.');
-    }
-
-    // 1. Create Firebase Auth Account
-    const userCredential = await createUserWithEmailAndPassword(auth, trimmedEmail, data.pass);
-    
-    try {
-      await updateFirebaseProfile(userCredential.user, {
-        displayName: trimmedPenName,
-        photoURL: `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(userCredential.user.uid)}`,
-      });
-    } catch (err) {
-      console.warn('Could not update Auth profile displayName:', err);
-    }
-
-    const avatarUrl = `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(userCredential.user.uid)}`;
-
-    // 2. Create Canonical User Profile in Firestore with status: 'pending' (Blocked from login until approved)
-    const userDocRef = doc(db, 'users', userCredential.user.uid);
-    await setDoc(userDocRef, {
-      uid: userCredential.user.uid,
-      id: userCredential.user.uid,
-      name: trimmedName,
-      displayName: trimmedPenName,
-      email: trimmedEmail,
-      photoURL: avatarUrl,
-      teluguName: trimmedPenName,
-      avatar: avatarUrl,
-      bio: data.bio.trim(),
-      teluguBio: data.bio.trim(),
-      role: 'reader', // Role is reader, but status is pending
-      status: 'pending', // Blocked from login until approved
-      followersCount: 0,
-      followingCount: 0,
-      savedStoriesCount: 0,
-      publishedCount: 0,
-      preferences: {
-        theme: 'light',
-        fontSize: 18,
-        fontFamily: 'serif',
-        notifications: true,
-      },
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+  }): Promise<{ user: User; applicationId: string; message: string }> {
+    const user = await this.registerWriter({
+      fullName: data.fullName,
+      penName: data.penName || data.displayName,
+      displayName: data.displayName,
+      email: data.email,
+      pass: data.pass,
+      bio: data.bio,
+      writingExperience: data.writingExperience,
+      genres: data.genres || data.categories,
+      sampleText: data.sampleText,
+      signatureName: data.agreementAcceptedName,
     });
-    
-    // 3. Create Writer Application Document in Firestore
-    const appData = {
-      applicantUid: userCredential.user.uid,
-      applicantType: 'new_registration' as const,
-      fullName: trimmedName,
-      name: trimmedName,
-      penName: trimmedPenName,
-      displayName: trimmedPenName,
-      username: data.username?.trim() || '',
-      email: trimmedEmail,
-      mobileNumber: data.mobileNumber?.trim() || data.phone?.trim() || '',
-      phone: data.mobileNumber?.trim() || data.phone?.trim() || '',
-      city: data.city?.trim() || '',
-      bio: data.bio.trim(),
-      writingExperience: data.writingExperience?.trim() || 'బ్లాగులు & సోషల్ మీడియా',
-      experience: data.writingExperience?.trim() || 'బ్లాగులు & సోషల్ మీడియా',
-      genres: resolvedGenres,
-      categories: resolvedGenres,
-      reasonForApplying: data.reasonForApplying?.trim() || 'తెలుగు పాఠకులతో నా రచనలు పంచుకోవడానికి.',
-      reason: data.reasonForApplying?.trim() || 'తెలుగు పాఠకులతో నా రచనలు పంచుకోవడానికి.',
-      sampleWriting: data.sampleText.trim(),
-      sampleText: data.sampleText.trim(),
-      photoURL: avatarUrl,
-
-      // Complete Legal Agreement Acceptance
-      agreementAccepted: true,
-      agreementVersion: '1.0',
-      agreementAcceptedAt: serverTimestamp(),
-      agreementAcceptedByUid: userCredential.user.uid,
-      agreementAcceptedName: data.agreementAcceptedName.trim(),
-
-      status: 'pending' as const,
-      submittedAt: serverTimestamp(),
-      reviewedAt: null,
-      reviewedBy: null,
-      rejectionReason: null,
-    };
-
-    const appDocRef = await addDoc(collection(db, 'writerApplications'), appData);
-
-    // Sign out immediately so pending new applicant cannot bypass review
-    await signOut(auth);
-    this.currentUser = null;
-    this.notify();
 
     return {
-      user: null,
-      applicationId: appDocRef.id,
-      message: 'మీ రచయిత దరఖాస్తు విజయవంతంగా సమర్పించబడింది. మీ ప్రొఫైల్‌ను నిర్వాహకులు పరిశీలిస్తున్నారు. సాధారణంగా 24 గంటల్లో లేదా అంతకంటే ముందే మీ దరఖాస్తుపై నిర్ణయం తీసుకోవడానికి ప్రయత్నిస్తాము.',
+      user,
+      applicationId: user.id,
+      message: 'మీ రచయిత దరఖాస్తు విజయవంతంగా సమర్పించబడింది. కథావాహిని అడ్మిన్ పరిశీలన తర్వాత ఆమోదించబడుతుంది.',
     };
   }
 
@@ -455,37 +569,8 @@ class AuthService {
       throw new Error('దయచేసి సరైన ఈమెయిల్ అడ్రస్‌ను నమోదు చేయండి.');
     }
 
-    const isAdminEmail = trimmedEmail === 'thekathavahini@gmail.com';
-    let userCredential;
-
-    try {
-      userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, pass);
-    } catch (err: any) {
-      // If admin user account does not exist in Firebase Auth yet, auto-provision it directly!
-      if (isAdminEmail && (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/invalid-login-credentials')) {
-        try {
-          userCredential = await createUserWithEmailAndPassword(auth, trimmedEmail, pass);
-          await updateFirebaseProfile(userCredential.user, {
-            displayName: 'అడ్మిన్',
-            photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-          });
-        } catch (createErr: any) {
-          throw err;
-        }
-      } else {
-        throw err;
-      }
-    }
-
-    const userProfile = await this.syncFirestoreUserProfile(userCredential.user, isAdminEmail ? 'అడ్మిన్' : undefined);
-
-    // Block pending writer applicant from logging in before Admin approval
-    if (userProfile.status === 'pending') {
-      await signOut(auth);
-      this.currentUser = null;
-      this.notify();
-      throw new Error('మీ రచయిత ఖాతా ఇంకా నిర్వాహకుల ఆమోదం కోసం వేచి ఉంది. సాధారణంగా మీ దరఖాస్తును 24 గంటల్లో లేదా అంతకంటే ముందే పరిశీలించడానికి ప్రయత్నిస్తాము.');
-    }
+    const userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, pass);
+    const userProfile = await this.syncFirestoreUserProfile(userCredential.user);
 
     // Verify account status (Suspended or Banned)
     if (userProfile.status === 'suspended' || userProfile.status === 'banned') {
@@ -505,7 +590,7 @@ class AuthService {
 
     // Update role-specific collection for console clarity
     try {
-      if (userProfile.role === 'admin' || userProfile.role === 'superadmin') {
+      if (userProfile.role === 'admin') {
         await setDoc(doc(db, 'admins', userProfile.id), {
           uid: userProfile.id,
           email: userProfile.email,
@@ -520,7 +605,7 @@ class AuthService {
           displayName: userProfile.displayName || userProfile.name,
           penName: userProfile.teluguName || userProfile.name,
           email: userProfile.email,
-          status: 'active',
+          status: userProfile.status || 'pending',
           updatedAt: serverTimestamp(),
         }, { merge: true });
       } else {

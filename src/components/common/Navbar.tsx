@@ -233,7 +233,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <div className="space-y-0.5 mt-0.5">
                       {user ? (
                         <>
-                          {user.role === 'admin' && user.email === 'thekathavahini@gmail.com' && (
+                          {user.role === 'admin' && (
                             <button
                               onClick={() => handleNavClick('admin')}
                               className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 text-purple-700 dark:text-purple-300 text-left cursor-pointer transition-colors font-bold"

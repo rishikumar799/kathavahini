@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   Type, 
   Heading2, 
@@ -13,7 +13,8 @@ import {
   Plus, 
   UploadCloud, 
   Loader2,
-  Sparkles
+  Sparkles,
+  X
 } from 'lucide-react';
 import { ContentBlock, ContentBlockType } from '../../types';
 import { storageService } from '../../services/storageService';
@@ -30,6 +31,9 @@ export const MixedContentTab: React.FC<MixedContentTabProps> = ({
   storyId = `story-${Date.now()}`
 }) => {
   const [uploadingBlockId, setUploadingBlockId] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [uploadError, setUploadError] = useState<{ blockId: string; message: string } | null>(null);
+  const cancelTaskRef = useRef<(() => void) | null>(null);
 
   const addBlock = (type: ContentBlockType) => {
     const newBlock: ContentBlock = {
@@ -84,18 +88,45 @@ export const MixedContentTab: React.FC<MixedContentTabProps> = ({
   const handleImageUpload = async (index: number, file: File) => {
     const block = blocks[index];
     setUploadingBlockId(block.id);
+    setUploadProgress(0);
+    setUploadError(null);
+
+    const validation = storageService.validateImageFile(file);
+    if (!validation.isValid) {
+      setUploadError({ blockId: block.id, message: validation.error || 'చిత్రం చెల్లదు' });
+      setUploadingBlockId(null);
+      return;
+    }
 
     try {
-      const uploadRes = await storageService.uploadStoryContentImage(storyId, file);
+      const uploadRes = await storageService.uploadStoryContentImage(storyId, file, {
+        onProgress: (pct) => {
+          setUploadProgress(pct);
+        },
+        onTaskCreated: (handle) => {
+          cancelTaskRef.current = () => handle.cancel();
+        }
+      });
+
       updateBlock(index, {
         imageUrl: uploadRes.downloadUrl,
         imagePath: uploadRes.storagePath,
         imageMetadata: uploadRes.metadata
       });
     } catch (err: any) {
-      alert(`చిత్రం అప్‌లోడ్ చేయడంలో విఫలమైంది: ${err.message || 'Error'}`);
+      if (err.code !== 'storage/canceled') {
+        setUploadError({ blockId: block.id, message: `చిత్రం అప్‌లోడ్ లోపం: ${err.message || 'నెట్‌వర్క్ లోపం'}` });
+      }
     } finally {
       setUploadingBlockId(null);
+      cancelTaskRef.current = null;
+    }
+  };
+
+  const handleCancelBlockUpload = () => {
+    if (cancelTaskRef.current) {
+      cancelTaskRef.current();
+      cancelTaskRef.current = null;
     }
   };
 
@@ -323,12 +354,39 @@ export const MixedContentTab: React.FC<MixedContentTabProps> = ({
                   ) : (
                     <div className="p-6 rounded-xl border-2 border-dashed border-[#E8E1DA] dark:border-[#2E2D36] bg-[#FAF7F2] dark:bg-[#222229] text-center space-y-3">
                       {uploadingBlockId === block.id ? (
-                        <div className="flex flex-col items-center justify-center py-4 space-y-2">
-                          <Loader2 className="w-6 h-6 animate-spin text-[#7A284B]" />
-                          <span className="text-xs font-semibold">చిత్రం అప్‌లోడ్ అవుతోంది...</span>
+                        <div className="flex flex-col items-center justify-center py-4 space-y-3 max-w-xs mx-auto">
+                          <div className="flex items-center gap-2">
+                            <Loader2 className="w-5 h-5 animate-spin text-[#7A284B]" />
+                            <span className="text-xs font-bold text-[#17151A] dark:text-[#F7F3EE]">
+                              అప్‌లోడ్ అవుతోంది ({uploadProgress}%)
+                            </span>
+                          </div>
+
+                          {/* Progress bar */}
+                          <div className="w-full h-1.5 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+                            <div 
+                              className="h-full bg-[#7A284B] rounded-full transition-all duration-200"
+                              style={{ width: `${uploadProgress}%` }}
+                            />
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={handleCancelBlockUpload}
+                            className="text-[11px] text-red-500 hover:text-red-700 font-semibold cursor-pointer inline-flex items-center gap-1"
+                          >
+                            <X className="w-3 h-3" />
+                            <span>రద్దు చేయండి (Cancel)</span>
+                          </button>
                         </div>
                       ) : (
                         <>
+                          {uploadError?.blockId === block.id && (
+                            <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-xs mb-2">
+                              {uploadError.message}
+                            </div>
+                          )}
+
                           <div className="flex justify-center gap-3">
                             <label className="px-4 py-2 rounded-xl bg-[#7A284B] hover:bg-[#631F3C] text-white text-xs font-bold inline-flex items-center gap-1.5 cursor-pointer shadow-sm transition-colors">
                               <UploadCloud className="w-4 h-4" />

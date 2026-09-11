@@ -83,6 +83,12 @@ export interface ImageMetadata {
   contentType?: string;
   size?: number;
   uploadedAt?: string;
+  ownerId?: string;
+  ownerRole?: string;
+  contentId?: string;
+  assetType?: string;
+  width?: number;
+  height?: number;
 }
 
 export interface Story {
@@ -96,6 +102,17 @@ export interface Story {
   coverImageUrl?: string;
   coverImagePath?: string;
   coverImageMetadata?: ImageMetadata;
+  coverImageURL?: string;
+  coverImageStoragePath?: string;
+  coverImageFileName?: string;
+  coverImageContentType?: string;
+  coverImageSize?: number;
+  coverImageUpdatedAt?: string;
+  documentURL?: string;
+  documentStoragePath?: string;
+  documentFileName?: string;
+  documentContentType?: string;
+  documentSize?: number;
   excerpt: string;
   teluguExcerpt: string;
   content: string[]; // Paragraphs in Telugu (backward compatible)
@@ -243,6 +260,10 @@ export interface User {
   email: string;
   photoURL?: string;
   photoPath?: string;
+  profileImageURL?: string;
+  profileImageStoragePath?: string;
+  profileImageFileName?: string;
+  profileImageUpdatedAt?: string;
   teluguName?: string;
   avatar: string;
   bio?: string;
@@ -269,6 +290,10 @@ export interface ReaderProfile {
   email: string;
   photoURL?: string;
   photoPath?: string;
+  profileImageURL?: string;
+  profileImageStoragePath?: string;
+  profileImageFileName?: string;
+  profileImageUpdatedAt?: string;
   preferences?: {
     theme?: ReadingTheme;
     fontSize?: number;
@@ -289,6 +314,10 @@ export interface WriterProfile {
   email: string;
   photoURL?: string;
   photoPath?: string;
+  profileImageURL?: string;
+  profileImageStoragePath?: string;
+  profileImageFileName?: string;
+  profileImageUpdatedAt?: string;
   bio: string;
   genres: string[];
   writingExperience: string;
@@ -352,7 +381,7 @@ export interface AdminAuditLog {
   adminUid: string;
   adminEmail?: string;
   action: string;
-  targetType: 'writer_application' | 'story' | 'novel' | 'episode' | 'joke' | 'knowledge' | 'comment' | 'user' | 'category' | 'report' | 'contact' | 'system';
+  targetType: 'writer_application' | 'story' | 'novel' | 'episode' | 'joke' | 'knowledge' | 'comment' | 'user' | 'category' | 'report' | 'contact' | 'announcement' | 'system';
   targetId: string;
   targetTitle?: string;
   metadata?: Record<string, any>;
@@ -446,3 +475,44 @@ export interface IssueReport {
   createdAt?: any;
   status?: 'pending' | 'reviewed' | 'resolved';
 }
+
+// ----------------------------------------------------
+// ANNOUNCEMENT SYSTEM TYPES
+// ----------------------------------------------------
+export type AnnouncementContentType = 'text_only' | 'image_only' | 'image_text';
+export type AnnouncementLayout = 'text_only' | 'image_only' | 'image_left' | 'text_left';
+export type AnnouncementAudience = 'everyone' | 'readers' | 'writers' | 'readers_and_writers';
+export type AnnouncementStatus = 'draft' | 'scheduled' | 'published' | 'hidden' | 'archived';
+export type AnnouncementPriority = 'high' | 'normal' | 'low';
+export type AnnouncementFrequency = 'every_visit' | 'once_per_session' | 'once_per_day' | 'until_dismissed';
+
+export interface Announcement {
+  id: string;
+  title: string;
+  message?: string;
+  contentType: AnnouncementContentType;
+  imageURL?: string;
+  imageStoragePath?: string;
+  imageAltText?: string;
+  layout: AnnouncementLayout;
+  buttonText?: string;
+  buttonURL?: string;
+  audience: AnnouncementAudience;
+  status: AnnouncementStatus;
+  priority: AnnouncementPriority;
+  displayDelaySeconds: number; // 0, 1, 3, 5, 10, 15, 30. Default 3
+  displayFrequency: AnnouncementFrequency; // 'every_visit' | 'once_per_session' | 'once_per_day' | 'until_dismissed'
+  startAt?: any;
+  endAt?: any;
+  scheduledAt?: any;
+  publishedAt?: any;
+  createdAt: any;
+  updatedAt: any;
+  createdBy: string;
+  metrics?: {
+    impressions?: number;
+    dismissals?: number;
+    clicks?: number;
+  };
+}
+

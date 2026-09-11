@@ -48,6 +48,7 @@ import { WriterApplicationView } from './views/WriterApplicationView';
 import { AdminDashboardView } from './views/AdminDashboardView';
 import { ResetPasswordView } from './views/ResetPasswordView';
 import { AdminTopBanner } from './components/admin/AdminTopBanner';
+import { PublicAnnouncementBanner } from './components/common/PublicAnnouncementBanner';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<string>('home');
@@ -103,16 +104,35 @@ export default function App() {
       if (currentTab === 'admin' && !(u && u.role === 'admin')) {
         setCurrentTab('home');
       }
+      // Strict Writer Studio Route Guard: If user is not active writer or admin, route away
+      if (currentTab === 'dashboard' && !(u && ((u.role === 'writer' && u.status === 'active') || u.role === 'admin'))) {
+        if (u && u.role === 'writer' && u.status === 'pending') {
+          setCurrentTab('apply-writer');
+        } else {
+          setCurrentTab('home');
+        }
+      }
     });
     return () => unsubscribe();
   }, [currentTab]);
 
-  // Strict route guard when tab changes to admin
+  // Strict route guard when tab changes to admin or dashboard
   useEffect(() => {
     if (currentTab === 'admin') {
       const isAuthorizedAdmin = Boolean(user && user.role === 'admin');
       if (!isAuthorizedAdmin) {
         setCurrentTab('home');
+      }
+    }
+    if (currentTab === 'dashboard') {
+      const isApprovedWriter = Boolean(user && user.role === 'writer' && user.status === 'active');
+      const isAdmin = Boolean(user && user.role === 'admin');
+      if (!isApprovedWriter && !isAdmin) {
+        if (user && user.role === 'writer' && user.status === 'pending') {
+          setCurrentTab('apply-writer');
+        } else {
+          setCurrentTab('home');
+        }
       }
     }
   }, [currentTab, user]);
@@ -445,7 +465,42 @@ export default function App() {
           />
         );
 
-      case 'dashboard':
+      case 'dashboard': {
+        const isApprovedWriter = Boolean(user && user.role === 'writer' && user.status === 'active');
+        const isAdmin = Boolean(user && user.role === 'admin');
+        if (!isApprovedWriter && !isAdmin) {
+          if (user && user.role === 'writer' && user.status === 'pending') {
+            return (
+              <WriterApplicationView
+                user={user}
+                onOpenAuth={() => handleRequireAuth('రచయితగా దరఖాస్తు చేసుకోవడానికి ముందుగా లాగిన్ చేయండి.')}
+                onBack={() => setCurrentTab('profile')}
+                onNavigateToDashboard={() => setCurrentTab('dashboard')}
+              />
+            );
+          }
+          return (
+            <HomeView
+              trendingStories={trendingStories}
+              popularStories={popularStories}
+              newReleases={newReleases}
+              featuredNovels={novels}
+              featuredAuthors={authors}
+              jokes={jokes}
+              categories={MOCK_CATEGORIES}
+              readingHistory={readingHistory}
+              onSelectStory={handleSelectStory}
+              onSelectNovel={handleSelectNovel}
+              onSelectAuthor={handleSelectAuthor}
+              onSelectCategory={handleSelectCategory}
+              onSelectTab={setCurrentTab}
+              onOpenWrite={() => setIsWriteOpen(true)}
+              onBookmarkToggle={handleBookmarkToggle}
+              onLikeToggle={handleLikeToggle}
+              onFollowToggle={handleFollowAuthorToggle}
+            />
+          );
+        }
         return creatorStats ? (
           <CreatorDashboardView
             stats={creatorStats}
@@ -456,6 +511,7 @@ export default function App() {
             onApplyWriter={() => setCurrentTab('apply-writer')}
           />
         ) : null;
+      }
 
       case 'apply-writer':
         return (
@@ -649,6 +705,20 @@ export default function App() {
         </>
       )}
 
+      {/* Public Announcement Card / Banner */}
+      {!isReaderView && (
+        <PublicAnnouncementBanner
+          currentUser={user}
+          onNavigateTab={(tab) => {
+            if (tab === 'write') {
+              setIsWriteOpen(true);
+            } else {
+              setCurrentTab(tab);
+            }
+          }}
+        />
+      )}
+
       {/* Write/Publish Modal */}
       <WriteModal
         isOpen={isWriteOpen}
@@ -677,8 +747,11 @@ export default function App() {
           const currentUserNow = authService.getCurrentUser();
           if (currentUserNow?.role === 'admin') {
             setCurrentTab('admin');
+          } else if (currentUserNow?.role === 'writer' && currentUserNow?.status === 'pending') {
+            // Show clear Waiting for Admin Approval state
+            setCurrentTab('apply-writer');
           } else {
-            // Readers and Writers remain on the public website
+            // Readers and Approved Writers remain on the public website
             if (currentTab === 'admin') {
               setCurrentTab('home');
             }

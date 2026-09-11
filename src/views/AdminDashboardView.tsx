@@ -34,6 +34,7 @@ import { AdminReportsView } from '../components/admin/AdminReportsView';
 import { AdminContactView } from '../components/admin/AdminContactView';
 import { AdminAuditLogsView } from '../components/admin/AdminAuditLogsView';
 import { AdminSettingsView } from '../components/admin/AdminSettingsView';
+import { AdminAnnouncementsView } from '../components/admin/AdminAnnouncementsView';
 import { AdminContentEditorModal } from '../components/admin/AdminContentEditorModal';
 import { AdminAddUserModal } from '../components/admin/AdminAddUserModal';
 
@@ -511,7 +512,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         />
 
         {/* Content Area */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto space-y-6">
+        <main className="flex-1 min-w-0 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto space-y-6">
           {activeTab === 'dashboard' && (
             <AdminOverviewView
               counts={counts}
@@ -648,6 +649,10 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
               onToggleStatus={handleToggleCategoryStatus}
               actionLoading={actionLoading}
             />
+          )}
+
+          {activeTab === 'announcements' && (
+            <AdminAnnouncementsView currentUser={currentUser} />
           )}
 
           {activeTab === 'comments' && (

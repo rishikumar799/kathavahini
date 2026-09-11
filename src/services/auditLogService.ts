@@ -18,7 +18,7 @@ export class AuditLogService {
    */
   public async logAction(logData: {
     action: string;
-    targetType: 'writer_application' | 'story' | 'novel' | 'episode' | 'joke' | 'knowledge' | 'comment' | 'user' | 'category' | 'report' | 'contact' | 'system';
+    targetType: AdminAuditLog['targetType'];
     targetId: string;
     targetTitle?: string;
     previousStatus?: string;

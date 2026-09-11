@@ -307,6 +307,17 @@ class WriterService {
       coverImageUrl: finalCover,
       coverImagePath: storyData.coverImagePath,
       coverImageMetadata: storyData.coverImageMetadata,
+      coverImageURL: finalCover,
+      coverImageStoragePath: storyData.coverImagePath,
+      coverImageFileName: storyData.coverImageMetadata?.fileName,
+      coverImageContentType: storyData.coverImageMetadata?.contentType,
+      coverImageSize: storyData.coverImageMetadata?.size,
+      coverImageUpdatedAt: new Date().toISOString(),
+      documentURL: storyData.sourceDocument?.storageUrl,
+      documentStoragePath: storyData.sourceDocument?.storagePath,
+      documentFileName: storyData.sourceDocument?.name,
+      documentContentType: storyData.sourceDocument?.type,
+      documentSize: storyData.sourceDocument?.size,
       excerpt,
       teluguExcerpt: excerpt,
       content: paragraphs,
@@ -365,6 +376,9 @@ class WriterService {
           const userData = userSnap.data();
           if (userData.status === 'suspended' || userData.status === 'banned') {
             throw new Error('మీ రచయిత ఖాతా నిలిపివేయబడింది లేదా రద్దు చేయబడింది. కథలను సమర్పించలేరు.');
+          }
+          if (userData.role !== 'admin' && (userData.role !== 'writer' || userData.status !== 'active')) {
+            throw new Error('మీ రచయిత దరఖాస్తు ప్రస్తుతం పరిశీలనలో ఉంది లేదా ఇంకా ఆమోదించబడలేదు. కథావాహిని అడ్మిన్ ఆమోదం తర్వాత మాత్రమే రచనలను సమర్పించగలరు.');
           }
         }
 

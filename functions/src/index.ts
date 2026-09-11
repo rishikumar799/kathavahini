@@ -205,12 +205,67 @@ export async function executeScheduledPublication(): Promise<{
     }
   }
 
+  // 6. Process Scheduled Announcements
+  let publishedAnnouncements = 0;
+  const announcementsSnap = await db
+    .collection('announcements')
+    .where('status', '==', 'scheduled')
+    .get();
+
+  for (const docSnap of announcementsSnap.docs) {
+    const data = docSnap.data();
+    const scheduledAtTs = data.scheduledAt || data.startAt;
+    let isTimeReached = false;
+
+    if (scheduledAtTs instanceof admin.firestore.Timestamp) {
+      isTimeReached = scheduledAtTs.toMillis() <= now.toMillis();
+    } else if (typeof scheduledAtTs === 'string') {
+      isTimeReached = new Date(scheduledAtTs).getTime() <= now.toMillis();
+    }
+
+    if (isTimeReached) {
+      await docSnap.ref.update({
+        status: 'published',
+        publishedAt: now,
+        updatedAt: now,
+      });
+      publishedAnnouncements++;
+    }
+  }
+
+  // 7. Check for Expired Published Announcements (endAt <= now)
+  const publishedAnnouncementsSnap = await db
+    .collection('announcements')
+    .where('status', '==', 'published')
+    .get();
+
+  for (const docSnap of publishedAnnouncementsSnap.docs) {
+    const data = docSnap.data();
+    if (data.endAt) {
+      const endAtTs = data.endAt;
+      let isExpired = false;
+      if (endAtTs instanceof admin.firestore.Timestamp) {
+        isExpired = endAtTs.toMillis() <= now.toMillis();
+      } else if (typeof endAtTs === 'string') {
+        isExpired = new Date(endAtTs).getTime() <= now.toMillis();
+      }
+
+      if (isExpired) {
+        await docSnap.ref.update({
+          status: 'archived',
+          updatedAt: now,
+        });
+      }
+    }
+  }
+
   return {
     publishedStories,
     publishedNovels,
     publishedEpisodes,
     publishedJokes,
     publishedKnowledge,
+    publishedAnnouncements,
     timestamp: nowISO,
   };
 }

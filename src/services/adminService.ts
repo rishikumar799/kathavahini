@@ -44,6 +44,7 @@ import {
 import { MOCK_STORIES, MOCK_NOVELS, MOCK_JOKES, MOCK_CATEGORIES, MOCK_KNOWLEDGE_ARTICLES } from './mockData';
 import { auditLogService } from './auditLogService';
 import { notificationService } from './notificationService';
+import { storageService } from './storageService';
 
 // Firebase configuration for secondary auth instance (so Admin remains logged in during user creation)
 const firebaseConfig = {
@@ -468,12 +469,29 @@ class AdminService {
   }
 
   /**
-   * Admin Deletes Story
+   * Admin Deletes Story (Deletes Firestore document and associated Storage assets)
    */
   public async deleteStory(storyId: string, adminUid: string, adminEmail?: string): Promise<void> {
     try {
+      const storySnap = await getDoc(doc(db, 'stories', storyId));
+      if (storySnap.exists()) {
+        const data = storySnap.data();
+        const coverPath = data.coverImagePath || data.coverImageStoragePath;
+        const docPath = data.documentStoragePath || data.sourceDocument?.storagePath;
+        const pagePaths = (data.imagePages || []).map((p: any) => p.imagePath).filter(Boolean);
+
+        storageService.deleteStoryAssets({
+          coverPath,
+          documentPath: docPath,
+          imagePagePaths: pagePaths,
+        }).catch((storageErr) => {
+          console.warn('Storage cleanup on story deletion notice:', storageErr);
+        });
+      }
       await deleteDoc(doc(db, 'stories', storyId));
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Error deleting story document:', e);
+    }
 
     await auditLogService.logAction({
       action: 'story_deleted',

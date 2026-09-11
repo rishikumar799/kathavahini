@@ -17,7 +17,8 @@ import {
   HelpCircle,
   ScrollText,
   Eye,
-  EyeOff
+  EyeOff,
+  LogIn
 } from 'lucide-react';
 import { User, WriterApplication, StoryCategory } from '../types';
 import { writerService } from '../services/writerService';
@@ -241,14 +242,14 @@ export const WriterApplicationView: React.FC<WriterApplicationViewProps> = ({
 
           <div className="space-y-3">
             <h2 className="text-2xl sm:text-3xl font-bold font-serif-telugu text-[#17151A] dark:text-[#F7F3EE]">
-              మీ రచయిత దరఖాస్తు విజయవంతంగా సమర్పించబడింది
+              రచయిత ఖాతా అభ్యర్థన అడ్మిన్ ప్యానెల్‌కు పంపబడింది
             </h2>
-            <div className="p-4 rounded-2xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-xs sm:text-sm font-serif-telugu text-[#6F6970] dark:text-[#AAA4AC] max-w-lg mx-auto leading-relaxed space-y-2">
+            <div className="p-4 rounded-2xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-xs sm:text-sm font-serif-telugu text-[#6F6970] dark:text-[#AAA4AC] max-w-lg mx-auto leading-relaxed space-y-2 text-left sm:text-center">
               <p className="font-semibold text-[#17151A] dark:text-[#F7F3EE]">
-                మీ ప్రొఫైల్‌ను నిర్వాహకులు పరిశీలిస్తున్నారు.
+                కథావాహిని అడ్మిన్ మీ దరఖాస్తును పరిశీలిస్తున్నారు.
               </p>
               <p>
-                సాధారణంగా 24 గంటల్లో లేదా అంతకంటే ముందే మీ దరఖాస్తుపై నిర్ణయం తీసుకోవడానికి ప్రయత్నిస్తాము.
+                అడ్మిన్ పరిశీలించి ఆమోదించిన తర్వాత మాత్రమే మీ రచయిత ఖాతా జోడించబడుతుంది మరియు మీరు లాగిన్ అవ్వగలరు. అప్పటివరకు దయచేసి వేచి ఉండండి.
               </p>
               {isReaderConversion && (
                 <p className="text-xs text-[#7A284B] dark:text-[#D87591] font-bold pt-1">
@@ -258,10 +259,23 @@ export const WriterApplicationView: React.FC<WriterApplicationViewProps> = ({
             </div>
           </div>
 
-          <div className="flex justify-center gap-3 pt-2">
+          <div className="flex flex-col sm:flex-row justify-center gap-3 pt-2">
+            {!isReaderConversion && (
+              <button
+                onClick={onOpenAuth}
+                className="px-8 py-3 rounded-full bg-[#7A284B] hover:bg-[#631F3C] text-white font-bold text-sm shadow-md transition-all cursor-pointer inline-flex items-center justify-center gap-2"
+              >
+                <LogIn className="w-4 h-4" />
+                <span>లాగిన్ పేజీకి వెళ్లండి (Go to Login)</span>
+              </button>
+            )}
             <button
               onClick={onBack}
-              className="px-8 py-3 rounded-full bg-[#7A284B] hover:bg-[#631F3C] text-white font-bold text-sm shadow-md transition-all cursor-pointer inline-flex items-center gap-2"
+              className={`px-8 py-3 rounded-full font-bold text-sm transition-all cursor-pointer inline-flex items-center justify-center gap-2 ${
+                !isReaderConversion
+                  ? 'bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE] hover:bg-[#E8E1DA]/50'
+                  : 'bg-[#7A284B] hover:bg-[#631F3C] text-white shadow-md'
+              }`}
             >
               <ArrowLeft className="w-4 h-4" />
               <span>హోమ్‌పేజీకి వెళ్లండి</span>

@@ -42,7 +42,16 @@ class AuthService {
       if (firebaseUser) {
         try {
           const userProfile = await this.syncFirestoreUserProfile(firebaseUser);
-          this.currentUser = userProfile;
+          // Block pending writers from direct login - they must wait for admin approval
+          if (userProfile.role === 'writer' && userProfile.status === 'pending') {
+            await signOut(auth);
+            this.currentUser = null;
+          } else if (userProfile.status === 'suspended' || userProfile.status === 'banned' || userProfile.status === 'rejected') {
+            await signOut(auth);
+            this.currentUser = null;
+          } else {
+            this.currentUser = userProfile;
+          }
         } catch (error) {
           console.error('Error fetching/syncing user profile from Firestore:', error);
           // Fallback to minimal profile based on Firebase Auth user
@@ -442,32 +451,8 @@ class AuthService {
 
     await setDoc(userDocRef, newUserData);
 
-    // 3. Create Writer Document in writers collection (pending status)
-    try {
-      await setDoc(doc(db, 'writers', userCredential.user.uid), {
-        uid: userCredential.user.uid,
-        id: userCredential.user.uid,
-        displayName: trimmedName,
-        penName: trimmedPenName,
-        email: trimmedEmail,
-        photoURL: avatarUrl,
-        bio: data.bio?.trim() || '',
-        genres: resolvedGenres,
-        writingExperience: data.writingExperience?.trim() || '',
-        sampleWriting: data.sampleText?.trim() || '',
-        agreementAcceptedName: data.signatureName?.trim() || trimmedName,
-        agreementAccepted: true,
-        status: 'pending',
-        publishedStoriesCount: 0,
-        totalStoriesSubmitted: 0,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-    } catch (err) {
-      console.warn('Could not initialize writers collection document:', err);
-    }
-
-    // 4. Record application/agreement in writerApplications collection with status: 'pending'
+    // 3. Record writer account request in writerApplications collection for admin review
+    // (Notice: writers/{uid} is NOT added until Admin checks and approves)
     try {
       await addDoc(collection(db, 'writerApplications'), {
         applicantUid: userCredential.user.uid,
@@ -514,7 +499,10 @@ class AuthService {
       },
     };
 
-    this.currentUser = userProfile;
+    // CRITICAL: Immediately sign out so there is NO direct login.
+    // The user must wait until the admin checks and approves their request.
+    await signOut(auth);
+    this.currentUser = null;
     this.notify();
     return userProfile;
   }
@@ -572,6 +560,14 @@ class AuthService {
     const userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, pass);
     const userProfile = await this.syncFirestoreUserProfile(userCredential.user);
 
+    // Verify writer pending status - block direct login until admin approves!
+    if (userProfile.role === 'writer' && userProfile.status === 'pending') {
+      await signOut(auth);
+      this.currentUser = null;
+      this.notify();
+      throw new Error('మీ రచయిత ఖాతా అభ్యర్థన ప్రస్తుతం అడ్మిన్ పరిశీలనలో ఉంది. కథావాహిని అడ్మిన్ పరిశీలించి ఆమోదించిన తర్వాత మాత్రమే మీరు లాగిన్ అవ్వగలరు. అప్పటివరకు దయచేసి వేచి ఉండండి.');
+    }
+
     // Verify account status (Suspended or Banned)
     if (userProfile.status === 'suspended' || userProfile.status === 'banned') {
       await signOut(auth);
@@ -599,13 +595,13 @@ class AuthService {
           status: 'active',
           updatedAt: serverTimestamp(),
         }, { merge: true });
-      } else if (userProfile.role === 'writer') {
+      } else if (userProfile.role === 'writer' && userProfile.status === 'active') {
         await setDoc(doc(db, 'writers', userProfile.id), {
           uid: userProfile.id,
           displayName: userProfile.displayName || userProfile.name,
           penName: userProfile.teluguName || userProfile.name,
           email: userProfile.email,
-          status: userProfile.status || 'pending',
+          status: 'active',
           updatedAt: serverTimestamp(),
         }, { merge: true });
       } else {

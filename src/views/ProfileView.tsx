@@ -20,7 +20,8 @@ import {
   AlertCircle,
   UploadCloud,
   Link as LinkIcon,
-  Image as ImageIcon
+  Image as ImageIcon,
+  RotateCcw
 } from 'lucide-react';
 import { User, ReadingTheme } from '../types';
 import { authService } from '../services/authService';
@@ -66,15 +67,32 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [customAvatarUrl, setCustomAvatarUrl] = useState('');
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadedStoragePath, setUploadedStoragePath] = useState<string | null>(null);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  const [lastSelectedAvatarFile, setLastSelectedAvatarFile] = useState<File | null>(null);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileMsg, setProfileMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const cancelAvatarUploadRef = useRef<(() => void) | null>(null);
+
+  const handleCancelAvatarUpload = () => {
+    if (cancelAvatarUploadRef.current) {
+      cancelAvatarUploadRef.current();
+      cancelAvatarUploadRef.current = null;
+    }
+    setIsUploadingAvatar(false);
+    setUploadProgress(0);
+    setProfileMsg({ type: 'error', text: 'అవతార్ అప్‌లోడ్ రద్దు చేయబడింది.' });
+  };
 
   const handleAvatarFileSelected = async (file: File) => {
     if (!user) return;
     setProfileMsg(null);
-    const validation = storageService.validateImageFile(file);
+    setLastSelectedAvatarFile(file);
+
+    // Validate image (Profile avatar max 5MB)
+    const validation = storageService.validateImageFile(file, 5 * 1024 * 1024);
     if (!validation.isValid) {
       setProfileMsg({ type: 'error', text: validation.error || 'సరైన చిత్రాన్ని ఎంచుకోండి.' });
       return;
@@ -83,21 +101,54 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     setIsUploadingAvatar(true);
     setUploadProgress(0);
 
-    try {
-      const uploadRes = await storageService.uploadProfileImage(user.id, file, (percent) => {
+    const uploadOptions = {
+      onProgress: (percent: number) => {
         setUploadProgress(percent);
-      });
+      },
+      onTaskCreated: ({ cancel }: { cancel: () => void }) => {
+        cancelAvatarUploadRef.current = cancel;
+      },
+    };
+
+    try {
+      let uploadRes;
+      if (user.role === 'writer') {
+        uploadRes = await storageService.uploadWriterProfileImage(user.id, file, uploadOptions);
+      } else if (user.role === 'admin') {
+        uploadRes = await storageService.uploadProfileImage(user.id, file, uploadOptions, 'admin');
+      } else {
+        uploadRes = await storageService.uploadProfileImage(user.id, file, uploadOptions, 'reader');
+      }
+
       setAvatarUrl(uploadRes.downloadUrl);
-      setProfileMsg({ type: 'success', text: 'ప్రొఫైల్ చిత్రం విజయవంతంగా అప్‌లోడ్ చేయబడింది!' });
+      setUploadedStoragePath(uploadRes.storagePath);
+      setUploadedFileName(uploadRes.metadata.fileName || file.name);
+
+      // Auto-save the new avatar directly to user profile so it persists immediately across the entire app
+      try {
+        await authService.updateProfile({
+          avatar: uploadRes.downloadUrl,
+          photoURL: uploadRes.downloadUrl,
+          profileImageURL: uploadRes.downloadUrl,
+          profileImageStoragePath: uploadRes.storagePath,
+          profileImageFileName: uploadRes.metadata.fileName || file.name,
+          profileImageUpdatedAt: new Date().toISOString(),
+        });
+        setProfileMsg({ type: 'success', text: 'ప్రొఫైల్ చిత్రం విజయవంతంగా నవీకరించబడింది!' });
+      } catch (saveErr) {
+        console.warn('Auto-save of profile avatar had non-critical issue:', saveErr);
+        setProfileMsg({ type: 'success', text: 'ప్రొఫైల్ చిత్రం సిద్ధమైంది! మార్పులను భద్రపరచడానికి క్రింద "భద్రపరచండి" నొక్కండి.' });
+      }
     } catch (err: any) {
       console.error('Avatar upload failed:', err);
+      const isCanceled = err?.code === 'storage/canceled';
       setProfileMsg({ 
         type: 'error', 
-        text: err.message || 'చిత్రాన్ని అప్‌లోడ్ చేయడంలో సమస్య ఎదురైంది. దయచేసి ఇమేజ్ URL లేదా ప్రీసెట్ అవతార్‌ను ఎంచుకోండి.' 
+        text: isCanceled ? 'అప్‌లోడ్ రద్దు చేయబడింది.' : (err.message || 'చిత్రాన్ని అప్‌లోడ్ చేయడంలో సమస్య ఎదురైంది. దయచేసి మళ్లీ ప్రయత్నించండి.')
       });
     } finally {
+      cancelAvatarUploadRef.current = null;
       setIsUploadingAvatar(false);
-      setUploadProgress(0);
       if (avatarInputRef.current) {
         avatarInputRef.current.value = '';
       }
@@ -111,12 +162,15 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     setIsSavingProfile(true);
     setProfileMsg(null);
 
+    // Keep track of old storage path to clean up only AFTER successful Firestore update
+    const previousStoragePath = user.profileImageStoragePath || user.photoPath;
+
     try {
       const resolvedTeluguName = editTeluguName.trim() || editName.trim() || user.name;
       const resolvedName = editName.trim() || user.name;
       const resolvedAvatar = avatarUrl.trim() || user.avatar || user.photoURL;
 
-      await authService.updateProfile({
+      const profilePayload: any = {
         name: resolvedName,
         displayName: resolvedTeluguName,
         teluguName: resolvedTeluguName,
@@ -124,7 +178,28 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         teluguBio: editTeluguBio.trim() || editBio.trim(),
         avatar: resolvedAvatar,
         photoURL: resolvedAvatar,
-      });
+      };
+
+      if (uploadedStoragePath) {
+        profilePayload.profileImageURL = resolvedAvatar;
+        profilePayload.profileImageStoragePath = uploadedStoragePath;
+        profilePayload.profileImageFileName = uploadedFileName || 'profile_image';
+        profilePayload.profileImageUpdatedAt = new Date().toISOString();
+        profilePayload.photoPath = uploadedStoragePath;
+      }
+
+      await authService.updateProfile(profilePayload);
+
+      // Safe cleanup: Delete the old Storage image only AFTER new image metadata is stored in Firestore
+      if (
+        uploadedStoragePath &&
+        previousStoragePath &&
+        previousStoragePath !== uploadedStoragePath
+      ) {
+        storageService.deleteFileByPath(previousStoragePath).catch((delErr) => {
+          console.warn('Non-fatal: could not remove previous profile avatar:', delErr);
+        });
+      }
 
       setProfileMsg({ type: 'success', text: 'మీ ప్రొఫైల్ వివరాలు విజయవంతంగా నవీకరించబడ్డాయి!' });
       setTimeout(() => {
@@ -546,7 +621,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
                 {/* Subview: Upload from Device */}
                 {avatarTab === 'upload' && (
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     <input
                       ref={avatarInputRef}
                       type="file"
@@ -559,24 +634,56 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                       className="hidden"
                       disabled={isUploadingAvatar || isSavingProfile}
                     />
-                    <button
-                      type="button"
-                      disabled={isUploadingAvatar || isSavingProfile}
-                      onClick={() => avatarInputRef.current?.click()}
-                      className="w-full py-3 px-4 rounded-xl border border-dashed border-[#E8E1DA] dark:border-[#2E2D36] hover:border-[#7A284B] bg-[#FAF7F2]/60 dark:bg-[#222229]/60 text-xs font-bold text-[#17151A] dark:text-[#F7F3EE] flex items-center justify-center gap-2 transition-colors cursor-pointer"
-                    >
-                      {isUploadingAvatar ? (
-                        <>
-                          <RefreshCw className="w-4 h-4 animate-spin text-[#7A284B]" />
-                          <span>అప్‌లోడ్ చేస్తోంది... {uploadProgress}%</span>
-                        </>
-                      ) : (
-                        <>
+
+                    {isUploadingAvatar ? (
+                      <div className="p-3.5 rounded-xl border border-[#7A284B]/30 bg-[#7A284B]/5 space-y-2">
+                        <div className="flex items-center justify-between text-xs font-bold text-[#17151A] dark:text-[#F7F3EE]">
+                          <span className="flex items-center gap-1.5">
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#7A284B]" />
+                            <span>అవతార్ అప్‌లోడ్ అవుతోంది...</span>
+                          </span>
+                          <span>{uploadProgress}%</span>
+                        </div>
+                        <div className="w-full h-2 bg-black/10 dark:bg-white/10 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-[#7A284B] rounded-full transition-all duration-200 ease-out"
+                            style={{ width: `${uploadProgress}%` }}
+                          />
+                        </div>
+                        <div className="flex justify-end">
+                          <button
+                            type="button"
+                            onClick={handleCancelAvatarUpload}
+                            className="text-[11px] font-bold text-red-600 hover:text-red-700 dark:text-red-400 cursor-pointer"
+                          >
+                            రద్దు చేయి (Cancel)
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={isSavingProfile}
+                          onClick={() => avatarInputRef.current?.click()}
+                          className="flex-1 py-3 px-4 rounded-xl border border-dashed border-[#E8E1DA] dark:border-[#2E2D36] hover:border-[#7A284B] bg-[#FAF7F2]/60 dark:bg-[#222229]/60 text-xs font-bold text-[#17151A] dark:text-[#F7F3EE] flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                        >
                           <Camera className="w-4 h-4 text-[#7A284B]" />
                           <span>పరికరం నుండి చిత్రాన్ని ఎంచుకోండి (గరిష్టంగా 5MB)</span>
-                        </>
-                      )}
-                    </button>
+                        </button>
+                        {lastSelectedAvatarFile && (
+                          <button
+                            type="button"
+                            disabled={isSavingProfile}
+                            onClick={() => handleAvatarFileSelected(lastSelectedAvatarFile)}
+                            title="మళ్లీ ప్రయత్నించు"
+                            className="py-3 px-3 rounded-xl border border-[#E8E1DA] dark:border-[#2E2D36] hover:border-[#7A284B] bg-[#FAF7F2]/60 dark:bg-[#222229]/60 text-xs font-bold text-[#7A284B] flex items-center justify-center transition-colors cursor-pointer"
+                          >
+                            <RotateCcw className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 

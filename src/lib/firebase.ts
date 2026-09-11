@@ -7,7 +7,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyDQ3LU73I-nv0Mghm6mZOpCxOhLkDS03RM",
   authDomain: "kathavahini-9a9c1.firebaseapp.com",
   projectId: "kathavahini-9a9c1",
-  storageBucket: "kathavahini-9a9c1.firebasestorage.app",
+  storageBucket: (typeof import.meta !== 'undefined' && import.meta.env?.VITE_FIREBASE_STORAGE_BUCKET) || "kathavahini-9a9c1.firebasestorage.app",
   messagingSenderId: "63748712545",
   appId: "1:63748712545:web:df61a333ccc86acac2e220",
   measurementId: "G-BT55GMSKLQ"
@@ -25,8 +25,8 @@ export const db = getFirestore(app);
 // Initialize Firebase Storage
 export const storage = getStorage(app);
 
-// Configure realistic timeouts (20 seconds for upload retry, 15 seconds for operations)
-// This prevents infinite 10-minute retry hangs when network drops or bucket is uninitialized
-storage.maxUploadRetryTime = 20000;
-storage.maxOperationRetryTime = 15000;
+// Configure responsive timeouts (6s for uploads, 5s for operations)
+// Prevents indefinite hangs and 2-minute freezes when storage bucket is unreachable
+storage.maxUploadRetryTime = 6000;
+storage.maxOperationRetryTime = 5000;
 

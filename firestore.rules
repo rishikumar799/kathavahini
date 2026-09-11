@@ -62,6 +62,10 @@ service cloud.firestore {
         allow read, update, delete: if isOwner(userId) || isAdmin();
         allow create: if isAuthenticated();
       }
+
+      match /dismissedAnnouncements/{announcementId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
     }
 
     // Role-specific collections
@@ -194,6 +198,23 @@ service cloud.firestore {
       allow create: if isAuthenticated();
       allow read: if isAdmin();
       allow update, delete: if false; // Immutable audit log
+    }
+
+    // Announcements collection
+    match /announcements/{announcementId} {
+      // Public / Authenticated read based on audience and status
+      allow read: if isAdmin() || (
+        (resource.data.status == 'published' || resource.data.status == 'scheduled') && (
+          resource.data.audience == 'everyone' ||
+          (resource.data.audience == 'readers' && isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'reader') ||
+          (resource.data.audience == 'writers' && isAuthenticated() && isWriter()) ||
+          (resource.data.audience == 'readers_and_writers' && isAuthenticated() && (
+            (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'reader') || isWriter()
+          ))
+        )
+      );
+      // Only Admin can create, update, delete announcements
+      allow write: if isAdmin();
     }
 
     // Fallback: Admin unrestricted

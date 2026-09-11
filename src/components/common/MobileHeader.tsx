@@ -138,6 +138,46 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
             >
               రచయితలు (Authors)
             </button>
+
+            {user?.role === 'admin' && (
+              <button
+                onClick={() => handleNav('admin')}
+                className="w-full text-left px-4 py-3 rounded-2xl bg-[#7A284B]/10 dark:bg-[#D87591]/20 font-bold text-[#7A284B] dark:text-[#D87591] shadow-sm border border-[#7A284B]/30 flex items-center justify-between"
+              >
+                <span>అడ్మిన్ ప్యానెల్ (Admin Panel)</span>
+                <Shield className="w-4 h-4" />
+              </button>
+            )}
+
+            {user && user.role === 'writer' && user.status === 'active' && (
+              <button
+                onClick={() => handleNav('dashboard')}
+                className="w-full text-left px-4 py-3 rounded-2xl bg-[#7A284B]/10 dark:bg-[#D87591]/20 font-bold text-[#7A284B] dark:text-[#D87591] shadow-sm border border-[#7A284B]/30 flex items-center justify-between"
+              >
+                <span>రచయిత స్టూడియో (Creator Studio)</span>
+                <Feather className="w-4 h-4" />
+              </button>
+            )}
+
+            {user && user.role === 'writer' && user.status === 'pending' && (
+              <button
+                onClick={() => handleNav('apply-writer')}
+                className="w-full text-left px-4 py-3 rounded-2xl bg-amber-500/10 dark:bg-amber-500/20 font-bold text-amber-700 dark:text-amber-300 shadow-sm border border-amber-500/30 flex items-center justify-between text-sm"
+              >
+                <span>రచయిత దరఖాస్తు పరిశీలనలో ఉంది (Pending)</span>
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+              </button>
+            )}
+
+            {(!user || user.role === 'reader') && (
+              <button
+                onClick={() => handleNav('apply-writer')}
+                className="w-full text-left px-4 py-3 rounded-2xl bg-white dark:bg-[#18181D] font-bold text-[#7A284B] dark:text-[#D87591] shadow-sm border border-[#E8E1DA] dark:border-[#2E2D36] flex items-center justify-between"
+              >
+                <span>రచయితగా చేరండి (Join as Writer)</span>
+                <Feather className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
           {/* Site & Help Links */}

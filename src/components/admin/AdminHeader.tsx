@@ -38,6 +38,7 @@ const TAB_TITLES: Record<AdminTab, { title: string; telugu: string; desc: string
   'jokes': { title: 'Humor & Jokes', telugu: 'హాస్య విభాగాలు', desc: 'సరదా జోక్స్ మరియు యూజర్ ప్రతిస్పందనలు' },
   'knowledge': { title: 'Literary Knowledge', telugu: 'సాహిత్య విజ్ఞానం', desc: 'సాహిత్య వ్యాసాలు మరియు జ్ఞాన విభాగం' },
   'categories': { title: 'Category Management', telugu: 'వర్గాలు & ఉపవర్గాలు', desc: 'కథా విభాగాలు, వివరణలు మరియు కథల గణన' },
+  'announcements': { title: 'Announcements CMS', telugu: 'ప్రకటనల నిర్వహణ', desc: 'వెబ్‌సైట్ సందర్శకులు, పాఠకులు, రచయితలకు ప్రకటనల సృష్టి మరియు షెడ్యూలింగ్' },
   'comments': { title: 'Comment Moderation', telugu: 'వ్యాఖ్యల నియంత్రణ', desc: 'కథలపై వచ్చిన కామెంట్ల పరిశీలన మరియు స్పామ్ తొలగింపు' },
   'reports': { title: 'Issue Reports', telugu: 'వినియోగదారుల ఫిర్యాదులు', desc: 'కంటెంట్ మరియు సాంకేతిక సమస్యల పరిష్కారం' },
   'contact': { title: 'Contact Submissions', telugu: 'సంప్రదింపు ఫారమ్ సందేశాలు', desc: 'యూజర్లు పంపిన వినతులు మరియు ప్రశ్నలు' },

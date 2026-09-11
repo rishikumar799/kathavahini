@@ -22,7 +22,8 @@ import {
   X,
   UserPlus,
   Layers,
-  FileText
+  FileText,
+  Megaphone
 } from 'lucide-react';
 import { User } from '../../types';
 
@@ -35,6 +36,7 @@ export type AdminTab =
   | 'jokes'
   | 'knowledge'
   | 'categories'
+  | 'announcements'
   // People
   | 'readers'
   | 'writers'
@@ -103,6 +105,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
         { id: 'jokes', label: 'Jokes', teluguLabel: 'హాస్య జోక్స్', icon: Smile },
         { id: 'knowledge', label: 'Knowledge', teluguLabel: 'సాహిత్య విజ్ఞానం', icon: Lightbulb },
         { id: 'categories', label: 'Categories', teluguLabel: 'కేటగిరీలు', icon: Tags },
+        { id: 'announcements', label: 'Announcements', teluguLabel: 'ప్రకటనలు (CMS)', icon: Megaphone },
       ]
     },
     {

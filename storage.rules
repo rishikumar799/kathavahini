@@ -20,64 +20,137 @@ service firebase.storage {
       );
     }
 
-    // File validation: safe image MIME types and max 5MB file size
-    function isValidImage() {
+    // Image validation: safe image MIME types and configurable max file size
+    function isValidImage(maxSize) {
       return request.resource != null
         && request.resource.contentType.matches('image/(jpeg|jpg|png|webp|gif|svg\\+xml)')
-        && request.resource.size <= 5 * 1024 * 1024;
+        && request.resource.size <= maxSize;
     }
 
-    // Document validation: PDF, DOCX, TXT and max 20MB file size
-    function isValidDocument() {
+    // Document validation: PDF, DOCX, DOC, TXT and configurable max file size
+    function isValidDocument(maxSize) {
       return request.resource != null
         && (
           request.resource.contentType.matches('application/(pdf|vnd.openxmlformats-officedocument.wordprocessingml.document|msword|octet-stream)') ||
           request.resource.contentType.matches('text/plain')
         )
-        && request.resource.size <= 20 * 1024 * 1024;
+        && request.resource.size <= maxSize;
     }
 
-    // User Profile Avatars: users/{userId}/profile/{fileName}
+    // -------------------------------------------------------------
+    // USER & WRITER PROFILES
+    // -------------------------------------------------------------
+    // Reader Profile Avatars: profiles/readers/{userId}/profile/{fileName}
+    match /profiles/readers/{userId}/profile/{fileName} {
+      allow read: if true;
+      allow write: if (isOwner(userId) || isAdmin()) && isValidImage(5 * 1024 * 1024);
+    }
+
+    // Writer Profile Avatars: profiles/writers/{userId}/profile/{fileName}
+    match /profiles/writers/{userId}/profile/{fileName} {
+      allow read: if true;
+      allow write: if (isOwner(userId) || isAdmin()) && isValidImage(5 * 1024 * 1024);
+    }
+
+    // Admin Profile Avatars: profiles/admin/{adminId}/profile/{fileName}
+    match /profiles/admin/{adminId}/profile/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidImage(5 * 1024 * 1024);
+    }
+
+    // Backward-compatible user profiles: users/{userId}/profile/{fileName}
     match /users/{userId}/profile/{fileName} {
       allow read: if true;
-      allow write: if (isOwner(userId) || isAdmin()) && isValidImage();
+      allow write: if (isOwner(userId) || isAdmin()) && isValidImage(5 * 1024 * 1024);
     }
 
-    // Writer Profile Images: writers/{writerId}/profile/{fileName}
+    // Backward-compatible writer profiles: writers/{writerId}/profile/{fileName}
     match /writers/{writerId}/profile/{fileName} {
       allow read: if true;
-      allow write: if (isOwner(writerId) || isAdmin()) && isValidImage();
+      allow write: if (isOwner(writerId) || isAdmin()) && isValidImage(5 * 1024 * 1024);
     }
 
-    // Story Assets (Cover, Content Images, Document attachments)
+    // -------------------------------------------------------------
+    // STORIES (Covers, Pages, Content Images, Source Documents)
+    // -------------------------------------------------------------
     match /stories/{storyId}/cover/{fileName} {
       allow read: if true;
-      allow write: if isAuthenticated() && isValidImage();
+      allow write: if isAuthenticated() && isValidImage(10 * 1024 * 1024);
+    }
+
+    match /stories/{storyId}/pages/{allPages=**} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isValidImage(10 * 1024 * 1024);
     }
 
     match /stories/{storyId}/content/{fileName} {
       allow read: if true;
-      allow write: if isAuthenticated() && isValidImage();
+      allow write: if isAuthenticated() && isValidImage(10 * 1024 * 1024);
     }
 
     match /stories/{storyId}/documents/{fileName} {
       allow read: if true;
-      allow write: if isAuthenticated() && (isValidDocument() || isAdmin());
+      allow write: if isAuthenticated() && (isValidDocument(25 * 1024 * 1024) || isAdmin());
     }
 
-    // Novel Cover Images: novels/{novelId}/cover/{fileName}
+    // -------------------------------------------------------------
+    // NOVELS & CHAPTERS
+    // -------------------------------------------------------------
     match /novels/{novelId}/cover/{fileName} {
       allow read: if true;
-      allow write: if isAuthenticated() && isValidImage();
+      allow write: if isAuthenticated() && isValidImage(10 * 1024 * 1024);
     }
 
-    // Knowledge Article Cover Images: knowledge/{knowledgeId}/cover/{fileName}
+    match /novels/{novelId}/chapters/{allChapters=**} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isValidImage(10 * 1024 * 1024);
+    }
+
+    // -------------------------------------------------------------
+    // EPISODES
+    // -------------------------------------------------------------
+    match /episodes/{episodeId}/assets/{fileName} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isValidImage(10 * 1024 * 1024);
+    }
+
+    // -------------------------------------------------------------
+    // JOKES & TELUGU SAMETHALU
+    // -------------------------------------------------------------
+    match /jokes/{contentId}/assets/{fileName} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isValidImage(10 * 1024 * 1024);
+    }
+
+    match /samethalu/{contentId}/assets/{fileName} {
+      allow read: if true;
+      allow write: if isAuthenticated() && isValidImage(10 * 1024 * 1024);
+    }
+
+    // -------------------------------------------------------------
+    // KNOWLEDGE ARTICLES
+    // -------------------------------------------------------------
     match /knowledge/{knowledgeId}/cover/{fileName} {
       allow read: if true;
-      allow write: if isAdmin() && isValidImage();
+      allow write: if isAdmin() && isValidImage(10 * 1024 * 1024);
     }
 
-    // Fallback: deny non-admin writes to unmanaged paths
+    match /knowledge/{knowledgeId}/assets/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidImage(10 * 1024 * 1024);
+    }
+
+    // -------------------------------------------------------------
+    // ANNOUNCEMENTS (CMS) - Admin Only
+    // -------------------------------------------------------------
+    match /announcements/{announcementId}/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidImage(10 * 1024 * 1024);
+    }
+
+    // -------------------------------------------------------------
+    // FALLBACK
+    // -------------------------------------------------------------
     match /{allPaths=**} {
       allow read: if true;
       allow write: if isAdmin();

@@ -9,11 +9,13 @@ import {
   ArrowRight, 
   Image as ImageIcon,
   Trash2,
-  BookOpen
+  BookOpen,
+  X,
+  RotateCcw
 } from 'lucide-react';
 import { DocumentParser, DocumentParseResult } from '../../utils/documentParser';
 import { SourceDocumentInfo } from '../../types';
-import { storageService } from '../../services/storageService';
+import { storageService, UploadProgressInfo, UploadStatus } from '../../services/storageService';
 
 interface DocumentImportTabProps {
   onImportComplete: (extractedText: string, suggestedTitle?: string, sourceDoc?: SourceDocumentInfo) => void;
@@ -32,18 +34,33 @@ export const DocumentImportTab: React.FC<DocumentImportTabProps> = ({
   const [parseResult, setParseResult] = useState<DocumentParseResult | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadSourceToCloud, setUploadSourceToCloud] = useState(true);
+  
+  // Real Storage Upload State
+  const [uploadStatus, setUploadStatus] = useState<UploadStatus>('IDLE');
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [bytesTransferred, setBytesTransferred] = useState(0);
+  const [totalBytes, setTotalBytes] = useState(0);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [customError, setCustomError] = useState<string | null>(null);
+  const cancelTaskRef = useRef<(() => void) | null>(null);
+
+  const formatBytes = (bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+  };
 
   const processFile = async (file: File) => {
     setCustomError(null);
     setParseResult(null);
     setSelectedFile(file);
 
-    // Validate size (max 20MB)
-    const MAX_DOC_SIZE = 20 * 1024 * 1024;
+    // Validate size (max 25MB)
+    const MAX_DOC_SIZE = 25 * 1024 * 1024;
     if (file.size > MAX_DOC_SIZE) {
-      setCustomError(`ఫైల్ పరిమాణం 20MB పరిమితిని మించింది (${(file.size / (1024 * 1024)).toFixed(1)}MB). దయచేసి చిన్న ఫైల్‌ను ఎంచుకోండి.`);
+      setCustomError(`ఫైల్ పరిమాణం 25MB పరిమితిని మించింది (${(file.size / (1024 * 1024)).toFixed(1)}MB). దయచేసి చిన్న ఫైల్‌ను ఎంచుకోండి.`);
       return;
     }
 
@@ -74,16 +91,36 @@ export const DocumentImportTab: React.FC<DocumentImportTabProps> = ({
     }
   };
 
+  const handleCancelUpload = () => {
+    if (cancelTaskRef.current) {
+      cancelTaskRef.current();
+      cancelTaskRef.current = null;
+    }
+  };
+
   const handleApplyToEditor = async () => {
     if (!parseResult || !parseResult.success) return;
 
     let sourceDocInfo: SourceDocumentInfo | undefined = undefined;
 
     if (selectedFile && uploadSourceToCloud) {
+      setUploadError(null);
+      setUploadStatus('VALIDATING');
+      setUploadProgress(0);
+      setBytesTransferred(0);
+      setTotalBytes(selectedFile.size);
+
       try {
-        setUploadProgress(10);
-        const uploadRes = await storageService.uploadStoryDocument(storyId, selectedFile, (pct) => {
-          setUploadProgress(pct);
+        const uploadRes = await storageService.uploadStoryDocument(storyId, selectedFile, {
+          onProgress: (pct, info?: UploadProgressInfo) => {
+            setUploadProgress(pct);
+            if (info?.status) setUploadStatus(info.status);
+            if (info?.bytesTransferred !== undefined) setBytesTransferred(info.bytesTransferred);
+            if (info?.totalBytes !== undefined) setTotalBytes(info.totalBytes);
+          },
+          onTaskCreated: (handle) => {
+            cancelTaskRef.current = () => handle.cancel();
+          }
         });
 
         sourceDocInfo = {
@@ -96,9 +133,19 @@ export const DocumentImportTab: React.FC<DocumentImportTabProps> = ({
           uploadedAt: new Date().toISOString(),
           extractedWordCount: parseResult.wordCount
         };
-      } catch (uploadErr) {
+        setUploadStatus('COMPLETE');
+      } catch (uploadErr: any) {
         console.warn('Document storage upload note:', uploadErr);
-        // Still proceed with local extracted content even if storage upload had a glitch
+        const isCanceled = uploadErr.code === 'storage/canceled';
+        setUploadStatus(isCanceled ? 'CANCELED' : 'FAILED');
+        setUploadError(isCanceled ? 'అప్‌లోడ్ రద్దు చేయబడింది' : (uploadErr.message || 'స్టోరేజ్ అప్‌లోడ్ లోపం'));
+
+        if (isCanceled) {
+          setUploadProgress(null);
+          return;
+        }
+
+        // Allow fallback with local extracted text if user chooses
         sourceDocInfo = {
           name: selectedFile.name,
           type: parseResult.fileType,
@@ -107,7 +154,7 @@ export const DocumentImportTab: React.FC<DocumentImportTabProps> = ({
           extractedWordCount: parseResult.wordCount
         };
       } finally {
-        setUploadProgress(null);
+        cancelTaskRef.current = null;
       }
     }
 
@@ -118,6 +165,9 @@ export const DocumentImportTab: React.FC<DocumentImportTabProps> = ({
     setSelectedFile(null);
     setParseResult(null);
     setCustomError(null);
+    setUploadError(null);
+    setUploadProgress(null);
+    setUploadStatus('IDLE');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -280,12 +330,75 @@ export const DocumentImportTab: React.FC<DocumentImportTabProps> = ({
               id="uploadSourceToCloud"
               checked={uploadSourceToCloud}
               onChange={(e) => setUploadSourceToCloud(e.target.checked)}
-              className="rounded accent-[#7A284B] cursor-pointer"
+              disabled={uploadProgress !== null}
+              className="rounded accent-[#7A284B] cursor-pointer disabled:opacity-50"
             />
             <label htmlFor="uploadSourceToCloud" className="cursor-pointer select-none">
               అసలు పత్రాన్ని (Original Document) కూడా కథతో పాటు క్లౌడ్ స్టోరేజ్‌లో భద్రపరచండి
             </label>
           </div>
+
+          {/* Active Cloud Upload Progress Card */}
+          {uploadProgress !== null && (
+            <div className="p-4 rounded-xl border border-[#7A284B]/20 bg-[#7A284B]/5 dark:bg-[#7A284B]/10 space-y-2.5">
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-[#17151A] dark:text-[#F7F3EE]">
+                    క్లౌడ్ స్టోరేజ్ అప్‌లోడ్
+                  </span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    uploadStatus === 'COMPLETE' ? 'bg-[#3E8065] text-white' :
+                    uploadStatus === 'UPLOADING' ? 'bg-[#7A284B] text-white' :
+                    uploadStatus === 'FAILED' ? 'bg-red-600 text-white' :
+                    'bg-purple-600 text-white'
+                  }`}>
+                    {uploadStatus}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[11px] text-[#6F6970] dark:text-[#AAA4AC]">
+                    {formatBytes(bytesTransferred)} / {formatBytes(totalBytes)} ({uploadProgress}%)
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={handleCancelUpload}
+                    className="p-1 rounded text-red-500 hover:bg-red-500/10 cursor-pointer"
+                    title="అప్‌లోడ్ రద్దు చేయండి (Cancel)"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Progress bar */}
+              <div className="w-full h-1.5 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+                <div
+                  className="h-full bg-[#7A284B] rounded-full transition-all duration-200"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Upload Error Banner */}
+          {uploadError && (
+            <div className="p-3 rounded-xl border border-red-500/30 bg-red-500/10 text-xs text-red-600 dark:text-red-400 flex items-start justify-between gap-2">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{uploadError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleApplyToEditor}
+                className="px-2.5 py-1 rounded bg-red-600 hover:bg-red-700 text-white font-bold text-[10px] inline-flex items-center gap-1 shrink-0 cursor-pointer"
+              >
+                <RotateCcw className="w-3 h-3" />
+                <span>Retry</span>
+              </button>
+            </div>
+          )}
 
           {/* Transfer to Editor Action */}
           <div className="pt-2 flex items-center justify-end gap-3">

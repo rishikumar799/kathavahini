@@ -18,5 +18,6 @@ export * from './contactService';
 export * from './auditLogService';
 export * from './storageService';
 export * from './adminService';
+export * from './announcementService';
 export * from './libraryService';
 export * from './mockData';

@@ -94,7 +94,7 @@ export const CoverImageUploader: React.FC<CoverImageUploaderProps> = ({
   targetType = 'story',
   targetId,
   label = 'కవర్ చిత్రం (Cover Image)',
-  helperText = 'JPG, PNG, WEBP ఫార్మాట్లు (గరిష్టంగా 5MB)',
+  helperText = 'JPG, PNG, WEBP ఫార్మాట్లు (గరిష్టంగా 10MB)',
   disabled = false,
   className = '',
   entityId,
@@ -167,8 +167,9 @@ export const CoverImageUploader: React.FC<CoverImageUploaderProps> = ({
     setTotalBytes(file.size);
     setBytesTransferred(0);
 
-    // Validate file
-    const validation = storageService.validateImageFile(file);
+    // Validate file with appropriate limits (10MB for stories/novels/knowledge, 5MB for profile)
+    const maxAllowedSize = (effectiveTargetType === 'profile' || effectiveTargetType === 'writer') ? 5 * 1024 * 1024 : 10 * 1024 * 1024;
+    const validation = storageService.validateImageFile(file, maxAllowedSize);
     if (!validation.isValid) {
       setErrorMsg(validation.error || 'సరైన చిత్రాన్ని ఎంచుకోండి');
       setUploadStatus('FAILED');

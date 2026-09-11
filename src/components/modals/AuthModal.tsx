@@ -13,7 +13,8 @@ import {
   AlertCircle,
   FileText,
   Eye,
-  EyeOff
+  EyeOff,
+  Clock
 } from 'lucide-react';
 import { authService } from '../../services/authService';
 import { StoryCategory } from '../../types';
@@ -85,6 +86,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [writerSuccessNotice, setWriterSuccessNotice] = useState(false);
+  const [pendingWriterNotice, setPendingWriterNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -276,11 +278,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       });
 
       setLoading(false);
-      setWriterSuccessNotice(true);
-      setTimeout(() => {
-        onSuccess();
-        onClose();
-      }, 3000);
+      // DO NOT add writer account or direct login.
+      // DO NOT redirect to dashboard.
+      // Show login page only and let them wait until admin approves.
+      setEmail(trimmedEmail);
+      setPassword('');
+      setConfirmPassword('');
+      setError('');
+      setPendingWriterNotice('మీ రచయిత ఖాతా అభ్యర్థన విజయవంతంగా అడ్మిన్ ప్యానెల్‌కు పంపబడింది. కథావాహిని అడ్మిన్ పరిశీలించి ఆమోదించిన తర్వాత మాత్రమే మీరు లాగిన్ అవ్వగలరు. అప్పటివరకు దయచేసి వేచి ఉండండి.');
+      setMode('login');
     } catch (err: any) {
       console.error('Writer registration error:', err);
       setError(authService.getErrorMessage(err));
@@ -351,6 +357,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               onClick={() => {
                 setMode('register');
                 setError('');
+                setPendingWriterNotice(null);
               }}
               className={`flex-1 py-2 rounded-xl text-xs font-bold font-serif-telugu transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                 mode === 'register'
@@ -375,6 +382,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             >
               ← తిరిగి లాగిన్‌కు వెళ్లండి (Back to Login)
             </button>
+          </div>
+        )}
+
+        {/* Pending Writer Waiting Notice (Shown on Login Screen after signup) */}
+        {mode === 'login' && pendingWriterNotice && (
+          <div className="p-4 mb-4 rounded-2xl bg-amber-500/15 border border-amber-500/30 text-amber-950 dark:text-amber-200 text-left space-y-2 animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400">
+              <Clock className="w-5 h-5 shrink-0" />
+              <h4 className="font-bold text-xs sm:text-sm font-serif-telugu">
+                రచయిత ఖాతా అభ్యర్థన పంపబడింది (Writer Request Sent to Admin)
+              </h4>
+            </div>
+            <p className="text-xs font-serif-telugu leading-relaxed text-amber-900 dark:text-amber-200">
+              {pendingWriterNotice}
+            </p>
+            <div className="text-[11px] font-sans font-medium text-amber-800 dark:text-amber-300 bg-amber-500/10 p-2 rounded-lg border border-amber-500/20">
+              ⏳ అడ్మిన్ మీ దరఖాస్తును సమీక్షించి ఆమోదించే వరకు లాగిన్ సాధ్యపడదు. దయచేసి వేచి ఉండండి.
+            </div>
           </div>
         )}
 

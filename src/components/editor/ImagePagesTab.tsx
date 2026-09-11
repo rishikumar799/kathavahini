@@ -7,17 +7,31 @@ import {
   ArrowDown, 
   Loader2, 
   Plus, 
-  CheckCircle,
+  CheckCircle2,
   Eye,
-  AlertCircle
+  AlertCircle,
+  X,
+  RotateCcw
 } from 'lucide-react';
 import { StoryImagePage } from '../../types';
-import { storageService } from '../../services/storageService';
+import { storageService, UploadProgressInfo, UploadStatus } from '../../services/storageService';
 
 interface ImagePagesTabProps {
   imagePages: StoryImagePage[];
   onChange: (pages: StoryImagePage[]) => void;
   storyId?: string;
+}
+
+interface UploadQueueItem {
+  id: string;
+  file: File;
+  name: string;
+  status: UploadStatus;
+  percent: number;
+  bytesTransferred: number;
+  totalBytes: number;
+  error?: string;
+  cancelFn?: () => void;
 }
 
 export const ImagePagesTab: React.FC<ImagePagesTabProps> = ({
@@ -26,62 +40,166 @@ export const ImagePagesTab: React.FC<ImagePagesTabProps> = ({
   storyId = `story-${Date.now()}`
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploadingFiles, setUploadingFiles] = useState<{ [fileName: string]: number }>({});
+  const [uploadQueue, setUploadQueue] = useState<UploadQueueItem[]>([]);
   const [previewImage, setPreviewImage] = useState<StoryImagePage | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const formatBytes = (bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${(bytes / Math.pow(k, i)).toFixed(1)} ${sizes[i]}`;
+  };
+
+  const processUploadQueue = async (itemsToUpload: UploadQueueItem[], currentPages: StoryImagePage[]) => {
+    const concurrency = 2;
+    let nextIndex = 0;
+    let pagesAccumulator = [...currentPages];
+
+    const uploadSingleItem = async (item: UploadQueueItem) => {
+      // Validate with 10MB limit for story page images
+      const validation = storageService.validateImageFile(item.file, 10 * 1024 * 1024);
+      if (!validation.isValid) {
+        setUploadQueue(prev => prev.map(q => q.id === item.id ? {
+          ...q,
+          status: 'FAILED',
+          error: validation.error || 'చిత్రం చెల్లదు'
+        } : q));
+        return;
+      }
+
+      setUploadQueue(prev => prev.map(q => q.id === item.id ? {
+        ...q,
+        status: 'UPLOADING',
+        percent: 0,
+        bytesTransferred: 0,
+        totalBytes: item.file.size
+      } : q));
+
+      try {
+        const pageId = `page_${pagesAccumulator.length + 1}`;
+        const uploadRes = await storageService.uploadStoryPageImage(storyId, pageId, item.file, {
+          onProgress: (pct, info?: UploadProgressInfo) => {
+            setUploadQueue(prev => prev.map(q => q.id === item.id ? {
+              ...q,
+              status: info?.status || 'UPLOADING',
+              percent: pct,
+              bytesTransferred: info?.bytesTransferred || 0,
+              totalBytes: info?.totalBytes || item.file.size,
+            } : q));
+          },
+          onTaskCreated: (handle) => {
+            setUploadQueue(prev => prev.map(q => q.id === item.id ? {
+              ...q,
+              cancelFn: () => handle.cancel()
+            } : q));
+          }
+        });
+
+        // Mark complete in queue
+        setUploadQueue(prev => prev.map(q => q.id === item.id ? {
+          ...q,
+          status: 'COMPLETE',
+          percent: 100,
+          bytesTransferred: item.file.size,
+          totalBytes: item.file.size,
+          cancelFn: undefined
+        } : q));
+
+        // Append page
+        const newPage: StoryImagePage = {
+          id: `page-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+          pageNumber: pagesAccumulator.length + 1,
+          imageUrl: uploadRes.downloadUrl,
+          imagePath: uploadRes.storagePath,
+          imageMetadata: uploadRes.metadata,
+          caption: '',
+          altText: `పేజీ ${pagesAccumulator.length + 1}`
+        };
+
+        pagesAccumulator = [...pagesAccumulator, newPage];
+        onChange([...pagesAccumulator]);
+      } catch (err: any) {
+        console.error('Upload failed for item:', item.name, err);
+        const isCancel = err.code === 'storage/canceled';
+        setUploadQueue(prev => prev.map(q => q.id === item.id ? {
+          ...q,
+          status: isCancel ? 'CANCELED' : 'FAILED',
+          error: isCancel ? 'అప్‌లోడ్ రద్దు చేయబడింది' : (err.message || 'అప్‌లోడ్ లోపం'),
+          cancelFn: undefined
+        } : q));
+      }
+    };
+
+    const worker = async () => {
+      while (nextIndex < itemsToUpload.length) {
+        const currentItem = itemsToUpload[nextIndex++];
+        await uploadSingleItem(currentItem);
+      }
+    };
+
+    const workers = [];
+    const count = Math.min(concurrency, itemsToUpload.length);
+    for (let i = 0; i < count; i++) {
+      workers.push(worker());
+    }
+
+    await Promise.all(workers);
+  };
 
   const handleFilesSelected = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     setErrorMsg(null);
 
     const fileArray = Array.from(files);
-    const validFiles: File[] = [];
+    const newItems: UploadQueueItem[] = fileArray.map(file => ({
+      id: `queue-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+      file,
+      name: file.name,
+      status: 'QUEUED',
+      percent: 0,
+      bytesTransferred: 0,
+      totalBytes: file.size,
+    }));
 
-    for (const file of fileArray) {
-      const validation = storageService.validateImageFile(file);
-      if (!validation.isValid) {
-        setErrorMsg(validation.error || 'చిత్రం చెల్లదు');
-        return;
-      }
-      validFiles.push(file);
+    setUploadQueue(prev => [...prev, ...newItems]);
+    await processUploadQueue(newItems, imagePages);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
+  };
 
-    // Upload each valid image sequentially with progress
-    const newPages: StoryImagePage[] = [...imagePages];
-    let startPageNumber = imagePages.length + 1;
+  const handleRetryItem = async (itemId: string) => {
+    const item = uploadQueue.find(q => q.id === itemId);
+    if (!item) return;
 
-    for (const file of validFiles) {
-      const tempKey = `${file.name}-${Date.now()}`;
-      setUploadingFiles(prev => ({ ...prev, [tempKey]: 0 }));
+    const resetItem: UploadQueueItem = {
+      ...item,
+      status: 'QUEUED',
+      percent: 0,
+      bytesTransferred: 0,
+      error: undefined,
+    };
 
-      try {
-        const uploadRes = await storageService.uploadStoryContentImage(storyId, file, (percent) => {
-          setUploadingFiles(prev => ({ ...prev, [tempKey]: percent }));
-        });
+    setUploadQueue(prev => prev.map(q => q.id === itemId ? resetItem : q));
+    await processUploadQueue([resetItem], imagePages);
+  };
 
-        newPages.push({
-          id: `page-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-          pageNumber: startPageNumber++,
-          imageUrl: uploadRes.downloadUrl,
-          imagePath: uploadRes.storagePath,
-          imageMetadata: uploadRes.metadata,
-          caption: '',
-          altText: `పేజీ ${startPageNumber - 1}`
-        });
-
-        // Update parent immediately so pages render as they finish
-        onChange([...newPages]);
-      } catch (err: any) {
-        console.error('Error uploading page image:', err);
-        setErrorMsg(`"${file.name}" అప్‌లోడ్ చేయడంలో విఫలమైంది: ${err.message || 'నెట్‌వర్క్ లోపం'}`);
-      } finally {
-        setUploadingFiles(prev => {
-          const next = { ...prev };
-          delete next[tempKey];
-          return next;
-        });
-      }
+  const handleCancelItem = (itemId: string) => {
+    const item = uploadQueue.find(q => q.id === itemId);
+    if (item?.cancelFn) {
+      item.cancelFn();
     }
+  };
+
+  const handleRemoveQueueItem = (itemId: string) => {
+    setUploadQueue(prev => prev.filter(q => q.id !== itemId));
+  };
+
+  const handleClearFinishedQueue = () => {
+    setUploadQueue(prev => prev.filter(q => q.status === 'UPLOADING' || q.status === 'VALIDATING' || q.status === 'PROCESSING'));
   };
 
   const handleMovePage = (index: number, direction: 'up' | 'down') => {
@@ -92,7 +210,6 @@ export const ImagePagesTab: React.FC<ImagePagesTabProps> = ({
     const [moved] = reordered.splice(index, 1);
     reordered.splice(targetIndex, 0, moved);
 
-    // Re-index page numbers
     const updated = reordered.map((p, idx) => ({
       ...p,
       pageNumber: idx + 1
@@ -108,7 +225,6 @@ export const ImagePagesTab: React.FC<ImagePagesTabProps> = ({
     }));
     onChange(remaining);
 
-    // Optionally cleanup Firebase Storage in background
     if (target?.imagePath) {
       storageService.deleteFileByPath(target.imagePath).catch(() => {});
     }
@@ -120,7 +236,8 @@ export const ImagePagesTab: React.FC<ImagePagesTabProps> = ({
     onChange(updated);
   };
 
-  const isUploading = Object.keys(uploadingFiles).length > 0;
+  const activeUploadsCount = uploadQueue.filter(q => q.status === 'UPLOADING' || q.status === 'VALIDATING' || q.status === 'PROCESSING').length;
+  const isUploading = activeUploadsCount > 0;
 
   return (
     <div className="space-y-6">
@@ -168,28 +285,136 @@ export const ImagePagesTab: React.FC<ImagePagesTabProps> = ({
         </div>
       )}
 
-      {/* Active Uploading Status Indicators */}
-      {isUploading && (
+      {/* Real Upload Queue Indicators */}
+      {uploadQueue.length > 0 && (
         <div className="p-4 rounded-2xl bg-[#FAF7F2] dark:bg-[#18181D] border border-[#E8E1DA] dark:border-[#2E2D36] space-y-3">
-          <div className="flex items-center gap-2 text-xs font-bold text-[#7A284B] dark:text-[#D87591]">
-            <Loader2 className="w-4 h-4 animate-spin" />
-            <span>చిత్రాలు అప్‌లోడ్ అవుతున్నాయి...</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs font-bold text-[#7A284B] dark:text-[#D87591]">
+              {isUploading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-[#7A284B]" />
+                  <span>చిత్రాలు అప్‌లోడ్ అవుతున్నాయి ({activeUploadsCount} క్యూలో / ప్రాసెస్‌లో)...</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4 text-[#3E8065]" />
+                  <span>అప్‌లోడ్ ప్రక్రియ పూర్తయింది</span>
+                </>
+              )}
+            </div>
+
+            {!isUploading && (
+              <button
+                type="button"
+                onClick={handleClearFinishedQueue}
+                className="text-[11px] text-[#6F6970] dark:text-[#AAA4AC] hover:text-[#7A284B] font-medium cursor-pointer"
+              >
+                క్యూను క్లియర్ చేయండి
+              </button>
+            )}
           </div>
-          <div className="space-y-2">
-            {Object.entries(uploadingFiles).map(([key, percent]) => (
-              <div key={key} className="space-y-1">
-                <div className="flex items-center justify-between text-[11px] text-[#6F6970] dark:text-[#AAA4AC]">
-                  <span className="truncate max-w-[200px]">{key.split('-')[0]}</span>
-                  <span>{percent}%</span>
+
+          <div className="space-y-2.5">
+            {uploadQueue.map((item) => {
+              const isItemActive = item.status === 'UPLOADING' || item.status === 'VALIDATING' || item.status === 'PROCESSING';
+              const isItemFailed = item.status === 'FAILED';
+              const isItemCanceled = item.status === 'CANCELED';
+              const isItemComplete = item.status === 'COMPLETE';
+
+              return (
+                <div 
+                  key={item.id} 
+                  className={`p-3 rounded-xl border text-xs transition-all ${
+                    isItemFailed ? 'border-red-500/30 bg-red-500/5' :
+                    isItemComplete ? 'border-[#3E8065]/30 bg-[#3E8065]/5' :
+                    isItemCanceled ? 'border-amber-500/30 bg-amber-500/5' :
+                    'border-[#E8E1DA] dark:border-[#2E2D36] bg-white dark:bg-[#202027]'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-semibold text-[#17151A] dark:text-[#F7F3EE] truncate max-w-[200px] sm:max-w-xs">
+                        {item.name}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                        item.status === 'COMPLETE' ? 'bg-[#3E8065] text-white' :
+                        item.status === 'UPLOADING' ? 'bg-[#7A284B] text-white' :
+                        item.status === 'VALIDATING' ? 'bg-blue-600 text-white' :
+                        item.status === 'PROCESSING' ? 'bg-purple-600 text-white' :
+                        item.status === 'CANCELED' ? 'bg-amber-600 text-white' :
+                        item.status === 'FAILED' ? 'bg-red-600 text-white' :
+                        'bg-gray-400 text-white'
+                      }`}>
+                        {item.status}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-[11px] font-mono text-[#6F6970] dark:text-[#AAA4AC]">
+                        {formatBytes(item.bytesTransferred)} / {formatBytes(item.totalBytes)} ({item.percent}%)
+                      </span>
+
+                      {/* Cancel active upload */}
+                      {isItemActive && item.cancelFn && (
+                        <button
+                          type="button"
+                          onClick={() => handleCancelItem(item.id)}
+                          className="p-1 text-[#6F6970] hover:text-red-500 rounded hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer"
+                          title="రద్దు చేయండి (Cancel)"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+
+                      {/* Retry failed upload */}
+                      {isItemFailed && (
+                        <button
+                          type="button"
+                          onClick={() => handleRetryItem(item.id)}
+                          className="px-2 py-0.5 rounded bg-[#7A284B] text-white text-[10px] font-bold hover:bg-[#631F3C] inline-flex items-center gap-1 cursor-pointer"
+                          title="మళ్లీ ప్రయత్నించండి"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Retry</span>
+                        </button>
+                      )}
+
+                      {/* Remove from queue if not active */}
+                      {!isItemActive && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveQueueItem(item.id)}
+                          className="p-1 text-[#6F6970] hover:text-red-500 rounded hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer"
+                          title="తొలగించు"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Progress Bar */}
+                  <div className="w-full h-1.5 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-200 rounded-full ${
+                        isItemFailed ? 'bg-red-500' :
+                        isItemComplete ? 'bg-[#3E8065]' :
+                        isItemCanceled ? 'bg-amber-500' :
+                        'bg-[#7A284B]'
+                      }`}
+                      style={{ width: `${item.percent}%` }}
+                    />
+                  </div>
+
+                  {/* Error / diagnostic details */}
+                  {item.error && (
+                    <p className="text-[11px] text-red-600 dark:text-red-400 mt-1.5 leading-snug">
+                      {item.error}
+                    </p>
+                  )}
                 </div>
-                <div className="w-full h-1.5 rounded-full bg-black/10 dark:bg-white/10 overflow-hidden">
-                  <div
-                    className="h-full bg-[#7A284B] transition-all duration-300 rounded-full"
-                    style={{ width: `${percent}%` }}
-                  />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

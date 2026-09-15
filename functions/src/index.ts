@@ -19,6 +19,7 @@ export async function executeScheduledPublication(): Promise<{
   publishedEpisodes: number;
   publishedJokes: number;
   publishedKnowledge: number;
+  publishedAnnouncements: number;
   timestamp: string;
 }> {
   const now = admin.firestore.Timestamp.now();
@@ -80,7 +81,7 @@ export async function executeScheduledPublication(): Promise<{
         targetId: docSnap.id,
         targetTitle: `Story "${data.title || data.teluguTitle || docSnap.id}" auto-published by backend scheduler`,
         performedBy: 'system_scheduler',
-        performedByEmail: 'scheduler@akshara.internal',
+        performedByEmail: 'scheduler@kathavahini.internal',
         timestamp: now,
         metadata: {
           scheduledAt: scheduledAtTs,
@@ -280,7 +281,7 @@ export const publishScheduledContent = functions.onSchedule(
     retryCount: 3,
     memory: '256MiB',
   },
-  async (event) => {
+  async (event: any) => {
     console.log('Starting automated scheduled content publisher at:', event.scheduleTime);
     const result = await executeScheduledPublication();
     console.log('Automated scheduler execution summary:', result);
@@ -295,7 +296,7 @@ export const publishScheduledContentHttp = onRequest(
     cors: true,
     region: 'us-central1',
   },
-  async (req, res) => {
+  async (req: any, res: any) => {
     try {
       const result = await executeScheduledPublication();
       res.status(200).json({

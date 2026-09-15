@@ -397,6 +397,10 @@ class AnnouncementService {
       }
     });
 
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('kathavahini:announcements-updated'));
+    }
+
     return newDocRef.id;
   }
 
@@ -437,6 +441,10 @@ class AnnouncementService {
         performedByEmail: adminUser?.email || ADMIN_EMAIL,
       }
     });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('kathavahini:announcements-updated'));
+    }
   }
 
   /**
@@ -472,6 +480,10 @@ class AnnouncementService {
         performedByEmail: adminUser?.email || ADMIN_EMAIL,
       }
     });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('kathavahini:announcements-updated'));
+    }
   }
 
   /**
@@ -506,6 +518,10 @@ class AnnouncementService {
         performedByEmail: adminUser?.email || ADMIN_EMAIL,
       }
     });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('kathavahini:announcements-updated'));
+    }
   }
 }
 

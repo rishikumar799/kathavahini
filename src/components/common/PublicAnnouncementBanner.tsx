@@ -48,9 +48,26 @@ export const PublicAnnouncementBanner: React.FC<PublicAnnouncementBannerProps> =
 
     fetchAndScheduleAnnouncement();
 
+    const handleAnnouncementsUpdated = () => {
+      announcementService.getActiveAnnouncementsForUser(currentUser).then((activeList) => {
+        if (!isMounted) return;
+        if (activeList.length === 0) {
+          setIsVisible(false);
+          setAnnouncement(null);
+        } else {
+          const top = activeList[0];
+          setAnnouncement(top);
+          setIsVisible(true);
+        }
+      }).catch(() => {});
+    };
+
+    window.addEventListener('kathavahini:announcements-updated', handleAnnouncementsUpdated);
+
     return () => {
       isMounted = false;
       if (timerId) clearTimeout(timerId);
+      window.removeEventListener('kathavahini:announcements-updated', handleAnnouncementsUpdated);
     };
   }, [currentUser]);
 

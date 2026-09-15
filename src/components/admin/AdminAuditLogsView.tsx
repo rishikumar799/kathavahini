@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { History, ShieldCheck, Search, Filter, Calendar } from 'lucide-react';
 import { AdminAuditLog } from '../../types';
+import { formatSafeDateTime } from '../../utils/dateUtils';
 
 interface AdminAuditLogsViewProps {
   logs: AdminAuditLog[];
@@ -73,7 +74,7 @@ export const AdminAuditLogsView: React.FC<AdminAuditLogsViewProps> = ({ logs }) 
               </div>
 
               <div className="text-[11px] text-[#6F6970] dark:text-[#A29CA6] shrink-0 font-mono">
-                {new Date(log.createdAt).toLocaleString('te-IN')}
+                {formatSafeDateTime(log.createdAt || (log as any).timestamp)}
               </div>
             </div>
           ))

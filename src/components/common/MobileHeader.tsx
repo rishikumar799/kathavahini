@@ -266,6 +266,13 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
                   <Shield className="w-4 h-4 text-[#6F6970]" />
                   <span>కంటెంట్ & కాపీరైట్ విధానం</span>
                 </button>
+                <button
+                  onClick={() => handleNav('admin')}
+                  className="w-full flex items-center gap-2.5 py-2 px-2 text-sm text-purple-700 dark:text-purple-400 font-medium"
+                >
+                  <Shield className="w-4 h-4 text-purple-600" />
+                  <span>అడ్మిన్ లాగిన్ పోర్టల్ (Admin)</span>
+                </button>
               </div>
             </div>
 

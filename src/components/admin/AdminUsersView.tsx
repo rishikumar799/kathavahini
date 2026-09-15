@@ -13,7 +13,8 @@ import {
   Calendar,
   AlertCircle,
   UserPlus,
-  ArrowUpRight
+  ArrowUpRight,
+  Trash2
 } from 'lucide-react';
 import { User, UserRole, AccountStatus } from '../../types';
 
@@ -22,6 +23,7 @@ interface AdminUsersViewProps {
   onToggleStatus: (user: User, newStatus: AccountStatus) => void;
   onPromoteToWriter?: (user: User) => void;
   onOpenAddUser?: () => void;
+  onDeleteUser?: (user: User) => void;
   actionLoading: boolean;
   filterRole?: 'all' | 'reader' | 'writer' | 'admin';
 }
@@ -31,6 +33,7 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   onToggleStatus,
   onPromoteToWriter,
   onOpenAddUser,
+  onDeleteUser,
   actionLoading,
   filterRole = 'all',
 }) => {
@@ -281,11 +284,27 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                               className={`p-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                                 isSuspended
                                   ? 'bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20'
-                                  : 'bg-red-500/10 text-red-600 hover:bg-red-500/20'
+                                  : 'bg-amber-500/10 text-amber-600 hover:bg-amber-500/20'
                               }`}
                               title={isSuspended ? 'ఖాతాను పునరుద్ధరించండి' : 'ఖాతాను సస్పెండ్ చేయండి'}
                             >
                               {isSuspended ? <UserCheck className="w-4 h-4" /> : <UserX className="w-4 h-4" />}
+                            </button>
+                          )}
+
+                          {/* Delete User */}
+                          {!isAdmin && onDeleteUser && (
+                            <button
+                              onClick={() => {
+                                if (window.confirm(`మీరు "${user.displayName || user.name}" యూజర్‌ను తొలగించాలనుకుంటున్నారా?`)) {
+                                  onDeleteUser(user);
+                                }
+                              }}
+                              disabled={actionLoading}
+                              className="p-1.5 rounded-xl text-xs font-bold bg-red-500/10 text-red-600 hover:bg-red-500/20 transition-all cursor-pointer"
+                              title="యూజర్‌ను తొలగించండి (Delete)"
+                            >
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           )}
                         </div>

@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { WriterApplication, Story, User, AdminAuditLog } from '../../types';
 import { AdminTab } from './AdminSidebar';
+import { formatSafeDate, formatSafeDateTime } from '../../utils/dateUtils';
 
 interface AdminOverviewViewProps {
   counts: {
@@ -248,7 +249,7 @@ export const AdminOverviewView: React.FC<AdminOverviewViewProps> = ({
                         </span>
                       </div>
                       <p className="text-[10px] text-[#6F6970] dark:text-[#A29CA6] truncate">
-                        {app.email || app.mobileNumber || 'సమర్పణ: ' + new Date(app.submittedAt).toLocaleDateString()}
+                        {app.email || app.mobileNumber || 'సమర్పణ: ' + formatSafeDate(app.submittedAt)}
                       </p>
                     </div>
 
@@ -386,7 +387,7 @@ export const AdminOverviewView: React.FC<AdminOverviewViewProps> = ({
                 </span>
               </div>
               <span className="text-[10px] text-[#6F6970] dark:text-[#A29CA6] shrink-0 font-mono">
-                {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {formatSafeDateTime(log.createdAt || (log as any).timestamp)}
               </span>
             </div>
           ))}

@@ -78,6 +78,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenWrite }) => {
               <li><button onClick={() => onSelectTab('terms')} className="hover:text-white transition-colors cursor-pointer text-left">నిబంధనలు & షరతులు</button></li>
               <li><button onClick={() => onSelectTab('cookie-policy')} className="hover:text-white transition-colors cursor-pointer text-left">కుకీస్ విధానం</button></li>
               <li><button onClick={() => onSelectTab('content-policy')} className="hover:text-white transition-colors cursor-pointer text-left">కంటెంట్ & కాపీరైట్</button></li>
+              <li className="pt-1"><button onClick={() => onSelectTab('admin')} className="hover:text-purple-400 text-purple-300/80 transition-colors cursor-pointer text-left flex items-center gap-1.5 font-medium"><Shield className="w-3 h-3 text-purple-400" /><span>అడ్మిన్ పోర్టల్ (Admin Login)</span></button></li>
             </ul>
           </div>
         </div>

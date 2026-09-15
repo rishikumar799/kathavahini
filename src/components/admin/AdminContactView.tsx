@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Mail, CheckCircle2, Clock, Check, Phone } from 'lucide-react';
 import { ContactSubmission } from '../../types';
+import { formatSafeDateTime } from '../../utils/dateUtils';
 
 interface AdminContactViewProps {
   contacts: ContactSubmission[];
@@ -89,7 +90,7 @@ export const AdminContactView: React.FC<AdminContactViewProps> = ({
                     ({item.email}) {item.phone && `• ఫోన్: ${item.phone}`}
                   </span>
                   <span className="text-[10px] text-[#6F6970] dark:text-[#A29CA6]">
-                    • {new Date(item.createdAt).toLocaleString('te-IN')}
+                    • {formatSafeDateTime(item.createdAt)}
                   </span>
                 </div>
 

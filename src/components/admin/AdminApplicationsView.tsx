@@ -16,6 +16,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { WriterApplication } from '../../types';
+import { formatSafeDate } from '../../utils/dateUtils';
 
 interface AdminApplicationsViewProps {
   applications: WriterApplication[];
@@ -154,12 +155,7 @@ export const AdminApplicationsView: React.FC<AdminApplicationsViewProps> = ({
                       {isPending ? 'సమీక్షలో ఉంది (Pending)' : isApproved ? 'ఆమోదించబడింది (Approved)' : 'తిరస్కరించబడింది (Rejected)'}
                     </span>
                     <span className="text-xs text-[#6F6970] dark:text-[#A29CA6]">
-                      తేదీ: {(() => {
-                        const ts = (app as any).submittedAt || (app as any).createdAt;
-                        if (!ts) return new Date().toLocaleDateString('te-IN');
-                        const d = ts.toDate ? ts.toDate() : new Date(ts);
-                        return isNaN(d.getTime()) ? new Date().toLocaleDateString('te-IN') : d.toLocaleDateString('te-IN');
-                      })()}
+                      తేదీ: {formatSafeDate((app as any).submittedAt || (app as any).createdAt)}
                     </span>
                   </div>
 

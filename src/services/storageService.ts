@@ -509,47 +509,49 @@ export class StorageService {
         throw err;
       }
 
-      // If image asset (avatar, cover, page, announcement), gracefully fall back to optimized inline asset
-      // This ensures avatar & image uploads never fail with network timeout errors when Cloud Storage bucket is unprovisioned
+      // Gracefully fall back to inline asset if Firebase Cloud Storage is unprovisioned or network times out
+      // This ensures avatar, image, and document/PDF uploads never fail with network timeout errors
+      console.warn('Firebase Cloud Storage unavailable, seamlessly activating client-side fallback:', err?.message || err);
+      notify(90, {
+        status: 'PROCESSING',
+        percent: 90,
+        bytesTransferred: fileToUpload.size,
+        totalBytes: fileToUpload.size,
+        fileName: fileToUpload.name,
+      });
+
+      let dataUrl = '';
       if (!isDoc) {
-        console.warn('Firebase Cloud Storage unavailable, seamlessly activating client-side fallback:', err?.message || err);
-        notify(90, {
-          status: 'PROCESSING',
-          percent: 90,
-          bytesTransferred: fileToUpload.size,
-          totalBytes: fileToUpload.size,
-          fileName: fileToUpload.name,
-        });
-
-        const dataUrl = optResult?.dataUrl || await this.fileToDataUrl(fileToUpload);
-
-        notify(100, {
-          status: 'COMPLETE',
-          percent: 100,
-          bytesTransferred: fileToUpload.size,
-          totalBytes: fileToUpload.size,
-          fileName: fileToUpload.name,
-        });
-
-        return {
-          downloadUrl: dataUrl,
-          storagePath: `inline:${storagePath}`,
-          metadata: {
-            fileName: rawFile.name,
-            contentType: fileToUpload.type || 'image/webp',
-            size: fileToUpload.size,
-            uploadedAt: new Date().toISOString(),
-            ownerId,
-            ownerRole,
-            contentId,
-            assetType,
-            width: imageWidth,
-            height: imageHeight,
-          },
-        };
+        dataUrl = optResult?.dataUrl || await this.fileToDataUrl(fileToUpload);
+      } else if (fileToUpload.size <= 10 * 1024 * 1024) {
+        // Embed PDF/Doc up to 10MB as data URL safely
+        dataUrl = await this.fileToDataUrl(fileToUpload).catch(() => '');
       }
 
-      throw err;
+      notify(100, {
+        status: 'COMPLETE',
+        percent: 100,
+        bytesTransferred: fileToUpload.size,
+        totalBytes: fileToUpload.size,
+        fileName: fileToUpload.name,
+      });
+
+      return {
+        downloadUrl: dataUrl,
+        storagePath: `inline:${storagePath}`,
+        metadata: {
+          fileName: rawFile.name,
+          contentType: fileToUpload.type || (isDoc ? 'application/octet-stream' : 'image/webp'),
+          size: fileToUpload.size,
+          uploadedAt: new Date().toISOString(),
+          ownerId,
+          ownerRole,
+          contentId,
+          assetType,
+          width: imageWidth,
+          height: imageHeight,
+        },
+      };
     }
   }
 

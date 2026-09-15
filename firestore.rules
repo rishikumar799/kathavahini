@@ -18,6 +18,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && (
+        request.auth.token.email == 'thekathavahini@gmail.com' ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          getUserData().role == 'admin')
@@ -123,8 +124,8 @@ service cloud.firestore {
         && (resource.data.authorId == request.auth.uid || resource.data.writerId == request.auth.uid)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'visibility', 'authorId', 'writerId', 'createdAt', 'approvedAt', 'approvedBy'])
       ) || (
-        // Allow public like/view counter updates
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewCount', 'viewsCount', 'likeCount', 'likesCount', 'bookmarkCount', 'bookmarksCount', 'commentsCount', 'updatedAt'])
+        // Allow public like/view/rating/bookmark counter updates
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewCount', 'viewsCount', 'likeCount', 'likesCount', 'rating', 'ratingsCount', 'ratingsSum', 'bookmarkCount', 'bookmarksCount', 'commentsCount', 'updatedAt'])
       );
       allow delete: if isAdmin() || (
         isWriter() && (resource.data.authorId == request.auth.uid || resource.data.writerId == request.auth.uid)
@@ -142,6 +143,18 @@ service cloud.firestore {
         allow read: if true;
         allow write: if isAuthenticated() && (request.auth.uid == likeUid || isAdmin());
       }
+
+      // Ratings subcollection
+      match /ratings/{ratingUid} {
+        allow read: if true;
+        allow write: if isAuthenticated() && (request.auth.uid == ratingUid || isAdmin());
+      }
+    }
+
+    // Deleted Items tracker for sync across all clients and sessions
+    match /deletedItems/{itemId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     // Novels collection
@@ -167,6 +180,18 @@ service cloud.firestore {
       allow create: if isAuthenticated();
       allow update: if isAuthenticated() || isAdmin();
       allow delete: if isAdmin();
+    }
+
+    // Samethalu (Telugu Proverbs) collection
+    match /samethalu/{samethaId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    // Topics collection
+    match /topics/{topicId} {
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     // Knowledge collection

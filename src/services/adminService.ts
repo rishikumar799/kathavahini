@@ -41,10 +41,20 @@ import {
   StoryImagePage,
   SourceDocumentInfo
 } from '../types';
-import { MOCK_STORIES, MOCK_NOVELS, MOCK_JOKES, MOCK_CATEGORIES, MOCK_KNOWLEDGE_ARTICLES } from './mockData';
+import { 
+  MOCK_STORIES, 
+  MOCK_NOVELS, 
+  MOCK_JOKES, 
+  MOCK_CATEGORIES, 
+  MOCK_KNOWLEDGE_ARTICLES,
+  removeMockStory,
+  removeMockNovel,
+  removeMockJoke
+} from './mockData';
 import { auditLogService } from './auditLogService';
 import { notificationService } from './notificationService';
 import { storageService } from './storageService';
+import { deletionTracker } from './deletionTracker';
 
 // Firebase configuration for secondary auth instance (so Admin remains logged in during user creation)
 const firebaseConfig = {
@@ -87,6 +97,8 @@ class AdminService {
     unreadContacts: number;
   }> {
     try {
+      await deletionTracker.init();
+
       // 1. Pending Writer Applications
       const appSnap = await getDocs(query(collection(db, 'writerApplications'), where('status', '==', 'pending')));
       const pendingApplications = appSnap.size;
@@ -100,8 +112,12 @@ class AdminService {
       let hiddenCount = 0;
       let privateCount = 0;
 
+      const firestoreStoryIds = new Set<string>();
       storiesSnap.forEach(d => {
+        if (deletionTracker.isDeleted(d.id)) return;
         const data = d.data();
+        if (data.deleted || data.status === 'deleted') return;
+        firestoreStoryIds.add(d.id);
         const s = data.status;
         const v = data.visibility;
         if (s === 'pending') pendingStories++;
@@ -112,24 +128,48 @@ class AdminService {
         if (v === 'private') privateCount++;
       });
 
+      // Count undeleted mock stories that aren't overridden in firestore
+      MOCK_STORIES.forEach(m => {
+        if (!deletionTracker.isDeleted(m.id) && !firestoreStoryIds.has(m.id)) {
+          if (m.status === 'published' && m.visibility !== 'hidden' && m.visibility !== 'private') {
+            publishedStories++;
+          }
+        }
+      });
+
       // 3. Users breakdown
       const usersSnap = await getDocs(collection(db, 'users'));
-      let totalUsers = usersSnap.size;
+      let totalUsers = 0;
       let totalReaders = 0;
       let totalWriters = 0;
       usersSnap.forEach(d => {
-        const r = d.data().role;
+        if (deletionTracker.isDeleted(d.id)) return;
+        const data = d.data();
+        if (data.deleted || data.status === 'deleted') return;
+        totalUsers++;
+        const r = data.role;
         if (r === 'reader' || !r) totalReaders++;
         else if (r === 'writer' || r === 'author') totalWriters++;
       });
 
       // 4. Novels, Episodes, Jokes, Knowledge
       const [novelsSnap, episodesSnap, jokesSnap, knowledgeSnap] = await Promise.all([
-        getDocs(collection(db, 'novels')).catch(() => ({ size: 0 })),
-        getDocs(collection(db, 'episodes')).catch(() => ({ size: 0 })),
-        getDocs(collection(db, 'jokes')).catch(() => ({ size: 0 })),
-        getDocs(collection(db, 'knowledge')).catch(() => ({ size: 0 }))
+        getDocs(collection(db, 'novels')).catch(() => ({ size: 0, docs: [] } as any)),
+        getDocs(collection(db, 'episodes')).catch(() => ({ size: 0, docs: [] } as any)),
+        getDocs(collection(db, 'jokes')).catch(() => ({ size: 0, docs: [] } as any)),
+        getDocs(collection(db, 'knowledge')).catch(() => ({ size: 0, docs: [] } as any))
       ]);
+
+      const activeNovelsCount = (novelsSnap.docs || []).filter((d: any) => !deletionTracker.isDeleted(d.id) && !d.data()?.deleted).length
+        + MOCK_NOVELS.filter(n => !deletionTracker.isDeleted(n.id) && !(novelsSnap.docs || []).some((d: any) => d.id === n.id)).length;
+
+      const activeEpisodesCount = (episodesSnap.docs || []).filter((d: any) => !deletionTracker.isDeleted(d.id) && !d.data()?.deleted).length;
+
+      const activeJokesCount = (jokesSnap.docs || []).filter((d: any) => !deletionTracker.isDeleted(d.id) && !d.data()?.deleted).length
+        + MOCK_JOKES.filter(j => !deletionTracker.isDeleted(j.id) && !(jokesSnap.docs || []).some((d: any) => d.id === j.id)).length;
+
+      const activeKnowledgeCount = (knowledgeSnap.docs || []).filter((d: any) => !deletionTracker.isDeleted(d.id) && !d.data()?.deleted).length
+        + MOCK_KNOWLEDGE_ARTICLES.filter(k => !deletionTracker.isDeleted(k.id) && !(knowledgeSnap.docs || []).some((d: any) => d.id === k.id)).length;
 
       // 5. Reports & Contacts
       const reportsSnap = await getDocs(query(collection(db, 'issueReports'), where('status', '==', 'pending'))).catch(() => ({ size: 0 }));
@@ -138,7 +178,7 @@ class AdminService {
       return {
         pendingApplications,
         pendingStories,
-        publishedStories: Math.max(publishedStories, MOCK_STORIES.length),
+        publishedStories,
         draftsCount,
         scheduledCount,
         hiddenCount,
@@ -146,10 +186,10 @@ class AdminService {
         totalUsers: Math.max(totalUsers, 1),
         totalReaders: Math.max(totalReaders, 1),
         totalWriters,
-        totalNovels: Math.max(novelsSnap.size, MOCK_NOVELS.length),
-        totalEpisodes: episodesSnap.size,
-        totalJokes: Math.max(jokesSnap.size, MOCK_JOKES.length),
-        totalKnowledge: Math.max(knowledgeSnap.size, MOCK_KNOWLEDGE_ARTICLES.length),
+        totalNovels: activeNovelsCount,
+        totalEpisodes: activeEpisodesCount,
+        totalJokes: activeJokesCount,
+        totalKnowledge: activeKnowledgeCount,
         pendingReports: reportsSnap.size,
         unreadContacts: contactsSnap.size,
       };
@@ -158,7 +198,7 @@ class AdminService {
       return {
         pendingApplications: 0,
         pendingStories: 0,
-        publishedStories: MOCK_STORIES.length,
+        publishedStories: MOCK_STORIES.filter(s => !deletionTracker.isDeleted(s.id)).length,
         draftsCount: 0,
         scheduledCount: 0,
         hiddenCount: 0,
@@ -166,10 +206,10 @@ class AdminService {
         totalUsers: 1,
         totalReaders: 1,
         totalWriters: 0,
-        totalNovels: MOCK_NOVELS.length,
+        totalNovels: MOCK_NOVELS.filter(n => !deletionTracker.isDeleted(n.id)).length,
         totalEpisodes: 0,
-        totalJokes: MOCK_JOKES.length,
-        totalKnowledge: MOCK_KNOWLEDGE_ARTICLES.length,
+        totalJokes: MOCK_JOKES.filter(j => !deletionTracker.isDeleted(j.id)).length,
+        totalKnowledge: MOCK_KNOWLEDGE_ARTICLES.filter(k => !deletionTracker.isDeleted(k.id)).length,
         pendingReports: 0,
         unreadContacts: 0,
       };
@@ -182,8 +222,11 @@ class AdminService {
 
   public async getStories(statusFilter?: string): Promise<Story[]> {
     try {
+      await deletionTracker.init();
       const snap = await getDocs(collection(db, 'stories'));
-      const firestoreStories: Story[] = snap.docs.map(d => {
+      const firestoreStories: Story[] = snap.docs
+        .filter(d => !deletionTracker.isDeleted(d.id) && !d.data()?.deleted && d.data()?.status !== 'deleted')
+        .map(d => {
         const data = d.data();
         return {
           id: d.id,
@@ -232,7 +275,7 @@ class AdminService {
 
       const all = [...firestoreStories];
       MOCK_STORIES.forEach(m => {
-        if (!all.some(s => s.id === m.id)) {
+        if (!deletionTracker.isDeleted(m.id) && !all.some(s => s.id === m.id)) {
           all.push(m);
         }
       });
@@ -247,7 +290,8 @@ class AdminService {
       });
     } catch (err) {
       console.warn('Error querying stories for admin:', err);
-      return statusFilter && statusFilter !== 'all' ? MOCK_STORIES.filter(s => s.status === statusFilter) : MOCK_STORIES;
+      const undeletedMocks = MOCK_STORIES.filter(s => !deletionTracker.isDeleted(s.id));
+      return statusFilter && statusFilter !== 'all' ? undeletedMocks.filter(s => s.status === statusFilter) : undeletedMocks;
     }
   }
 
@@ -388,8 +432,10 @@ class AdminService {
     adminUid: string,
     adminEmail?: string
   ): Promise<void> {
+    const mockStory = MOCK_STORIES.find(s => s.id === storyId);
     const storyRef = doc(db, 'stories', storyId);
     const updatePayload: any = {
+      ...(mockStory || {}),
       status,
       updatedBy: adminUid,
       updatedAt: serverTimestamp(),
@@ -399,7 +445,7 @@ class AdminService {
       updatePayload.approvedAt = serverTimestamp();
       updatePayload.approvedBy = adminUid;
     }
-    await updateDoc(storyRef, updatePayload);
+    await setDoc(storyRef, updatePayload, { merge: true });
 
     await auditLogService.logAction({
       action: `story_status_${status}`,
@@ -419,12 +465,14 @@ class AdminService {
     adminUid: string,
     adminEmail?: string
   ): Promise<void> {
+    const mockStory = MOCK_STORIES.find(s => s.id === storyId);
     const storyRef = doc(db, 'stories', storyId);
-    await updateDoc(storyRef, {
+    await setDoc(storyRef, {
+      ...(mockStory || {}),
       visibility,
       updatedBy: adminUid,
       updatedAt: serverTimestamp(),
-    });
+    }, { merge: true });
 
     await auditLogService.logAction({
       action: `story_visibility_${visibility}`,
@@ -449,15 +497,17 @@ class AdminService {
       throw new Error('షెడ్యూల్ చేసిన సమయం భవిష్యత్తులో ఉండాలి (Scheduled publication time must be in the future).');
     }
 
+    const mockStory = MOCK_STORIES.find(s => s.id === storyId);
     const storyRef = doc(db, 'stories', storyId);
-    await updateDoc(storyRef, {
+    await setDoc(storyRef, {
+      ...(mockStory || {}),
       status: 'scheduled',
       visibility: 'public',
       scheduledAt: scheduledAtISO,
       scheduledPublishAt: Timestamp.fromDate(new Date(scheduledAtISO)),
       updatedBy: adminUid,
       updatedAt: serverTimestamp(),
-    });
+    }, { merge: true });
 
     await auditLogService.logAction({
       action: 'story_scheduled',
@@ -472,6 +522,11 @@ class AdminService {
    * Admin Deletes Story (Deletes Firestore document and associated Storage assets)
    */
   public async deleteStory(storyId: string, adminUid: string, adminEmail?: string): Promise<void> {
+    // 1. Immediately register deletion in persistent tracker and remove from mock cache
+    removeMockStory(storyId);
+    await deletionTracker.markDeleted(storyId, 'story', adminUid);
+
+    // 2. Clean up storage assets if they exist
     try {
       const storySnap = await getDoc(doc(db, 'stories', storyId));
       if (storySnap.exists()) {
@@ -488,6 +543,13 @@ class AdminService {
           console.warn('Storage cleanup on story deletion notice:', storageErr);
         });
       }
+      // 3. Mark deleted in Firestore doc and delete document
+      await setDoc(doc(db, 'stories', storyId), {
+        deleted: true,
+        status: 'deleted',
+        deletedAt: serverTimestamp(),
+        deletedBy: adminUid,
+      }, { merge: true });
       await deleteDoc(doc(db, 'stories', storyId));
     } catch (e) {
       console.warn('Error deleting story document:', e);
@@ -502,8 +564,10 @@ class AdminService {
   }
 
   public async approveStory(storyId: string, adminUid: string, authorId?: string, adminEmail?: string): Promise<void> {
+    const mockStory = MOCK_STORIES.find(s => s.id === storyId);
     const storyRef = doc(db, 'stories', storyId);
-    await updateDoc(storyRef, {
+    await setDoc(storyRef, {
+      ...(mockStory || {}),
       status: 'published',
       visibility: 'public',
       publishedAt: new Date().toISOString().split('T')[0],
@@ -512,7 +576,8 @@ class AdminService {
       reviewedBy: adminUid,
       approvedBy: adminUid,
       rejectionReason: '',
-    });
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
 
     if (authorId) {
       try {
@@ -533,13 +598,16 @@ class AdminService {
   }
 
   public async rejectStory(storyId: string, adminUid: string, rejectionReason: string, adminEmail?: string): Promise<void> {
+    const mockStory = MOCK_STORIES.find(s => s.id === storyId);
     const storyRef = doc(db, 'stories', storyId);
-    await updateDoc(storyRef, {
+    await setDoc(storyRef, {
+      ...(mockStory || {}),
       status: 'rejected',
       rejectionReason: rejectionReason.trim(),
       reviewedAt: serverTimestamp(),
       reviewedBy: adminUid,
-    });
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
 
     await auditLogService.logAction({
       action: 'story_rejected',
@@ -552,17 +620,37 @@ class AdminService {
   }
 
   public async publishStoryNow(storyId: string, adminUid: string, adminEmail?: string): Promise<void> {
-    await this.setStoryStatus(storyId, 'published', adminUid, adminEmail);
-    await this.setStoryVisibility(storyId, 'public', adminUid, adminEmail);
+    const mockStory = MOCK_STORIES.find(s => s.id === storyId);
+    const storyRef = doc(db, 'stories', storyId);
+    await setDoc(storyRef, {
+      ...(mockStory || {}),
+      status: 'published',
+      visibility: 'public',
+      publishedAt: new Date().toISOString().split('T')[0],
+      approvedAt: serverTimestamp(),
+      approvedBy: adminUid,
+      updatedBy: adminUid,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+
+    await auditLogService.logAction({
+      action: 'story_published_now',
+      targetType: 'story',
+      targetId: storyId,
+      targetTitle: `Story ${storyId} published immediately`,
+    });
   }
 
   public async archiveStory(storyId: string, adminUid: string, adminEmail?: string): Promise<void> {
+    const mockStory = MOCK_STORIES.find(s => s.id === storyId);
     const storyRef = doc(db, 'stories', storyId);
-    await updateDoc(storyRef, {
+    await setDoc(storyRef, {
+      ...(mockStory || {}),
       status: 'archived',
       archivedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+      updatedBy: adminUid,
+    }, { merge: true });
 
     await auditLogService.logAction({
       action: 'story_archived',
@@ -578,21 +666,22 @@ class AdminService {
 
   public async getNovels(): Promise<Novel[]> {
     try {
+      await deletionTracker.init();
       const snap = await getDocs(collection(db, 'novels'));
-      if (!snap.empty) {
-        const firestoreNovels: Novel[] = snap.docs.map(d => ({
+      const firestoreNovels: Novel[] = snap.docs
+        .filter(d => !deletionTracker.isDeleted(d.id) && !d.data()?.deleted && d.data()?.status !== 'deleted')
+        .map(d => ({
           id: d.id,
           ...d.data(),
         } as Novel));
-        const map = new Map<string, Novel>();
-        MOCK_NOVELS.forEach(n => map.set(n.id, n));
-        firestoreNovels.forEach(n => map.set(n.id, n));
-        return Array.from(map.values());
-      }
+      const map = new Map<string, Novel>();
+      MOCK_NOVELS.filter(n => !deletionTracker.isDeleted(n.id)).forEach(n => map.set(n.id, n));
+      firestoreNovels.forEach(n => map.set(n.id, n));
+      return Array.from(map.values());
     } catch (err) {
       console.warn('Error fetching novels in admin:', err);
     }
-    return MOCK_NOVELS;
+    return MOCK_NOVELS.filter(n => !deletionTracker.isDeleted(n.id));
   }
 
   public async createNovel(novelData: {
@@ -684,11 +773,14 @@ class AdminService {
   }
 
   public async archiveNovel(novelId: string, adminUid: string, adminEmail?: string): Promise<void> {
+    const mockNovel = MOCK_NOVELS.find(n => n.id === novelId);
     const novelRef = doc(db, 'novels', novelId);
-    await updateDoc(novelRef, {
+    await setDoc(novelRef, {
+      ...(mockNovel || {}),
       status: 'archived',
       updatedAt: serverTimestamp(),
-    });
+      updatedBy: adminUid,
+    }, { merge: true });
 
     await auditLogService.logAction({
       action: 'novel_archived',
@@ -699,7 +791,17 @@ class AdminService {
   }
 
   public async deleteNovel(novelId: string, adminUid: string, adminEmail?: string): Promise<void> {
+    // 1. Immediately register in deletion tracker and remove from mock cache
+    removeMockNovel(novelId);
+    await deletionTracker.markDeleted(novelId, 'novel', adminUid);
+
     try {
+      await setDoc(doc(db, 'novels', novelId), {
+        deleted: true,
+        status: 'deleted',
+        deletedAt: serverTimestamp(),
+        deletedBy: adminUid,
+      }, { merge: true });
       await deleteDoc(doc(db, 'novels', novelId));
     } catch (e) {}
 
@@ -714,14 +816,17 @@ class AdminService {
   // Episodes
   public async getEpisodes(novelId?: string): Promise<Episode[]> {
     try {
+      await deletionTracker.init();
       const q = novelId 
         ? query(collection(db, 'episodes'), where('novelId', '==', novelId))
         : collection(db, 'episodes');
       const snap = await getDocs(q);
-      return snap.docs.map(d => ({
-        id: d.id,
-        ...d.data(),
-      } as Episode)).sort((a, b) => (a.episodeNumber || 1) - (b.episodeNumber || 1));
+      return snap.docs
+        .filter(d => !deletionTracker.isDeleted(d.id) && !d.data()?.deleted && d.data()?.status !== 'deleted')
+        .map(d => ({
+          id: d.id,
+          ...d.data(),
+        } as Episode)).sort((a, b) => (a.episodeNumber || 1) - (b.episodeNumber || 1));
     } catch (err) {
       return [];
     }
@@ -802,7 +907,13 @@ class AdminService {
   }
 
   public async deleteEpisode(episodeId: string, adminUid?: string, adminEmail?: string, novelId?: string): Promise<void> {
+    await deletionTracker.markDeleted(episodeId, 'episode', adminUid || 'admin');
     try {
+      await setDoc(doc(db, 'episodes', episodeId), {
+        deleted: true,
+        status: 'deleted',
+        deletedAt: serverTimestamp(),
+      }, { merge: true });
       await deleteDoc(doc(db, 'episodes', episodeId));
       if (novelId) {
         await updateDoc(doc(db, 'novels', novelId), {
@@ -826,21 +937,22 @@ class AdminService {
 
   public async getJokes(): Promise<Joke[]> {
     try {
+      await deletionTracker.init();
       const snap = await getDocs(collection(db, 'jokes'));
-      if (!snap.empty) {
-        const list: Joke[] = snap.docs.map(d => ({
+      const list: Joke[] = snap.docs
+        .filter(d => !deletionTracker.isDeleted(d.id) && !d.data()?.deleted && d.data()?.status !== 'deleted')
+        .map(d => ({
           id: d.id,
           ...d.data(),
         } as Joke));
-        const map = new Map<string, Joke>();
-        MOCK_JOKES.forEach(j => map.set(j.id, j));
-        list.forEach(j => map.set(j.id, j));
-        return Array.from(map.values());
-      }
+      const map = new Map<string, Joke>();
+      MOCK_JOKES.filter(j => !deletionTracker.isDeleted(j.id)).forEach(j => map.set(j.id, j));
+      list.forEach(j => map.set(j.id, j));
+      return Array.from(map.values());
     } catch (err) {
       console.warn('Error fetching jokes in admin:', err);
     }
-    return MOCK_JOKES;
+    return MOCK_JOKES.filter(j => !deletionTracker.isDeleted(j.id));
   }
 
   public async createJoke(jokeData: {
@@ -910,7 +1022,15 @@ class AdminService {
   }
 
   public async deleteJoke(jokeId: string, adminUid: string, adminEmail?: string): Promise<void> {
+    removeMockJoke(jokeId);
+    await deletionTracker.markDeleted(jokeId, 'joke', adminUid);
     try {
+      await setDoc(doc(db, 'jokes', jokeId), {
+        deleted: true,
+        status: 'deleted',
+        deletedAt: serverTimestamp(),
+        deletedBy: adminUid,
+      }, { merge: true });
       await deleteDoc(doc(db, 'jokes', jokeId));
     } catch (e) {}
 
@@ -928,21 +1048,22 @@ class AdminService {
 
   public async getKnowledgeArticles(): Promise<KnowledgeArticle[]> {
     try {
+      await deletionTracker.init();
       const snap = await getDocs(collection(db, 'knowledge'));
-      if (!snap.empty) {
-        const firestoreArticles: KnowledgeArticle[] = snap.docs.map(d => ({
+      const firestoreArticles: KnowledgeArticle[] = snap.docs
+        .filter(d => !deletionTracker.isDeleted(d.id) && !d.data()?.deleted && d.data()?.status !== 'deleted')
+        .map(d => ({
           id: d.id,
           ...d.data(),
         } as KnowledgeArticle));
-        const map = new Map<string, KnowledgeArticle>();
-        MOCK_KNOWLEDGE_ARTICLES.forEach(a => map.set(a.id, a));
-        firestoreArticles.forEach(a => map.set(a.id, a));
-        return Array.from(map.values());
-      }
+      const map = new Map<string, KnowledgeArticle>();
+      MOCK_KNOWLEDGE_ARTICLES.filter(a => !deletionTracker.isDeleted(a.id)).forEach(a => map.set(a.id, a));
+      firestoreArticles.forEach(a => map.set(a.id, a));
+      return Array.from(map.values());
     } catch (err) {
       console.warn('Error fetching knowledge in admin:', err);
     }
-    return MOCK_KNOWLEDGE_ARTICLES;
+    return MOCK_KNOWLEDGE_ARTICLES.filter(a => !deletionTracker.isDeleted(a.id));
   }
 
   public async createKnowledgeArticle(data: {
@@ -1015,7 +1136,14 @@ class AdminService {
   }
 
   public async deleteKnowledgeArticle(articleId: string, adminUid: string, adminEmail?: string): Promise<void> {
+    await deletionTracker.markDeleted(articleId, 'knowledge', adminUid);
     try {
+      await setDoc(doc(db, 'knowledge', articleId), {
+        deleted: true,
+        status: 'deleted',
+        deletedAt: serverTimestamp(),
+        deletedBy: adminUid,
+      }, { merge: true });
       await deleteDoc(doc(db, 'knowledge', articleId));
     } catch (e) {}
 
@@ -1033,25 +1161,45 @@ class AdminService {
 
   public async getCategories(): Promise<CategoryItem[]> {
     try {
+      await deletionTracker.init();
       const snap = await getDocs(collection(db, 'categories'));
-      if (!snap.empty) {
-        return snap.docs.map(d => ({
+      const firestoreCats = snap.docs
+        .filter(d => !deletionTracker.isDeleted(d.id) && !d.data()?.deleted && d.data()?.status !== 'deleted')
+        .map(d => ({
           id: d.id,
           ...d.data(),
         } as CategoryItem));
-      }
+
+      const mockCats = MOCK_CATEGORIES
+        .filter(c => !deletionTracker.isDeleted(`cat-${encodeURIComponent(c.name)}`))
+        .map(c => ({
+          id: `cat-${encodeURIComponent(c.name)}`,
+          name: c.name,
+          teluguName: c.name,
+          slug: encodeURIComponent(c.name),
+          description: c.description,
+          storyCount: c.count,
+          status: 'active' as const,
+        }));
+
+      const map = new Map<string, CategoryItem>();
+      mockCats.forEach(c => map.set(c.id, c));
+      firestoreCats.forEach(c => map.set(c.id, c));
+      return Array.from(map.values());
     } catch (err) {
       console.warn('Error fetching categories:', err);
     }
-    return MOCK_CATEGORIES.map(c => ({
-      id: `cat-${encodeURIComponent(c.name)}`,
-      name: c.name,
-      teluguName: c.name,
-      slug: encodeURIComponent(c.name),
-      description: c.description,
-      storyCount: c.count,
-      status: 'active' as const,
-    }));
+    return MOCK_CATEGORIES
+      .filter(c => !deletionTracker.isDeleted(`cat-${encodeURIComponent(c.name)}`))
+      .map(c => ({
+        id: `cat-${encodeURIComponent(c.name)}`,
+        name: c.name,
+        teluguName: c.name,
+        slug: encodeURIComponent(c.name),
+        description: c.description,
+        storyCount: c.count,
+        status: 'active' as const,
+      }));
   }
 
   public async addCategory(catData: { 
@@ -1090,12 +1238,20 @@ class AdminService {
 
   public async toggleCategoryStatus(catId: string, status: 'active' | 'archived', adminUid: string, adminEmail?: string): Promise<void> {
     try {
-      await updateDoc(doc(db, 'categories', catId), {
+      await setDoc(doc(db, 'categories', catId), {
+        id: catId,
         status,
         isActive: status === 'active',
         updatedAt: serverTimestamp(),
-      });
-    } catch (e) {}
+      }, { merge: true });
+    } catch (e) {
+      console.warn('Error toggling category doc:', e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('kathavahini:categories-updated', { detail: { catId, status } }));
+      window.dispatchEvent(new CustomEvent('kathavahini:refresh-content'));
+    }
 
     await auditLogService.logAction({
       action: `category_${status}`,
@@ -1106,9 +1262,38 @@ class AdminService {
   }
 
   public async deleteCategory(catId: string, adminUid: string, adminEmail?: string): Promise<void> {
+    // 1. Mark in deletion tracker immediately
+    await deletionTracker.markDeleted(catId, 'category', adminUid);
+    
+    // Also extract raw name if it was slugged or encoded
+    if (catId.startsWith('cat-')) {
+      try {
+        const rawName = decodeURIComponent(catId.replace('cat-', ''));
+        if (rawName) {
+          await deletionTracker.markDeleted(rawName, 'category', adminUid);
+        }
+      } catch {}
+    }
+
     try {
-      await deleteDoc(doc(db, 'categories', catId));
-    } catch (e) {}
+      // Set status as deleted in Firestore so real-time snapshot removes it everywhere across the app
+      await setDoc(doc(db, 'categories', catId), {
+        status: 'deleted',
+        isActive: false,
+        deleted: true,
+        updatedAt: serverTimestamp(),
+        deletedAt: serverTimestamp(),
+        deletedBy: adminUid,
+      }, { merge: true });
+    } catch (e) {
+      console.warn('Error deleting category doc:', e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('kathavahini:categories-updated', { detail: { catId } }));
+      window.dispatchEvent(new CustomEvent('kathavahini:category-deleted', { detail: { categoryId: catId } }));
+      window.dispatchEvent(new CustomEvent('kathavahini:refresh-content'));
+    }
 
     await auditLogService.logAction({
       action: 'category_deleted',
@@ -1124,8 +1309,11 @@ class AdminService {
 
   public async getUsers(roleFilter?: string): Promise<User[]> {
     try {
+      await deletionTracker.init();
       const snap = await getDocs(collection(db, 'users'));
-      const list: User[] = snap.docs.map(docSnap => {
+      const list: User[] = snap.docs
+        .filter(docSnap => !deletionTracker.isDeleted(docSnap.id) && !docSnap.data()?.deleted && docSnap.data()?.status !== 'deleted')
+        .map(docSnap => {
         const d = docSnap.data();
         let role: 'reader' | 'writer' | 'admin' = 'reader';
         if (d.role === 'admin') role = 'admin';
@@ -1303,6 +1491,29 @@ class AdminService {
       targetId: targetUid,
       targetTitle: `User ${targetUid} status changed to ${status}`,
       metadata: { status },
+    });
+  }
+
+  public async deleteUser(targetUid: string, adminUid: string, adminEmail?: string): Promise<void> {
+    await deletionTracker.markDeleted(targetUid, 'user', adminUid);
+    try {
+      await setDoc(doc(db, 'users', targetUid), {
+        deleted: true,
+        status: 'deleted',
+        deletedAt: serverTimestamp(),
+        deletedBy: adminUid,
+      }, { merge: true });
+      await deleteDoc(doc(db, 'users', targetUid));
+      await deleteDoc(doc(db, 'readers', targetUid)).catch(() => {});
+      await deleteDoc(doc(db, 'writers', targetUid)).catch(() => {});
+      await deleteDoc(doc(db, 'authors', targetUid)).catch(() => {});
+    } catch (e) {}
+
+    await auditLogService.logAction({
+      action: 'user_deleted',
+      targetType: 'user',
+      targetId: targetUid,
+      targetTitle: `User ${targetUid} deleted by admin`,
     });
   }
 
@@ -1661,15 +1872,18 @@ class AdminService {
 
   public async getAllComments(): Promise<Comment[]> {
     try {
+      await deletionTracker.init();
       const snap = await getDocs(collection(db, 'comments'));
       if (!snap.empty) {
-        return snap.docs.map(d => ({
-          id: d.id,
-          ...d.data(),
-        } as Comment));
+        return snap.docs
+          .filter(d => !deletionTracker.isDeleted(d.id) && !d.data()?.deleted && d.data()?.status !== 'deleted')
+          .map(d => ({
+            id: d.id,
+            ...d.data(),
+          } as Comment));
       }
     } catch (err) {}
-    return [
+    const defaultComments: Comment[] = [
       {
         id: 'comm-1',
         storyId: 'story-1',
@@ -1695,10 +1909,18 @@ class AdminService {
         likes: 8,
       },
     ];
+    return defaultComments.filter(c => !deletionTracker.isDeleted(c.id));
   }
 
   public async deleteComment(commentId: string, adminUid: string, adminEmail?: string): Promise<void> {
+    await deletionTracker.markDeleted(commentId, 'comment', adminUid);
     try {
+      await setDoc(doc(db, 'comments', commentId), {
+        deleted: true,
+        status: 'deleted',
+        deletedAt: serverTimestamp(),
+        deletedBy: adminUid,
+      }, { merge: true });
       await deleteDoc(doc(db, 'comments', commentId));
     } catch (e) {}
 

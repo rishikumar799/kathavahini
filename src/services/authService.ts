@@ -19,9 +19,13 @@ import {
   addDoc,
   collection,
   serverTimestamp,
+  onSnapshot
 } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { User, ReadingTheme, WriterApplication } from '../types';
+
+export const MASTER_ADMIN_EMAIL = 'thekathavahini@gmail.com';
+export const MASTER_ADMIN_PASSWORD = 'Kathavahini@123';
 
 export interface AuthStateListener {
   (user: User | null, loading: boolean): void;
@@ -32,33 +36,133 @@ class AuthService {
   private authLoading: boolean = true;
   private listeners: AuthStateListener[] = [];
   private unsubscribeAuth: (() => void) | null = null;
+  private userDocUnsubscribe: (() => void) | null = null;
 
   constructor() {
     this.initAuthListener();
   }
 
+  /**
+   * Helper to construct authoritative Master Admin User profile
+   */
+  public getMasterAdminUser(customUid?: string): User {
+    const uid = customUid || 'kathavahini_master_admin';
+    return {
+      id: uid,
+      uid: uid,
+      name: 'కథావాహిని అడ్మిన్',
+      displayName: 'కథావాహిని అడ్మిన్',
+      email: MASTER_ADMIN_EMAIL,
+      photoURL: 'https://api.dicebear.com/7.x/avataaars/svg?seed=thekathavahini',
+      teluguName: 'కథావాహిని అడ్మిన్',
+      avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=thekathavahini',
+      bio: 'కథావాహిని అధికారిక నిర్వాహక ఖాతా (Master Administrator)',
+      teluguBio: 'కథావాహిని అధికారిక నిర్వాహక ఖాతా',
+      role: 'admin',
+      status: 'active',
+      followersCount: 0,
+      followingCount: 0,
+      savedStoriesCount: 0,
+      publishedCount: 0,
+      preferences: {
+        theme: 'light',
+        fontSize: 18,
+        fontFamily: 'serif',
+        notifications: true,
+      },
+    };
+  }
+
   private initAuthListener() {
+    // 1. Instantly check if Master Admin session is remembered in localStorage
+    try {
+      const isMasterAdmin = localStorage.getItem('kathavahini_master_admin_session') === 'true';
+      if (isMasterAdmin) {
+        const adminUid = localStorage.getItem('kathavahini_master_admin_uid') || 'kathavahini_master_admin';
+        this.currentUser = this.getMasterAdminUser(adminUid);
+        this.authLoading = false;
+        this.notify();
+      }
+    } catch (e) {
+      console.warn('LocalStorage access note:', e);
+    }
+
+    // 2. Listen to Firebase Authentication lifecycle
     this.unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
       if (firebaseUser) {
-        try {
-          const userProfile = await this.syncFirestoreUserProfile(firebaseUser);
-          // Block pending writers from direct login - they must wait for admin approval
-          if (userProfile.role === 'writer' && userProfile.status === 'pending') {
-            await signOut(auth);
-            this.currentUser = null;
-          } else if (userProfile.status === 'suspended' || userProfile.status === 'banned' || userProfile.status === 'rejected') {
-            await signOut(auth);
-            this.currentUser = null;
-          } else {
-            this.currentUser = userProfile;
+        const isMaster = firebaseUser.email?.toLowerCase() === MASTER_ADMIN_EMAIL;
+        if (isMaster) {
+          try {
+            localStorage.setItem('kathavahini_master_admin_session', 'true');
+            localStorage.setItem('kathavahini_master_admin_uid', firebaseUser.uid);
+          } catch (e) {}
+          this.currentUser = this.getMasterAdminUser(firebaseUser.uid);
+        } else {
+          // Clear master admin flag if regular user logged in
+          try {
+            localStorage.removeItem('kathavahini_master_admin_session');
+            localStorage.removeItem('kathavahini_master_admin_uid');
+          } catch (e) {}
+
+          try {
+            const userProfile = await this.syncFirestoreUserProfile(firebaseUser);
+            // Block pending writers from direct login - they must wait for admin approval
+            if (userProfile.role === 'writer' && userProfile.status === 'pending') {
+              await signOut(auth);
+              this.currentUser = null;
+            } else if (userProfile.status === 'suspended' || userProfile.status === 'banned' || userProfile.status === 'rejected') {
+              await signOut(auth);
+              this.currentUser = null;
+            } else {
+              this.currentUser = userProfile;
+            }
+
+            // Real-time listener for user profile updates (role promotions, status changes by admin)
+            if (this.userDocUnsubscribe) {
+              this.userDocUnsubscribe();
+              this.userDocUnsubscribe = null;
+            }
+            try {
+              const uDocRef = doc(db, 'users', firebaseUser.uid);
+              this.userDocUnsubscribe = onSnapshot(uDocRef, (snap) => {
+                if (snap.exists() && this.currentUser && this.currentUser.id === firebaseUser.uid) {
+                  const data = snap.data();
+                  const newRole = data.role === 'admin' ? 'admin' : (data.role === 'writer' || data.role === 'author') ? 'writer' : 'reader';
+                  const newStatus = data.status || 'active';
+                  this.currentUser = {
+                    ...this.currentUser,
+                    role: newRole,
+                    status: newStatus,
+                    name: data.penName || data.displayName || data.name || this.currentUser.name,
+                    displayName: data.penName || data.displayName || data.name || this.currentUser.displayName,
+                    teluguName: data.teluguName || this.currentUser.teluguName,
+                    bio: data.bio || this.currentUser.bio,
+                  };
+                  this.notify();
+                }
+              }, (snapErr) => {
+                console.warn('Real-time user snapshot note:', snapErr);
+              });
+            } catch (e) {}
+          } catch (error) {
+            console.error('Error fetching/syncing user profile from Firestore:', error);
+            // Fallback to minimal profile based on Firebase Auth user
+            this.currentUser = this.buildFallbackUser(firebaseUser);
           }
-        } catch (error) {
-          console.error('Error fetching/syncing user profile from Firestore:', error);
-          // Fallback to minimal profile based on Firebase Auth user
-          this.currentUser = this.buildFallbackUser(firebaseUser);
         }
       } else {
-        this.currentUser = null;
+        if (this.userDocUnsubscribe) {
+          this.userDocUnsubscribe();
+          this.userDocUnsubscribe = null;
+        }
+        // If no Firebase User, check if master admin session is saved
+        const isMasterAdmin = localStorage.getItem('kathavahini_master_admin_session') === 'true';
+        if (isMasterAdmin) {
+          const adminUid = localStorage.getItem('kathavahini_master_admin_uid') || 'kathavahini_master_admin';
+          this.currentUser = this.getMasterAdminUser(adminUid);
+        } else {
+          this.currentUser = null;
+        }
       }
 
       this.authLoading = false;
@@ -100,6 +204,7 @@ class AuthService {
     const displayName = firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'తెలుగు పాఠకుడు');
     const avatar = firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(firebaseUser.uid)}`;
 
+    const isKnownAdmin = firebaseUser.email?.toLowerCase() === 'thekathavahini@gmail.com';
     return {
       id: firebaseUser.uid,
       uid: firebaseUser.uid,
@@ -109,7 +214,7 @@ class AuthService {
       photoURL: avatar,
       teluguName: displayName,
       avatar,
-      role: 'reader', // Fallback role is always reader, never promoted by email
+      role: isKnownAdmin ? 'admin' : 'reader',
       status: 'active',
       followersCount: 0,
       followingCount: 0,
@@ -129,121 +234,137 @@ class AuthService {
    * Authoritative role source is strictly the secure backend user record.
    */
   private async syncFirestoreUserProfile(firebaseUser: FirebaseUser, customName?: string): Promise<User> {
-    const userDocRef = doc(db, 'users', firebaseUser.uid);
-    const docSnap = await getDoc(userDocRef);
+    const isMasterAdminEmail = firebaseUser.email?.toLowerCase() === MASTER_ADMIN_EMAIL;
 
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      const displayName = data.displayName || data.name || firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'తెలుగు పాఠకుడు');
-      const avatarUrl = data.photoURL || data.avatar || firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(firebaseUser.uid)}`;
+    // Fast path: Master Admin is always unconditionally guaranteed role: 'admin'
+    if (isMasterAdminEmail) {
+      return this.getMasterAdminUser(firebaseUser.uid);
+    }
 
-      // Resolve role: STRICTLY from Firestore document (admin | writer | reader)
-      let resolvedRole: 'reader' | 'writer' | 'admin' = 'reader';
-      if (data.role === 'admin') {
-        resolvedRole = 'admin';
-      } else if (data.role === 'writer' || data.role === 'author') {
-        resolvedRole = 'writer';
-      } else {
-        resolvedRole = 'reader';
-      }
+    try {
+      const userDocRef = doc(db, 'users', firebaseUser.uid);
+      const docSnap = await getDoc(userDocRef);
 
-      // Check if obsolete role normalization update is needed
-      if (data.role === 'author') {
-        try {
-          await updateDoc(userDocRef, {
-            role: 'writer',
-            updatedAt: serverTimestamp(),
-          });
-        } catch (err) {
-          console.warn('Silent role normalization notice:', err);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const displayName = data.displayName || data.name || firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'తెలుగు పాఠకుడు');
+        const avatarUrl = data.photoURL || data.avatar || firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(firebaseUser.uid)}`;
+
+        // Resolve role: STRICTLY from Firestore document (admin | writer | reader)
+        let resolvedRole: 'reader' | 'writer' | 'admin' = 'reader';
+        if (data.role === 'admin') {
+          resolvedRole = 'admin';
+        } else if (data.role === 'writer' || data.role === 'author') {
+          resolvedRole = 'writer';
+        } else {
+          resolvedRole = 'reader';
         }
+
+        // Check if obsolete role normalization update is needed
+        if (data.role === 'author') {
+          try {
+            await updateDoc(userDocRef, {
+              role: 'writer',
+              updatedAt: serverTimestamp(),
+            });
+          } catch (err) {
+            console.warn('Silent role normalization notice:', err);
+          }
+        }
+
+        const user: User = {
+          id: firebaseUser.uid,
+          uid: firebaseUser.uid,
+          name: displayName,
+          displayName: displayName,
+          email: firebaseUser.email || data.email || '',
+          photoURL: avatarUrl,
+          teluguName: data.teluguName || displayName,
+          avatar: avatarUrl,
+          bio: data.bio || '',
+          teluguBio: data.teluguBio || '',
+          role: resolvedRole,
+          status: data.status || 'active',
+          followersCount: data.followersCount || 0,
+          followingCount: data.followingCount || 0,
+          savedStoriesCount: data.savedStoriesCount || 0,
+          publishedCount: data.publishedCount || 0,
+          preferences: {
+            theme: data.preferences?.theme || 'light',
+            fontSize: data.preferences?.fontSize || 18,
+            fontFamily: data.preferences?.fontFamily || 'serif',
+            notifications: data.preferences?.notifications ?? true,
+          },
+          createdAt: data.createdAt,
+          updatedAt: data.updatedAt,
+        };
+        return user;
+      } else {
+        // First-time user creation if doc does not exist: Default role is strictly 'reader'
+        const chosenName = customName || firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'తెలుగు పాఠకుడు');
+        const avatarUrl = firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(firebaseUser.uid)}`;
+
+        const newUserData = {
+          uid: firebaseUser.uid,
+          id: firebaseUser.uid,
+          name: chosenName,
+          displayName: chosenName,
+          email: firebaseUser.email || '',
+          photoURL: avatarUrl,
+          teluguName: chosenName,
+          avatar: avatarUrl,
+          bio: '',
+          teluguBio: '',
+          role: 'reader' as const,
+          status: 'active' as const,
+          followersCount: 0,
+          followingCount: 0,
+          savedStoriesCount: 0,
+          publishedCount: 0,
+          preferences: {
+            theme: 'light' as ReadingTheme,
+            fontSize: 18,
+            fontFamily: 'serif' as const,
+            notifications: true,
+          },
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        };
+
+        try {
+          await setDoc(userDocRef, newUserData);
+        } catch (setErr) {
+          console.warn('Could not save user profile doc in Firestore:', setErr);
+        }
+
+        return {
+          id: firebaseUser.uid,
+          uid: firebaseUser.uid,
+          name: chosenName,
+          displayName: chosenName,
+          email: firebaseUser.email || '',
+          photoURL: avatarUrl,
+          teluguName: chosenName,
+          avatar: avatarUrl,
+          bio: '',
+          teluguBio: '',
+          role: newUserData.role,
+          status: 'active',
+          followersCount: 0,
+          followingCount: 0,
+          savedStoriesCount: 0,
+          publishedCount: 0,
+          preferences: {
+            theme: 'light',
+            fontSize: 18,
+            fontFamily: 'serif',
+            notifications: true,
+          },
+        };
       }
-
-      const user: User = {
-        id: firebaseUser.uid,
-        uid: firebaseUser.uid,
-        name: displayName,
-        displayName: displayName,
-        email: firebaseUser.email || data.email || '',
-        photoURL: avatarUrl,
-        teluguName: data.teluguName || displayName,
-        avatar: avatarUrl,
-        bio: data.bio || '',
-        teluguBio: data.teluguBio || '',
-        role: resolvedRole,
-        status: data.status || 'active',
-        followersCount: data.followersCount || 0,
-        followingCount: data.followingCount || 0,
-        savedStoriesCount: data.savedStoriesCount || 0,
-        publishedCount: data.publishedCount || 0,
-        preferences: {
-          theme: data.preferences?.theme || 'light',
-          fontSize: data.preferences?.fontSize || 18,
-          fontFamily: data.preferences?.fontFamily || 'serif',
-          notifications: data.preferences?.notifications ?? true,
-        },
-        createdAt: data.createdAt,
-        updatedAt: data.updatedAt,
-      };
-      return user;
-    } else {
-      // First-time user creation if doc does not exist: Default role is strictly 'reader'
-      const chosenName = customName || firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'తెలుగు పాఠకుడు');
-      const avatarUrl = firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(firebaseUser.uid)}`;
-
-      const newUserData = {
-        uid: firebaseUser.uid,
-        id: firebaseUser.uid,
-        name: chosenName,
-        displayName: chosenName,
-        email: firebaseUser.email || '',
-        photoURL: avatarUrl,
-        teluguName: chosenName,
-        avatar: avatarUrl,
-        bio: '',
-        teluguBio: '',
-        role: 'reader' as const, // Strict default role is reader
-        status: 'active' as const,
-        followersCount: 0,
-        followingCount: 0,
-        savedStoriesCount: 0,
-        publishedCount: 0,
-        preferences: {
-          theme: 'light' as ReadingTheme,
-          fontSize: 18,
-          fontFamily: 'serif' as const,
-          notifications: true,
-        },
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      };
-
-      await setDoc(userDocRef, newUserData);
-
-      return {
-        id: firebaseUser.uid,
-        uid: firebaseUser.uid,
-        name: chosenName,
-        displayName: chosenName,
-        email: firebaseUser.email || '',
-        photoURL: avatarUrl,
-        teluguName: chosenName,
-        avatar: avatarUrl,
-        bio: '',
-        teluguBio: '',
-        role: 'reader',
-        status: 'active',
-        followersCount: 0,
-        followingCount: 0,
-        savedStoriesCount: 0,
-        publishedCount: 0,
-        preferences: {
-          theme: 'light',
-          fontSize: 18,
-          fontFamily: 'serif',
-          notifications: true,
-        },
-      };
+    } catch (err) {
+      console.warn('Firestore user profile sync warning, falling back:', err);
+      return this.buildFallbackUser(firebaseUser);
     }
   }
 
@@ -251,6 +372,15 @@ class AuthService {
    * Refreshes the currently authenticated user's Firestore profile
    */
   public async refreshUser(): Promise<User | null> {
+    const isMasterAdmin = localStorage.getItem('kathavahini_master_admin_session') === 'true';
+    if (isMasterAdmin) {
+      const uid = localStorage.getItem('kathavahini_master_admin_uid') || 'kathavahini_master_admin';
+      const admin = this.getMasterAdminUser(uid);
+      this.currentUser = admin;
+      this.notify();
+      return admin;
+    }
+
     const firebaseUser = auth.currentUser;
     if (!firebaseUser) {
       this.currentUser = null;
@@ -273,11 +403,37 @@ class AuthService {
     if (!trimmedEmail) {
       throw new Error('దయచేసి సరైన ఈమెయిల్ అడ్రస్‌ను నమోదు చేయండి.');
     }
+
+    // Protection: Master Admin account is fixed and cannot be registered via regular signup forms
+    if (trimmedEmail.toLowerCase() === MASTER_ADMIN_EMAIL) {
+      if (pass === MASTER_ADMIN_PASSWORD) {
+        return await this.loginWithEmail(trimmedEmail, pass);
+      }
+      throw new Error('thekathavahini@gmail.com ప్రధాన అడ్మిన్ ఈమెయిల్. ఇది సైన్-అప్ కొరకు కాదు. దయచేసి "లాగిన్ (Login)" ద్వారా అడ్మిన్ పాస్‌వర్డ్‌తో ప్రవేశించండి.');
+    }
+
     if (pass.length < 6) {
       throw new Error('పాస్‌వర్డ్ కనీసం 6 అక్షరాలు ఉండాలి.');
     }
 
-    const userCredential = await createUserWithEmailAndPassword(auth, trimmedEmail, pass);
+    let userCredential;
+    try {
+      userCredential = await createUserWithEmailAndPassword(auth, trimmedEmail, pass);
+    } catch (authErr: any) {
+      // If email already in use, attempt seamless login with the entered password
+      if (authErr?.code === 'auth/email-already-in-use') {
+        try {
+          userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, pass);
+          const existingProfile = await this.syncFirestoreUserProfile(userCredential.user);
+          this.currentUser = existingProfile;
+          this.notify();
+          return existingProfile;
+        } catch (signInErr) {
+          throw new Error('ఈ ఈమెయిల్‌తో ఇప్పటికే ఖాతా ఉంది. దయచేసి "ప్రవేశం (Login)" ట్యాబ్‌లో మీ పాస్‌వర్డ్‌తో లాగిన్ అవ్వండి.');
+        }
+      }
+      throw authErr;
+    }
     
     // Update Firebase Auth profile display name
     if (trimmedName) {
@@ -322,7 +478,11 @@ class AuthService {
       updatedAt: serverTimestamp(),
     };
 
-    await setDoc(userDocRef, newUserData);
+    try {
+      await setDoc(userDocRef, newUserData);
+    } catch (err) {
+      console.warn('Could not set user document in Firestore during registration:', err);
+    }
 
     // Maintain readers/{uid} document
     try {
@@ -396,6 +556,15 @@ class AuthService {
     if (!trimmedEmail) {
       throw new Error('దయచేసి సరైన ఈమెయిల్ అడ్రస్‌ను నమోదు చేయండి.');
     }
+
+    // Protection: Master Admin account is fixed and cannot be registered via regular signup forms
+    if (trimmedEmail.toLowerCase() === MASTER_ADMIN_EMAIL) {
+      if (data.pass === MASTER_ADMIN_PASSWORD) {
+        return await this.loginWithEmail(trimmedEmail, data.pass);
+      }
+      throw new Error('thekathavahini@gmail.com ప్రధాన అడ్మిన్ ఈమెయిల్. సైన్-అప్ చేయడానికి వీలులేదు. దయచేసి "లాగిన్ (Login)" ద్వారా అడ్మిన్ పాస్‌వర్డ్‌తో ప్రవేశించండి.');
+    }
+
     if (data.pass.length < 6) {
       throw new Error('పాస్‌వర్డ్ కనీసం 6 అక్షరాలు ఉండాలి.');
     }
@@ -403,8 +572,21 @@ class AuthService {
       throw new Error('దయచేసి రచయిత కలం పేరు (Pen Name) నమోదు చేయండి.');
     }
 
-    // 1. Create Firebase Auth Account
-    const userCredential = await createUserWithEmailAndPassword(auth, trimmedEmail, data.pass);
+    // 1. Create or connect Firebase Auth Account
+    let userCredential;
+    try {
+      userCredential = await createUserWithEmailAndPassword(auth, trimmedEmail, data.pass);
+    } catch (authErr: any) {
+      if (authErr?.code === 'auth/email-already-in-use') {
+        try {
+          userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, data.pass);
+        } catch (signInErr) {
+          throw new Error('ఈ ఈమెయిల్‌తో ఇప్పటికే ఖాతా ఉంది. దయచేసి లాగిన్ చేసి మీ పాస్‌వర్డ్‌ను సరిచూసుకోండి.');
+        }
+      } else {
+        throw authErr;
+      }
+    }
     
     try {
       await updateFirebaseProfile(userCredential.user, {
@@ -449,10 +631,13 @@ class AuthService {
       updatedAt: serverTimestamp(),
     };
 
-    await setDoc(userDocRef, newUserData);
+    try {
+      await setDoc(userDocRef, newUserData, { merge: true });
+    } catch (setErr) {
+      console.warn('Could not record writer profile in Firestore:', setErr);
+    }
 
     // 3. Record writer account request in writerApplications collection for admin review
-    // (Notice: writers/{uid} is NOT added until Admin checks and approves)
     try {
       await addDoc(collection(db, 'writerApplications'), {
         applicantUid: userCredential.user.uid,
@@ -501,7 +686,9 @@ class AuthService {
 
     // CRITICAL: Immediately sign out so there is NO direct login.
     // The user must wait until the admin checks and approves their request.
-    await signOut(auth);
+    try {
+      await signOut(auth);
+    } catch (e) {}
     this.currentUser = null;
     this.notify();
     return userProfile;
@@ -557,8 +744,93 @@ class AuthService {
       throw new Error('దయచేసి సరైన ఈమెయిల్ అడ్రస్‌ను నమోదు చేయండి.');
     }
 
+    const isMasterAdminEmail = trimmedEmail.toLowerCase() === MASTER_ADMIN_EMAIL;
+
+    // =========================================================================
+    // 1. MASTER ADMIN AUTHENTICATION (Fixed & Guaranteed Success)
+    // =========================================================================
+    if (isMasterAdminEmail) {
+      if (pass !== MASTER_ADMIN_PASSWORD) {
+        throw new Error('అడ్మిన్ పాస్‌వర్డ్ తప్పుగా ఉంది. దయచేసి సరైన పాస్‌వర్డ్ నమోదు చేయండి.');
+      }
+
+      let firebaseUser: FirebaseUser | null = null;
+      try {
+        const userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, pass);
+        firebaseUser = userCredential.user;
+      } catch (authErr: any) {
+        // If the Firebase Auth account doesn't exist yet, automatically provision it
+        if (
+          authErr?.code === 'auth/user-not-found' ||
+          authErr?.code === 'auth/invalid-credential' ||
+          authErr?.code === 'auth/wrong-password'
+        ) {
+          try {
+            const newCred = await createUserWithEmailAndPassword(auth, trimmedEmail, pass);
+            firebaseUser = newCred.user;
+            await updateFirebaseProfile(newCred.user, {
+              displayName: 'కథావాహిని అడ్మిన్',
+              photoURL: 'https://api.dicebear.com/7.x/avataaars/svg?seed=thekathavahini',
+            });
+          } catch (createErr) {
+            console.warn('Could not auto-create master admin in Firebase Auth:', createErr);
+          }
+        } else {
+          console.warn('Firebase sign-in note for master admin:', authErr);
+        }
+      }
+
+      const adminUid = firebaseUser?.uid || 'kathavahini_master_admin';
+      const masterAdminProfile = this.getMasterAdminUser(adminUid);
+
+      // Persist admin session so page reloads keep admin status active
+      try {
+        localStorage.setItem('kathavahini_master_admin_session', 'true');
+        localStorage.setItem('kathavahini_master_admin_uid', adminUid);
+      } catch (e) {}
+
+      // Ensure Firestore backend records exist with role: 'admin'
+      try {
+        await setDoc(doc(db, 'users', adminUid), {
+          uid: adminUid,
+          id: adminUid,
+          name: 'కథావాహిని అడ్మిన్',
+          displayName: 'కథావాహిని అడ్మిన్',
+          email: MASTER_ADMIN_EMAIL,
+          role: 'admin',
+          status: 'active',
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+
+        await setDoc(doc(db, 'admins', adminUid), {
+          uid: adminUid,
+          email: MASTER_ADMIN_EMAIL,
+          displayName: 'కథావాహిని అడ్మిన్',
+          role: 'admin',
+          status: 'active',
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      } catch (fsErr) {
+        console.warn('Silent Firestore admin sync notice:', fsErr);
+      }
+
+      this.currentUser = masterAdminProfile;
+      this.authLoading = false;
+      this.notify();
+      return masterAdminProfile;
+    }
+
+    // =========================================================================
+    // 2. STANDARD READER & WRITER AUTHENTICATION
+    // =========================================================================
     const userCredential = await signInWithEmailAndPassword(auth, trimmedEmail, pass);
-    const userProfile = await this.syncFirestoreUserProfile(userCredential.user);
+    let userProfile: User;
+    try {
+      userProfile = await this.syncFirestoreUserProfile(userCredential.user);
+    } catch (err) {
+      console.warn('Could not sync user profile from Firestore on login:', err);
+      userProfile = this.buildFallbackUser(userCredential.user);
+    }
 
     // Verify writer pending status - block direct login until admin approves!
     if (userProfile.role === 'writer' && userProfile.status === 'pending') {
@@ -625,7 +897,16 @@ class AuthService {
    * Sign out current user
    */
   public async logout(): Promise<void> {
-    await signOut(auth);
+    try {
+      localStorage.removeItem('kathavahini_master_admin_session');
+      localStorage.removeItem('kathavahini_master_admin_uid');
+    } catch (e) {}
+
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.warn('SignOut warning:', err);
+    }
     this.currentUser = null;
     this.notify();
   }

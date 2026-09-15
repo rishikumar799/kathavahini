@@ -21,6 +21,8 @@ import {
 import { Story, ReadingTheme, User } from '../types';
 import { ReaderToolbar } from '../components/reader/ReaderToolbar';
 import { ReadingProgress } from '../components/reader/ReadingProgress';
+import { StarRating } from '../components/common/StarRating';
+import { storyService } from '../services/storyService';
 
 interface StoryReaderViewProps {
   story: Story;
@@ -69,6 +71,13 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
 
   const hasImagePages = story.contentType === 'image_pages' && story.imagePages && story.imagePages.length > 0;
   const hasMixedBlocks = story.contentType === 'mixed' && story.contentBlocks && story.contentBlocks.length > 0;
+
+  // Record real view on mount
+  useEffect(() => {
+    if (story?.id) {
+      storyService.recordStoryView(story.id);
+    }
+  }, [story?.id]);
 
   // Track scroll progress for text/mixed stories, or page progress for image stories
   useEffect(() => {
@@ -408,6 +417,21 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
           <p className="text-xs opacity-70">
             ఈ కథ మీకు నచ్చినట్లయితే లైక్ చేయండి లేదా రచయితకు అభిప్రాయం పంపండి.
           </p>
+
+          {/* Interactive Star Rating Section */}
+          <div className="py-2 flex flex-col items-center gap-2">
+            <p className="text-xs font-bold text-[#7A284B] dark:text-[#D87591]">
+              ఈ కథకు మీ రేటింగ్ ఇవ్వండి:
+            </p>
+            <StarRating
+              storyId={story.id}
+              initialRating={story.rating}
+              currentUserId={currentUser?.id}
+              currentUserName={currentUser?.teluguName || currentUser?.name}
+              size="md"
+              showSummary={true}
+            />
+          </div>
 
           <div className="flex items-center justify-center gap-4 pt-2">
             <button

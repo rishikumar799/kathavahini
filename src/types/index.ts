@@ -399,7 +399,7 @@ export interface CategoryItem {
   storyCount?: number;
   isActive?: boolean;
   sortOrder?: number;
-  status: 'active' | 'archived';
+  status: 'active' | 'archived' | 'deleted';
   createdAt?: any;
   updatedAt?: any;
 }

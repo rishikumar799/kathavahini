@@ -13,6 +13,7 @@ import { Story, Novel, ReadingHistoryItem } from '../types';
 import { MOCK_STORIES, MOCK_NOVELS, MOCK_READING_HISTORY } from './mockData';
 import { storyService } from './storyService';
 import { bookmarkService } from './bookmarkService';
+import { deletionTracker } from './deletionTracker';
 
 class LibraryService {
   private inMemoryHistory: ReadingHistoryItem[] = [...MOCK_READING_HISTORY];
@@ -20,7 +21,7 @@ class LibraryService {
   public async getSavedStories(): Promise<Story[]> {
     const user = auth.currentUser;
     if (!user) {
-      return [MOCK_STORIES[0], MOCK_STORIES[1]];
+      return MOCK_STORIES.filter(s => !deletionTracker.isDeleted(s.id)).slice(0, 2);
     }
 
     try {
@@ -29,9 +30,11 @@ class LibraryService {
         const allStories = await storyService.getAllPublishedStories();
         const savedMap = new Map<string, Story>();
         bookmarks.forEach(bm => {
-          const story = allStories.find(s => s.id === bm.storyId);
-          if (story) {
-            savedMap.set(story.id, { ...story, isBookmarked: true });
+          if (!deletionTracker.isDeleted(bm.storyId)) {
+            const story = allStories.find(s => s.id === bm.storyId);
+            if (story && !deletionTracker.isDeleted(story.id)) {
+              savedMap.set(story.id, { ...story, isBookmarked: true });
+            }
           }
         });
         return Array.from(savedMap.values());
@@ -40,17 +43,17 @@ class LibraryService {
       console.warn('Error fetching saved stories:', err);
     }
 
-    return [MOCK_STORIES[0], MOCK_STORIES[1]];
+    return MOCK_STORIES.filter(s => !deletionTracker.isDeleted(s.id)).slice(0, 2);
   }
 
   public async getSavedNovels(): Promise<Novel[]> {
-    return [MOCK_NOVELS[0]];
+    return MOCK_NOVELS.filter(n => !deletionTracker.isDeleted(n.id)).slice(0, 1);
   }
 
   public async getReadingHistory(): Promise<ReadingHistoryItem[]> {
     const user = auth.currentUser;
     if (!user) {
-      return this.inMemoryHistory;
+      return this.inMemoryHistory.filter(h => !deletionTracker.isDeleted(h.storyId));
     }
 
     try {
@@ -63,22 +66,24 @@ class LibraryService {
 
       if (!snap.empty) {
         const allStories = await storyService.getAllPublishedStories();
-        return snap.docs.map(d => {
-          const data = d.data();
-          const story = allStories.find(s => s.id === data.storyId) || MOCK_STORIES[0];
-          return {
-            storyId: data.storyId,
-            story,
-            progressPercent: data.progressPercent || 0,
-            lastReadAt: data.lastReadAt?.toDate?.()?.toISOString() || new Date().toISOString(),
-          };
-        });
+        return snap.docs
+          .filter(d => !deletionTracker.isDeleted(d.data().storyId))
+          .map(d => {
+            const data = d.data();
+            const story = allStories.find(s => s.id === data.storyId) || MOCK_STORIES.find(s => s.id === data.storyId && !deletionTracker.isDeleted(s.id)) || MOCK_STORIES[0];
+            return {
+              storyId: data.storyId,
+              story,
+              progressPercent: data.progressPercent || 0,
+              lastReadAt: data.lastReadAt?.toDate?.()?.toISOString() || new Date().toISOString(),
+            };
+          });
       }
     } catch (err) {
       console.warn('Error fetching reading history:', err);
     }
 
-    return this.inMemoryHistory;
+    return this.inMemoryHistory.filter(h => !deletionTracker.isDeleted(h.storyId));
   }
 
   public async updateProgress(storyId: string, progressPercent: number): Promise<void> {

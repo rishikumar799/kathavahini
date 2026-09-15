@@ -1,17 +1,31 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BookOpen, Clock, Tag, Search, Sparkles, ChevronRight } from 'lucide-react';
-import { MOCK_KNOWLEDGE_ARTICLES } from '../services/mockData';
 import { KnowledgeArticle } from '../types';
+import { knowledgeService } from '../services/knowledgeService';
 
 interface KnowledgeViewProps {
   onSelectArticle?: (article: KnowledgeArticle) => void;
 }
 
 export const KnowledgeView: React.FC<KnowledgeViewProps> = () => {
-  const [articles] = useState<KnowledgeArticle[]>(MOCK_KNOWLEDGE_ARTICLES as KnowledgeArticle[]);
+  const [articles, setArticles] = useState<KnowledgeArticle[]>([]);
   const [selectedArticle, setSelectedArticle] = useState<KnowledgeArticle | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCat, setSelectedCat] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsub = knowledgeService.subscribeArticles((latestArticles) => {
+      setArticles(latestArticles);
+      // If the currently viewed article was deleted, reset selectedArticle
+      setSelectedArticle(prev => {
+        if (!prev) return null;
+        const stillExists = latestArticles.find(a => a.id === prev.id);
+        return stillExists || null;
+      });
+    });
+
+    return () => unsub();
+  }, []);
 
   const categories = Array.from(new Set(articles.map(a => a.category)));
 

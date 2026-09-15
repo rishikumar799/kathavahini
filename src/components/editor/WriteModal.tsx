@@ -27,11 +27,13 @@ import {
   StoryContentType, 
   ContentBlock, 
   StoryImagePage, 
-  SourceDocumentInfo 
+  SourceDocumentInfo,
+  CategoryItem 
 } from '../../types';
 import { writerService } from '../../services/writerService';
 import { jokeService } from '../../services/jokeService';
 import { novelService } from '../../services/novelService';
+import { categoryService } from '../../services/categoryService';
 import { CoverImageUploader } from '../common/CoverImageUploader';
 import { RichTextEditor } from './RichTextEditor';
 import { DocumentImportTab } from './DocumentImportTab';
@@ -110,6 +112,18 @@ export const WriteModal: React.FC<WriteModalProps> = ({
 
   // Unique session Story ID for storage uploads
   const [sessionStoryId] = useState(() => `story-draft-${Date.now()}`);
+
+  // Dynamic Categories from real-time CategoryService
+  const [dynamicCategories, setDynamicCategories] = useState<CategoryItem[]>([]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const unsubscribe = categoryService.subscribeCategories((cats) => {
+      const activeCats = cats.filter(c => c.status === 'active' && c.isActive !== false);
+      setDynamicCategories(activeCats);
+    });
+    return () => unsubscribe();
+  }, [isOpen]);
 
   const isWriterOrAdmin = currentUser && (
     (currentUser.role === 'writer' && currentUser.status === 'active') || 
@@ -231,8 +245,8 @@ export const WriteModal: React.FC<WriteModalProps> = ({
     if (sourceDoc) {
       setSourceDocument(sourceDoc);
     }
-    // Switch to Rich Text editor so user can immediately polish the extracted literature
-    setStoryMode('rich_text');
+    // Keep user in document_import mode so their full PDF story is preserved and displayed
+    setStoryMode('document_import');
     setViewMode('edit');
   };
 
@@ -261,13 +275,24 @@ export const WriteModal: React.FC<WriteModalProps> = ({
       if (mainType === 'story') {
         let paragraphs: string[] = [];
 
-        if (storyMode === 'rich_text' || storyMode === 'document_import') {
+        if (storyMode === 'rich_text') {
           paragraphs = textContent.split('\n\n').map(p => p.trim()).filter(Boolean);
           if (paragraphs.length === 0 && textContent.trim()) {
             paragraphs = [textContent.trim()];
           }
           if (paragraphs.length === 0) {
             throw new Error('దయచేసి కథ కంటెంట్‌ను నమోదు చేయండి.');
+          }
+        } else if (storyMode === 'document_import') {
+          if (!sourceDocument) {
+            throw new Error('దయచేసి కథ కోసం ఒక PDF పత్రాన్ని ఎంచుకుని అప్‌లోడ్ చేయండి.');
+          }
+          paragraphs = textContent.split('\n\n').map(p => p.trim()).filter(Boolean);
+          if (paragraphs.length === 0 && textContent.trim()) {
+            paragraphs = [textContent.trim()];
+          }
+          if (paragraphs.length === 0) {
+            paragraphs = [`పూర్తి PDF పత్ర కథ: ${sourceDocument.name}`];
           }
         } else if (storyMode === 'image_pages') {
           if (imagePages.length === 0) {
@@ -288,6 +313,9 @@ export const WriteModal: React.FC<WriteModalProps> = ({
         }
 
         const effectiveTitle = teluguTitle.trim() || title.trim() || 'శీర్షిక లేని కథ';
+        const effectiveCover = coverImage || 
+          (storyMode === 'image_pages' && imagePages.length > 0 ? imagePages[0].imageUrl : undefined) || 
+          (storyMode === 'document_import' ? 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800' : 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800');
 
         await writerService.submitStory({
           title: title.trim() || effectiveTitle,
@@ -295,8 +323,8 @@ export const WriteModal: React.FC<WriteModalProps> = ({
           subtitle: subtitle.trim(),
           teluguSubtitle: subtitle.trim(),
           category,
-          coverImage: coverImage || (imagePages.length > 0 ? imagePages[0].imageUrl : 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800'),
-          coverImageUrl: coverImage || (imagePages.length > 0 ? imagePages[0].imageUrl : 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800'),
+          coverImage: effectiveCover,
+          coverImageUrl: effectiveCover,
           coverImagePath,
           coverImageMetadata,
           excerpt: subtitle || paragraphs[0]?.slice(0, 120) || 'కథ వివరణ',
@@ -599,9 +627,9 @@ export const WriteModal: React.FC<WriteModalProps> = ({
                     >
                       <div className="flex items-center gap-2 font-bold text-xs">
                         <FileText className="w-4 h-4 text-[#7A284B] dark:text-[#D87591]" />
-                        <span>2. పత్రం దిగుమతి</span>
+                        <span>2. పి.డి.ఎఫ్ కథ</span>
                       </div>
-                      <span className="text-[11px] opacity-80">PDF / Word / TXT</span>
+                      <span className="text-[11px] opacity-80">పూర్తి PDF పత్రం</span>
                     </button>
 
                     <button
@@ -617,7 +645,7 @@ export const WriteModal: React.FC<WriteModalProps> = ({
                         <ImageIcon className="w-4 h-4 text-[#7A284B] dark:text-[#D87591]" />
                         <span>3. చిత్ర కథ పేజీలు</span>
                       </div>
-                      <span className="text-[11px] opacity-80">కామిక్స్ / స్కాన్ పేజీలు</span>
+                      <span className="text-[11px] opacity-80">ప్రతి పేజీ ఒక చిత్రం</span>
                     </button>
 
                     <button
@@ -693,16 +721,32 @@ export const WriteModal: React.FC<WriteModalProps> = ({
                       onChange={(e) => setCategory(e.target.value as StoryCategory)}
                       className="w-full px-4 py-2.5 rounded-2xl bg-[#FAF7F2] dark:bg-[#202027] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm font-serif-telugu focus:outline-none focus:ring-2 focus:ring-[#7A284B] text-[#17151A] dark:text-[#F7F3EE]"
                     >
-                      <option value="జీవితం">జీవితం (Life)</option>
-                      <option value="ప్రేమ">ప్రేమ (Love / Romance)</option>
-                      <option value="హాస్యం">హాస్యం (Humor)</option>
-                      <option value="భక్తి">భక్తి (Devotional)</option>
-                      <option value="క్రైమ్">క్రైమ్ & సస్పెన్స్ (Crime & Suspense)</option>
-                      <option value="గ్రామీణం">గ్రామీణం (Rural Life)</option>
-                      <option value="చరిత్ర">చరిత్ర (Historical)</option>
-                      <option value="సైన్స్ ఫిక్షన్">సైన్స్ ఫిక్షన్ (Sci-Fi)</option>
-                      <option value="పిల్లల కథలు">పిల్లల కథలు (Children's Stories)</option>
-                      <option value="సామాజికం">సామాజికం (Social)</option>
+                      {dynamicCategories.length > 0 ? (
+                        dynamicCategories.map((c) => (
+                          <option key={c.id} value={c.teluguName || c.name}>
+                            {c.teluguName || c.name} {c.name && c.name !== c.teluguName ? `(${c.name})` : ''}
+                          </option>
+                        ))
+                      ) : (
+                        <>
+                          <option value="జీవితం">జీవితం (Life)</option>
+                          <option value="ప్రేమ">ప్రేమ (Love / Romance)</option>
+                          <option value="కుటుంబం">కుటుంబం (Family)</option>
+                          <option value="స్నేహం">స్నేహం (Friendship)</option>
+                          <option value="ప్రేరణ">ప్రేరణ (Inspirational)</option>
+                          <option value="హాస్యం">హాస్యం (Humor)</option>
+                          <option value="రహస్యం">రహస్యం (Mystery)</option>
+                          <option value="థ్రిల్లర్">థ్రిల్లర్ (Thriller)</option>
+                          <option value="ఫాంటసీ">ఫాంటసీ (Fantasy)</option>
+                          <option value="చారిత్రక">చారిత్రక (Historical)</option>
+                          <option value="భయం">భయం (Horror)</option>
+                          <option value="పిల్లల కథలు">పిల్లల కథలు (Children's Stories)</option>
+                          <option value="ఆధ్యాత్మికం">ఆధ్యాత్మికం (Spiritual)</option>
+                          <option value="సామాజికం">సామాజికం (Social)</option>
+                          <option value="గ్రామీణ కథలు">గ్రామీణ కథలు (Rural Stories)</option>
+                          <option value="సాహిత్యం">సాహిత్యం (Literature)</option>
+                        </>
+                      )}
                     </select>
                   </div>
 
@@ -720,39 +764,41 @@ export const WriteModal: React.FC<WriteModalProps> = ({
                   </div>
                 </div>
 
-                {/* Cover Image Section */}
-                <div className="space-y-2">
-                  <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE]">
-                    కథ ముఖచిత్రం (Story Cover Image)
-                  </label>
-                  <CoverImageUploader
-                    value={coverImage}
-                    storagePath={coverImagePath}
-                    metadata={coverImageMetadata}
-                    targetType="story"
-                    targetId={sessionStoryId}
-                    onChange={(url, path, metadata) => {
-                      setCoverImage(url);
-                      setCoverImagePath(path);
-                      setCoverImageMetadata(metadata);
-                    }}
-                    entityId={sessionStoryId}
-                    folder="stories"
-                    initialImageUrl={coverImage}
-                    initialImagePath={coverImagePath}
-                    onImageUploaded={(url, path, metadata) => {
-                      setCoverImage(url);
-                      setCoverImagePath(path);
-                      setCoverImageMetadata(metadata);
-                    }}
-                    onImageRemoved={() => {
-                      setCoverImage('');
-                      setCoverImagePath(undefined);
-                      setCoverImageMetadata(undefined);
-                    }}
-                    label="కథ కోసం ఆకర్షణీయమైన ముఖచిత్రాన్ని ఎంచుకోండి (JPG, PNG, WEBP max 5MB)"
-                  />
-                </div>
+                {/* Cover Image Section: Only shown for Direct Writing (rich_text) and Mixed Content modes */}
+                {(storyMode === 'rich_text' || storyMode === 'mixed') && (
+                  <div className="space-y-2">
+                    <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE]">
+                      కథ ముఖచిత్రం (Story Cover Image)
+                    </label>
+                    <CoverImageUploader
+                      value={coverImage}
+                      storagePath={coverImagePath}
+                      metadata={coverImageMetadata}
+                      targetType="story"
+                      targetId={sessionStoryId}
+                      onChange={(url, path, metadata) => {
+                        setCoverImage(url);
+                        setCoverImagePath(path);
+                        setCoverImageMetadata(metadata);
+                      }}
+                      entityId={sessionStoryId}
+                      folder="stories"
+                      initialImageUrl={coverImage}
+                      initialImagePath={coverImagePath}
+                      onImageUploaded={(url, path, metadata) => {
+                        setCoverImage(url);
+                        setCoverImagePath(path);
+                        setCoverImageMetadata(metadata);
+                      }}
+                      onImageRemoved={() => {
+                        setCoverImage('');
+                        setCoverImagePath(undefined);
+                        setCoverImageMetadata(undefined);
+                      }}
+                      label="కథ కోసం ఆకర్షణీయమైన ముఖచిత్రాన్ని ఎంచుకోండి (JPG, PNG, WEBP max 5MB)"
+                    />
+                  </div>
+                )}
 
                 {/* Active Mode Content Workspace */}
                 <div className="pt-2">
@@ -773,7 +819,7 @@ export const WriteModal: React.FC<WriteModalProps> = ({
                     <DocumentImportTab
                       storyId={sessionStoryId}
                       onImportComplete={handleDocumentImported}
-                      onSwitchToImagePages={() => setStoryMode('image_pages')}
+                      initialSourceDoc={sourceDocument}
                     />
                   )}
 

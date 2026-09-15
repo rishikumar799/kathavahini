@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { CreatorStats, Story, User } from '../types';
 import { writerService } from '../services/writerService';
+import { formatSafeDate } from '../utils/dateUtils';
 
 interface CreatorDashboardViewProps {
   stats: CreatorStats;
@@ -305,7 +306,7 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
                       )}
 
                       <span className="text-xs text-[#6F6970]">
-                        {story.publishedAt || (story.submittedAt ? new Date(story.submittedAt).toLocaleDateString('te-IN') : '')}
+                        {formatSafeDate(story.publishedAt || story.submittedAt)}
                       </span>
                     </div>
 

@@ -8,41 +8,88 @@ import {
   where,
   limit,
   serverTimestamp,
-  Timestamp
+  Timestamp,
+  onSnapshot
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { Novel, Chapter } from '../types';
 import { MOCK_NOVELS } from './mockData';
+import { deletionTracker } from './deletionTracker';
 
 class NovelService {
+  /**
+   * Subscribe to real-time novel updates from Firestore
+   */
+  public subscribeNovels(callback: (novels: Novel[]) => void): () => void {
+    this.getFeaturedNovels().then(callback).catch(() => {});
+
+    try {
+      const q = query(collection(db, 'novels'), limit(50));
+      const unsubscribe = onSnapshot(q, async () => {
+        try {
+          const novels = await this.getFeaturedNovels();
+          callback(novels);
+        } catch (e) {}
+      }, (err) => {
+        console.warn('Real-time novels subscriber note:', err);
+      });
+
+      const handleRefresh = () => {
+        this.getFeaturedNovels().then(callback).catch(() => {});
+      };
+
+      if (typeof window !== 'undefined') {
+        window.addEventListener('kathavahini:refresh-content', handleRefresh);
+        window.addEventListener('kathavahini:item-deleted', handleRefresh);
+      }
+
+      return () => {
+        unsubscribe();
+        if (typeof window !== 'undefined') {
+          window.removeEventListener('kathavahini:refresh-content', handleRefresh);
+          window.removeEventListener('kathavahini:item-deleted', handleRefresh);
+        }
+      };
+    } catch (e) {
+      console.warn('Could not establish real-time novels snapshot:', e);
+      return () => {};
+    }
+  }
+
   /**
    * Fetch all novels from top-level `novels` collection
    */
   public async getFeaturedNovels(maxLimit: number = 30): Promise<Novel[]> {
     try {
+      await deletionTracker.init();
       const q = query(collection(db, 'novels'), limit(maxLimit));
       const snap = await getDocs(q);
 
       if (!snap.empty) {
         const novels: Novel[] = [];
         for (const docSnap of snap.docs) {
+          if (deletionTracker.isDeleted(docSnap.id)) continue;
           const data = docSnap.data();
+          if (data.deleted === true || data.status === 'deleted') continue;
+          if (data.visibility === 'hidden' || data.visibility === 'private') continue;
           const novelId = docSnap.id;
 
           // Fetch chapters subcollection
           const chapSnap = await getDocs(collection(db, 'novels', novelId, 'chapters'));
-          const chapters: Chapter[] = chapSnap.docs.map(c => {
-            const cd = c.data();
-            return {
-              id: c.id,
-              chapterNumber: cd.chapterNumber || 1,
-              title: cd.title || '',
-              teluguTitle: cd.teluguTitle || cd.title || '',
-              content: Array.isArray(cd.content) ? cd.content : [cd.content || ''],
-              readingTimeMinutes: cd.readingTimeMinutes || 5,
-              publishedAt: cd.publishedAt instanceof Timestamp ? cd.publishedAt.toDate().toISOString().split('T')[0] : (cd.publishedAt || ''),
-            };
-          });
+          const chapters: Chapter[] = chapSnap.docs
+            .filter(c => !deletionTracker.isDeleted(c.id) && !c.data()?.deleted && c.data()?.status !== 'deleted')
+            .map(c => {
+              const cd = c.data();
+              return {
+                id: c.id,
+                chapterNumber: cd.chapterNumber || 1,
+                title: cd.title || '',
+                teluguTitle: cd.teluguTitle || cd.title || '',
+                content: Array.isArray(cd.content) ? cd.content : [cd.content || ''],
+                readingTimeMinutes: cd.readingTimeMinutes || 5,
+                publishedAt: cd.publishedAt instanceof Timestamp ? cd.publishedAt.toDate().toISOString().split('T')[0] : (cd.publishedAt || ''),
+              };
+            });
 
           novels.push({
             id: novelId,
@@ -68,17 +115,19 @@ class NovelService {
           });
         }
 
-        // Merge with mock catalog
+        // Merge with mock catalog (excluding any deleted ones)
         const map = new Map<string, Novel>();
-        MOCK_NOVELS.forEach(n => map.set(n.id, n));
+        MOCK_NOVELS.filter(n => !deletionTracker.isDeleted(n.id)).forEach(n => map.set(n.id, n));
         novels.forEach(n => map.set(n.id, n));
-        return Array.from(map.values()).sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0));
+        return Array.from(map.values())
+          .filter(n => !deletionTracker.isDeleted(n.id) && (n as any).status !== 'deleted' && (n as any).status !== 'archived')
+          .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0));
       }
     } catch (err) {
       console.warn('Error fetching novels from Firestore:', err);
     }
 
-    return MOCK_NOVELS;
+    return MOCK_NOVELS.filter(n => !deletionTracker.isDeleted(n.id) && (n as any).status !== 'deleted' && (n as any).status !== 'archived');
   }
 
   public async getNovelById(id: string): Promise<Novel | undefined> {

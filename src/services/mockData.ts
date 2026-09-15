@@ -484,3 +484,25 @@ export const MOCK_KNOWLEDGE_ARTICLES = [
     tags: ['నవలలు', 'చరిత్ర', 'విశ్వనాథ', 'చలం']
   }
 ];
+
+export const removeMockStory = (id: string) => {
+  const index = MOCK_STORIES.findIndex(s => s.id === id);
+  if (index !== -1) {
+    MOCK_STORIES.splice(index, 1);
+  }
+};
+
+export const removeMockNovel = (id: string) => {
+  const index = MOCK_NOVELS.findIndex(n => n.id === id);
+  if (index !== -1) {
+    MOCK_NOVELS.splice(index, 1);
+  }
+};
+
+export const removeMockJoke = (id: string) => {
+  const index = MOCK_JOKES.findIndex(j => j.id === id);
+  if (index !== -1) {
+    MOCK_JOKES.splice(index, 1);
+  }
+};
+

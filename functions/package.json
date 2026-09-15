@@ -1,5 +1,5 @@
 {
-  "name": "akshara-functions",
+  "name": "kathavahini-functions",
   "scripts": {
     "build": "tsc",
     "build:watch": "tsc --watch",

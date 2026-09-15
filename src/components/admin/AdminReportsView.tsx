@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { AlertTriangle, CheckCircle2, Clock, Eye, Check, MessageSquare } from 'lucide-react';
 import { IssueReport } from '../../types';
+import { formatSafeDateTime } from '../../utils/dateUtils';
 
 interface AdminReportsViewProps {
   reports: IssueReport[];
@@ -86,7 +87,7 @@ export const AdminReportsView: React.FC<AdminReportsViewProps> = ({
                     రకం: {rep.category || rep.issueType || 'కంటెంట్ సమస్య'}
                   </span>
                   <span className="text-[11px] text-[#6F6970] dark:text-[#A29CA6]">
-                    • {new Date(rep.createdAt).toLocaleString('te-IN')}
+                    • {formatSafeDateTime(rep.createdAt)}
                   </span>
                 </div>
 

@@ -16,7 +16,7 @@ import {
   EyeOff,
   Clock
 } from 'lucide-react';
-import { authService } from '../../services/authService';
+import { authService, MASTER_ADMIN_EMAIL, MASTER_ADMIN_PASSWORD } from '../../services/authService';
 import { StoryCategory } from '../../types';
 
 interface AuthModalProps {
@@ -427,6 +427,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* ========================================================================= */}
         {mode === 'login' && (
           <form onSubmit={handleLoginSubmit} className="space-y-4">
+            {/* Master Admin Identification Banner */}
+            {email.trim().toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase() && (
+              <div className="p-3 rounded-2xl bg-purple-500/10 border border-purple-500/30 text-purple-800 dark:text-purple-300 text-xs flex items-start gap-2.5 animate-in fade-in">
+                <ShieldCheck className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-bold font-serif-telugu">కథావాహిని ప్రధాన అడ్మిన్ లాగిన్ (Master Administrator)</p>
+                  <p className="text-[11px] leading-relaxed opacity-90">
+                    అధికారిక నిర్వాహక పాస్‌వర్డ్ ద్వారా అన్ని కథలు, వినియోగదారులు మరియు ప్లాట్‌ఫారమ్ సెట్టింగ్‌లను నిర్వహించవచ్చు.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE] mb-1 font-serif-telugu">
                 ఈమెయిల్ అడ్రస్ (Email)
@@ -493,6 +506,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <span>{loading ? 'వేచి ఉండండి...' : 'లాగిన్ (Login)'}</span>
             </button>
 
+            {/* Discreet Admin Quick Fill helper */}
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setEmail(MASTER_ADMIN_EMAIL);
+                  setPassword(MASTER_ADMIN_PASSWORD);
+                  setError('');
+                }}
+                className="w-full py-2 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/30 dark:hover:bg-purple-950/50 text-purple-700 dark:text-purple-300 text-xs font-bold border border-purple-200 dark:border-purple-800/40 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>అడ్మిన్ లాగిన్ వివరాలు నింపండి (Fill Admin Credentials)</span>
+              </button>
+            </div>
+
             <p className="text-center text-xs text-[#6F6970] dark:text-[#AAA4AC] pt-2 font-serif-telugu">
               ఖాతా లేదా?{' '}
               <button
@@ -543,7 +572,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      setEmail(resetEmail || 'thekathavahini@gmail.com');
+                      setEmail(resetEmail || '');
                       setMode('register');
                       setError('');
                       setResetSent(false);
@@ -610,6 +639,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* ========================================================================= */}
         {mode === 'register' && (
           <div className="space-y-4">
+            {/* Master Admin Notice on Register screen */}
+            {email.trim().toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase() && (
+              <div className="p-3.5 rounded-2xl bg-purple-500/10 border border-purple-500/30 text-purple-800 dark:text-purple-300 text-xs space-y-2 animate-in fade-in">
+                <div className="flex items-center gap-2 font-bold font-serif-telugu">
+                  <ShieldCheck className="w-4 h-4 text-purple-600 dark:text-purple-400 shrink-0" />
+                  <span>{MASTER_ADMIN_EMAIL} ప్రధాన అడ్మిన్ ఖాతా</span>
+                </div>
+                <p className="text-[11px] leading-relaxed">
+                  ఈ ఈమెయిల్ కథావాహిని ప్రధాన నిర్వాహక ఖాతాగా స్థిరపరచబడింది. దీనికి ప్రత్యేక సైన్-అప్ లేదా దరఖాస్తు అవసరం లేదు. దయచేసి నేరుగా లాగిన్ ద్వారా ప్రవేశించండి.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('login');
+                    setPassword(MASTER_ADMIN_PASSWORD);
+                    setError('');
+                  }}
+                  className="w-full py-2 rounded-xl bg-purple-700 hover:bg-purple-800 text-white text-xs font-bold shadow-sm transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>అడ్మిన్ లాగిన్‌కు మారండి (Switch to Admin Login)</span>
+                </button>
+              </div>
+            )}
+
             {/* TWO CLEAR REGISTRATION TABS */}
             <div className="grid grid-cols-2 gap-2 p-1 bg-[#FAF7F2] dark:bg-[#222229] rounded-2xl border border-[#E8E1DA] dark:border-[#2E2D36]">
               <button

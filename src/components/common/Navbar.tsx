@@ -354,6 +354,22 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span>కథ రాయండి</span>
           </button>
 
+          {/* Admin Dashboard Direct Entry */}
+          {user && user.role === 'admin' && (
+            <button
+              onClick={() => handleNavClick('admin')}
+              className={`hidden sm:inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer border ${
+                currentTab === 'admin'
+                  ? 'bg-purple-700 text-white border-purple-700 shadow-sm'
+                  : 'bg-purple-500/10 hover:bg-purple-500/20 text-purple-700 dark:text-purple-300 border-purple-500/30'
+              }`}
+              title="అడ్మిన్ కంట్రోల్ ప్యానెల్"
+            >
+              <Shield className="w-3.5 h-3.5" />
+              <span>అడ్మిన్ ప్యానెల్</span>
+            </button>
+          )}
+
           {/* User Profile / Login */}
           {user ? (
             <button

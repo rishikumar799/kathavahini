@@ -9,40 +9,85 @@ import {
   limit,
   serverTimestamp,
   increment,
-  Timestamp
+  Timestamp,
+  onSnapshot
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { Joke } from '../types';
 import { MOCK_JOKES, MOCK_AUTHORS } from './mockData';
+import { deletionTracker } from './deletionTracker';
 
 class JokeService {
+  /**
+   * Real-time subscription to jokes from Firestore
+   */
+  public subscribeJokes(callback: (jokes: Joke[]) => void, category?: string): () => void {
+    this.getJokes(category).then(callback).catch(() => {});
+
+    try {
+      const q = query(collection(db, 'jokes'), limit(60));
+      const unsubscribe = onSnapshot(q, async () => {
+        try {
+          const jokes = await this.getJokes(category);
+          callback(jokes);
+        } catch (e) {}
+      }, (err) => {
+        console.warn('Real-time jokes subscriber note:', err);
+      });
+
+      const handleRefresh = () => {
+        this.getJokes(category).then(callback).catch(() => {});
+      };
+
+      if (typeof window !== 'undefined') {
+        window.addEventListener('kathavahini:refresh-content', handleRefresh);
+        window.addEventListener('kathavahini:item-deleted', handleRefresh);
+      }
+
+      return () => {
+        unsubscribe();
+        if (typeof window !== 'undefined') {
+          window.removeEventListener('kathavahini:refresh-content', handleRefresh);
+          window.removeEventListener('kathavahini:item-deleted', handleRefresh);
+        }
+      };
+    } catch (e) {
+      console.warn('Could not establish real-time jokes snapshot:', e);
+      return () => {};
+    }
+  }
+
   /**
    * Fetch jokes from top-level `jokes` collection
    */
   public async getJokes(category?: string, maxLimit: number = 50): Promise<Joke[]> {
     try {
+      await deletionTracker.init();
       const q = query(collection(db, 'jokes'), limit(maxLimit));
       const snap = await getDocs(q);
 
       if (!snap.empty) {
-        const firestoreJokes: Joke[] = snap.docs.map(d => {
-          const data = d.data();
-          return {
-            id: d.id,
-            content: data.content || data.teluguContent || '',
-            category: data.category || 'హాస్యం',
-            authorId: data.authorId || '',
-            author: data.author || MOCK_AUTHORS[2],
-            likeCount: data.likesCount || data.likeCount || 0,
-            shareCount: data.shareCount || 0,
-            publishedAt: data.publishedAt instanceof Timestamp ? data.publishedAt.toDate().toISOString().split('T')[0] : (data.publishedAt || ''),
-          };
-        });
+        const firestoreJokes: Joke[] = snap.docs
+          .filter(d => !deletionTracker.isDeleted(d.id) && !d.data()?.deleted && d.data()?.status !== 'deleted')
+          .map(d => {
+            const data = d.data();
+            return {
+              id: d.id,
+              content: data.content || data.teluguContent || '',
+              category: data.category || 'హాస్యం',
+              authorId: data.authorId || '',
+              author: data.author || MOCK_AUTHORS[2],
+              likeCount: data.likesCount || data.likeCount || 0,
+              shareCount: data.shareCount || 0,
+              publishedAt: data.publishedAt instanceof Timestamp ? data.publishedAt.toDate().toISOString().split('T')[0] : (data.publishedAt || ''),
+            };
+          });
 
         const map = new Map<string, Joke>();
-        MOCK_JOKES.forEach(j => map.set(j.id, j));
+        MOCK_JOKES.filter(j => !deletionTracker.isDeleted(j.id)).forEach(j => map.set(j.id, j));
         firestoreJokes.forEach(j => map.set(j.id, j));
-        const allJokes = Array.from(map.values());
+        const allJokes = Array.from(map.values())
+          .filter(j => !deletionTracker.isDeleted(j.id) && (j as any).status !== 'deleted' && (j as any).status !== 'archived');
 
         if (category && category !== 'అన్నీ') {
           return allJokes.filter(j => j.category === category);
@@ -53,10 +98,11 @@ class JokeService {
       console.warn('Error fetching jokes from Firestore:', err);
     }
 
+    const baseline = MOCK_JOKES.filter(j => !deletionTracker.isDeleted(j.id));
     if (category && category !== 'అన్నీ') {
-      return MOCK_JOKES.filter(j => j.category === category);
+      return baseline.filter(j => j.category === category);
     }
-    return [...MOCK_JOKES].sort((a, b) => b.likeCount - a.likeCount);
+    return [...baseline].sort((a, b) => b.likeCount - a.likeCount);
   }
 
   public async toggleLike(jokeId: string): Promise<boolean> {

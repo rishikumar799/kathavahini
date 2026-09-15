@@ -15,7 +15,8 @@ import {
   Redo2, 
   Maximize2, 
   Minimize2,
-  Minus
+  Minus,
+  Pilcrow
 } from 'lucide-react';
 
 interface RichTextEditorProps {
@@ -127,6 +128,28 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
     }, 10);
   };
 
+  const insertParagraph = () => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const currentText = textarea.value;
+
+    const before = currentText.substring(0, start);
+    const after = currentText.substring(end);
+
+    const needsBreak = !before.endsWith('\n\n') ? (before.endsWith('\n') ? '\n' : '\n\n') : '';
+    const newText = `${before}${needsBreak}${after}`;
+    handleTextChange(newText);
+
+    setTimeout(() => {
+      textarea.focus();
+      const newPos = start + needsBreak.length;
+      textarea.setSelectionRange(newPos, newPos);
+    }, 10);
+  };
+
   return (
     <div className={`flex flex-col border border-[#E8E1DA] dark:border-[#2E2D36] rounded-2xl bg-white dark:bg-[#18181D] overflow-hidden shadow-sm transition-all duration-300 ${
       isDistractionFree ? 'fixed inset-0 z-50 rounded-none border-none p-6 sm:p-12 bg-[#FAF7F2] dark:bg-[#121216]' : ''
@@ -201,6 +224,21 @@ export const RichTextEditor: React.FC<RichTextEditorProps> = ({
           >
             <Heading3 className="w-4 h-4" />
           </button>
+
+          <div className="w-[1px] h-5 bg-[#E8E1DA] dark:bg-[#2E2D36] mx-1" />
+
+          {/* Paragraph break / New paragraph */}
+          <button
+            type="button"
+            onClick={insertParagraph}
+            className="px-2 py-1 rounded-lg text-[#6F6970] dark:text-[#AAA4AC] hover:text-[#7A284B] dark:hover:text-[#D87591] hover:bg-[#7A284B]/10 cursor-pointer flex items-center gap-1 text-xs font-serif-telugu font-bold transition-colors"
+            title="కొత్త పేరాను ప్రారంభించండి (Start New Paragraph)"
+          >
+            <Pilcrow className="w-4 h-4 text-[#7A284B] dark:text-[#D87591]" />
+            <span className="hidden sm:inline">కొత్త పేరా</span>
+          </button>
+
+          <div className="w-[1px] h-5 bg-[#E8E1DA] dark:bg-[#2E2D36] mx-1" />
 
           {/* Quotes & Lists */}
           <button

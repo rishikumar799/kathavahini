@@ -22,9 +22,11 @@ import {
   Globe
 } from 'lucide-react';
 import { Story, StoryCategory, ContentStatus, ContentVisibility } from '../../types';
+import { formatSafeDate } from '../../utils/dateUtils';
 
 interface AdminStoriesViewProps {
   stories: Story[];
+  initialFilter?: 'all' | 'pending' | 'published' | 'draft' | 'scheduled' | 'rejected' | 'archived';
   onApprove: (story: Story) => void;
   onReject: (story: Story, reason: string) => void;
   onArchive: (story: Story) => void;
@@ -41,6 +43,7 @@ interface AdminStoriesViewProps {
 
 export const AdminStoriesView: React.FC<AdminStoriesViewProps> = ({
   stories,
+  initialFilter = 'all',
   onApprove,
   onReject,
   onArchive,
@@ -54,12 +57,18 @@ export const AdminStoriesView: React.FC<AdminStoriesViewProps> = ({
   onOpenPreview,
   onClosePreview,
 }) => {
-  const [filter, setFilter] = useState<'all' | 'pending' | 'published' | 'draft' | 'scheduled' | 'rejected' | 'archived'>('all');
+  const [filter, setFilter] = useState<'all' | 'pending' | 'published' | 'draft' | 'scheduled' | 'rejected' | 'archived'>(initialFilter);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [rejectModalStory, setRejectModalStory] = useState<Story | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [deleteConfirmStory, setDeleteConfirmStory] = useState<Story | null>(null);
+
+  React.useEffect(() => {
+    if (initialFilter) {
+      setFilter(initialFilter);
+    }
+  }, [initialFilter]);
 
   const filtered = stories.filter(story => {
     const matchesFilter = 
@@ -287,7 +296,7 @@ export const AdminStoriesView: React.FC<AdminStoriesViewProps> = ({
                       {isScheduled && (
                         <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/10 text-purple-600 border border-purple-500/20 flex items-center gap-1 font-serif-telugu">
                           <Calendar className="w-3 h-3" />
-                          షెడ్యూల్డ్ ({story.scheduledAt ? new Date(story.scheduledAt).toLocaleDateString() : ''})
+                          షెడ్యూల్డ్ ({story.scheduledAt ? formatSafeDate(story.scheduledAt) : ''})
                         </span>
                       )}
                       {isRejected && (

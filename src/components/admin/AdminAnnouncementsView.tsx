@@ -41,6 +41,7 @@ import {
 import { announcementService } from '../../services/announcementService';
 import { storageService } from '../../services/storageService';
 import { AdminAnnouncementPreviewModal } from './AdminAnnouncementPreviewModal';
+import { formatSafeDateTime } from '../../utils/dateUtils';
 
 interface AdminAnnouncementsViewProps {
   currentUser: User | null;
@@ -598,7 +599,7 @@ export const AdminAnnouncementsView: React.FC<AdminAnnouncementsViewProps> = ({ 
                           <span>•</span>
                           <span className="text-amber-600 dark:text-amber-400 flex items-center gap-1">
                             <Clock className="w-3 h-3" />
-                            షెడ్యూల్: {new Date(ann.scheduledAt).toLocaleString()}
+                            షెడ్యూల్: {formatSafeDateTime(ann.scheduledAt)}
                           </span>
                         </>
                       )}

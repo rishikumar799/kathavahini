@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { MessageSquare, Search, Trash2, Heart, User as UserIcon } from 'lucide-react';
 import { Comment } from '../../types';
+import { formatSafeDate } from '../../utils/dateUtils';
 
 interface AdminCommentsViewProps {
   comments: Comment[];
@@ -66,7 +67,7 @@ export const AdminCommentsView: React.FC<AdminCommentsViewProps> = ({
                       {c.user?.name || 'పాఠకుడు'}
                     </span>
                     <span className="text-[10px] text-[#6F6970] dark:text-[#A29CA6]">
-                      {new Date(c.createdAt).toLocaleDateString('te-IN')}
+                      {formatSafeDate(c.createdAt)}
                     </span>
                   </div>
                   <p className="text-xs font-serif-telugu text-[#17151A] dark:text-[#F7F3EE] leading-relaxed">

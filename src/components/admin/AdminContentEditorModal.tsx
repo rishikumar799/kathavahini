@@ -53,14 +53,17 @@ export type ContentEditorType = 'story' | 'novel' | 'episode' | 'joke' | 'knowle
 interface AdminContentEditorModalProps {
   isOpen: boolean;
   onClose: () => void;
+  contentType?: ContentEditorType;
   initialType?: ContentEditorType;
   initialData?: any;
+  novelContext?: Novel;
   novelsList?: Novel[];
-  onSaveStory: (data: any) => Promise<void>;
-  onSaveNovel: (data: any) => Promise<void>;
-  onSaveEpisode: (data: any) => Promise<void>;
-  onSaveJoke: (data: any) => Promise<void>;
-  onSaveKnowledge: (data: any) => Promise<void>;
+  onSave?: (data: any) => Promise<void>;
+  onSaveStory?: (data: any) => Promise<void>;
+  onSaveNovel?: (data: any) => Promise<void>;
+  onSaveEpisode?: (data: any) => Promise<void>;
+  onSaveJoke?: (data: any) => Promise<void>;
+  onSaveKnowledge?: (data: any) => Promise<void>;
 }
 
 const CATEGORIES: StoryCategory[] = [
@@ -79,16 +82,20 @@ const CATEGORIES: StoryCategory[] = [
 export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = ({
   isOpen,
   onClose,
+  contentType: passedContentType,
   initialType = 'story',
   initialData = null,
+  novelContext,
   novelsList = [],
+  onSave,
   onSaveStory,
   onSaveNovel,
   onSaveEpisode,
   onSaveJoke,
   onSaveKnowledge,
 }) => {
-  const [contentType, setContentType] = useState<ContentEditorType>(initialType);
+  const effectiveInitialType = passedContentType || initialType;
+  const [contentType, setContentType] = useState<ContentEditorType>(effectiveInitialType);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -140,7 +147,7 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
   const [knowledgeText, setKnowledgeText] = useState('');
 
   useEffect(() => {
-    if (initialType) setContentType(initialType);
+    if (effectiveInitialType) setContentType(effectiveInitialType);
     setViewMode('edit');
     setSessionEntityId(initialData?.id || `admin-${Date.now()}`);
 
@@ -157,7 +164,7 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
       setScheduledAt(initialData.scheduledAt || '');
       setTagsInput(Array.isArray(initialData.tags) ? initialData.tags.join(', ') : 'తెలుగు, కథ');
 
-      if (initialType === 'story') {
+      if (effectiveInitialType === 'story') {
         setExcerpt(initialData.excerpt || '');
         setTeluguExcerpt(initialData.teluguExcerpt || initialData.excerpt || '');
         setStoryMode(initialData.contentType || (initialData.imagePages?.length > 0 ? 'image_pages' : initialData.contentBlocks?.length > 0 ? 'mixed' : 'rich_text'));
@@ -183,17 +190,17 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
         }
 
         setSourceDocument(initialData.sourceDocument || undefined);
-      } else if (initialType === 'novel') {
+      } else if (effectiveInitialType === 'novel') {
         setNovelDescription(initialData.description || '');
         setNovelTeluguDescription(initialData.teluguDescription || initialData.description || '');
-      } else if (initialType === 'episode') {
-        setSelectedNovelId(initialData.novelId || '');
+      } else if (effectiveInitialType === 'episode') {
+        setSelectedNovelId(initialData.novelId || novelContext?.id || '');
         setEpisodeNumber(initialData.episodeNumber || 1);
         setEpisodeText(Array.isArray(initialData.content) ? initialData.content.join('\n\n') : (initialData.content || ''));
-      } else if (initialType === 'joke') {
+      } else if (effectiveInitialType === 'joke') {
         setJokeContent(initialData.content || '');
         setJokeTeluguContent(initialData.teluguContent || initialData.content || '');
-      } else if (initialType === 'knowledge') {
+      } else if (effectiveInitialType === 'knowledge') {
         setKnowledgeSummary(initialData.summary || '');
         setKnowledgeText(Array.isArray(initialData.content) ? initialData.content.join('\n\n') : (initialData.content || ''));
       }
@@ -219,7 +226,7 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
       setStoryMode('rich_text');
       setNovelDescription('');
       setNovelTeluguDescription('');
-      setSelectedNovelId(novelsList[0]?.id || '');
+      setSelectedNovelId(novelContext?.id || novelsList[0]?.id || '');
       setEpisodeNumber(1);
       setEpisodeText('');
       setJokeContent('');
@@ -227,7 +234,7 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
       setKnowledgeSummary('');
       setKnowledgeText('');
     }
-  }, [isOpen, initialType, initialData, novelsList]);
+  }, [isOpen, effectiveInitialType, initialData, novelContext, novelsList]);
 
   if (!isOpen) return null;
 
@@ -241,8 +248,8 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
     if (sourceDoc) {
       setSourceDocument(sourceDoc);
     }
-    // Switch to Rich Text Editor for easy review & polishing
-    setStoryMode('rich_text');
+    // Keep user in document_import mode for complete PDF story preservation
+    setStoryMode('document_import');
     setViewMode('edit');
   };
 
@@ -262,13 +269,24 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
 
         let paragraphs: string[] = [];
 
-        if (storyMode === 'rich_text' || storyMode === 'document_import') {
+        if (storyMode === 'rich_text') {
           paragraphs = textContent.split('\n\n').map(p => p.trim()).filter(Boolean);
           if (paragraphs.length === 0 && textContent.trim()) {
             paragraphs = [textContent.trim()];
           }
           if (paragraphs.length === 0) {
-            throw new Error('దయచేసి కథ కంటెంట్‌ను నమోదు చేయండి లేదా పత్రాన్ని దిగుమతి చేసుకోండి.');
+            throw new Error('దయచేసి కథ కంటెంట్‌ను నమోదు చేయండి.');
+          }
+        } else if (storyMode === 'document_import') {
+          if (!sourceDocument) {
+            throw new Error('దయచేసి కథ కోసం ఒక PDF లేదా డాక్యుమెంట్ ఫైల్‌ను అప్‌లోడ్ చేయండి.');
+          }
+          paragraphs = textContent.split('\n\n').map(p => p.trim()).filter(Boolean);
+          if (paragraphs.length === 0 && textContent.trim()) {
+            paragraphs = [textContent.trim()];
+          }
+          if (paragraphs.length === 0) {
+            paragraphs = [`పూర్తి PDF పత్ర కథ: ${sourceDocument.name}`];
           }
         } else if (storyMode === 'image_pages') {
           if (imagePages.length === 0) {
@@ -291,7 +309,7 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
         const effectiveTitle = teluguTitle.trim() || title.trim() || 'శీర్షిక లేని కథ';
         const effectiveCover = coverImage || (imagePages.length > 0 ? imagePages[0].imageUrl : 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800');
 
-        await onSaveStory({
+        const storyPayload = {
           id: initialData?.id,
           title: title || effectiveTitle,
           teluguTitle: effectiveTitle,
@@ -312,12 +330,18 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
           status: finalStatus,
           visibility: finalVisibility,
           scheduledAt: finalStatus === 'scheduled' ? scheduledAt : undefined,
-        });
+        };
+
+        if (onSave) {
+          await onSave(storyPayload);
+        } else if (onSaveStory) {
+          await onSaveStory(storyPayload);
+        }
       } else if (contentType === 'novel') {
         if (!teluguTitle.trim() && !title.trim()) {
           throw new Error('దయచేసి నవల శీర్షికను నమోదు చేయండి');
         }
-        await onSaveNovel({
+        const novelPayload = {
           id: initialData?.id,
           title: title || teluguTitle,
           teluguTitle: teluguTitle || title,
@@ -332,7 +356,13 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
           authorName,
           status: finalStatus === 'published' ? 'ongoing' : finalStatus,
           visibility: finalVisibility,
-        });
+        };
+
+        if (onSave) {
+          await onSave(novelPayload);
+        } else if (onSaveNovel) {
+          await onSaveNovel(novelPayload);
+        }
       } else if (contentType === 'episode') {
         if (!selectedNovelId) {
           throw new Error('దయచేసి నవలను ఎంచుకోండి');
@@ -345,7 +375,7 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
           throw new Error('దయచేసి ఎపిసోడ్ కంటెంట్ రాయండి');
         }
         const selectedNovel = novelsList.find(n => n.id === selectedNovelId);
-        await onSaveEpisode({
+        const episodePayload = {
           id: initialData?.id,
           novelId: selectedNovelId,
           novelTitle: selectedNovel?.teluguTitle || selectedNovel?.title || 'నవల',
@@ -356,13 +386,19 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
           status: finalStatus,
           visibility: finalVisibility,
           scheduledAt: finalStatus === 'scheduled' ? scheduledAt : undefined,
-        });
+        };
+
+        if (onSave) {
+          await onSave(episodePayload);
+        } else if (onSaveEpisode) {
+          await onSaveEpisode(episodePayload);
+        }
       } else if (contentType === 'joke') {
         const text = jokeTeluguContent || jokeContent;
         if (!text.trim()) {
           throw new Error('దయచేసి జోక్ కంటెంట్ రాయండి');
         }
-        await onSaveJoke({
+        const jokePayload = {
           id: initialData?.id,
           content: jokeContent || jokeTeluguContent,
           teluguContent: jokeTeluguContent || jokeContent,
@@ -370,7 +406,13 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
           status: finalStatus,
           visibility: finalVisibility,
           scheduledAt: finalStatus === 'scheduled' ? scheduledAt : undefined,
-        });
+        };
+
+        if (onSave) {
+          await onSave(jokePayload);
+        } else if (onSaveJoke) {
+          await onSaveJoke(jokePayload);
+        }
       } else if (contentType === 'knowledge') {
         if (!teluguTitle.trim() && !title.trim()) {
           throw new Error('దయచేసి శీర్షికను నమోదు చేయండి');
@@ -379,7 +421,7 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
         if (paras.length === 0 && knowledgeText.trim()) {
           paras.push(knowledgeText.trim());
         }
-        await onSaveKnowledge({
+        const knowledgePayload = {
           id: initialData?.id,
           title: title || teluguTitle,
           teluguTitle: teluguTitle || title,
@@ -395,7 +437,13 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
           status: finalStatus,
           visibility: finalVisibility,
           scheduledAt: finalStatus === 'scheduled' ? scheduledAt : undefined,
-        });
+        };
+
+        if (onSave) {
+          await onSave(knowledgePayload);
+        } else if (onSaveKnowledge) {
+          await onSaveKnowledge(knowledgePayload);
+        }
       }
 
       onClose();
@@ -646,8 +694,8 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
                 </div>
               )}
 
-              {/* Cover Image Upload Row */}
-              {(contentType === 'story' || contentType === 'novel' || contentType === 'knowledge') && (
+              {/* Cover Image Upload Row: Only shown for rich_text and mixed stories, or novels/knowledge */}
+              {(((contentType === 'story' && (storyMode === 'rich_text' || storyMode === 'mixed')) || contentType === 'novel' || contentType === 'knowledge')) && (
                 <CoverImageUploader
                   value={coverImage}
                   storagePath={coverImagePath}
@@ -709,9 +757,9 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
                     >
                       <div className="flex items-center gap-2 font-bold text-xs">
                         <FileText className="w-4 h-4 text-[#7A284B] dark:text-[#D87591]" />
-                        <span>2. పత్రం దిగుమతి</span>
+                        <span>2. పి.డి.ఎఫ్ కథ</span>
                       </div>
-                      <span className="text-[10px] opacity-80">PDF / Word / TXT</span>
+                      <span className="text-[10px] opacity-80">పూర్తి PDF పత్రం</span>
                     </button>
 
                     <button
@@ -727,7 +775,7 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
                         <ImageIcon className="w-4 h-4 text-[#7A284B] dark:text-[#D87591]" />
                         <span>3. చిత్ర కథ పేజీలు</span>
                       </div>
-                      <span className="text-[10px] opacity-80">కామిక్స్ / స్కాన్ పేజీలు</span>
+                      <span className="text-[10px] opacity-80">ప్రతి పేజీ ఒక చిత్రం</span>
                     </button>
 
                     <button
@@ -785,7 +833,7 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
                       <DocumentImportTab
                         storyId={sessionEntityId}
                         onImportComplete={handleDocumentImported}
-                        onSwitchToImagePages={() => setStoryMode('image_pages')}
+                        initialSourceDoc={sourceDocument}
                       />
                     )}
 

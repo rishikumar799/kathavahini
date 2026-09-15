@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { 
   BookOpen, Star, Eye, Heart, Bookmark, Share2, Clock, Calendar, ArrowLeft, Play, UserPlus, UserCheck 
 } from 'lucide-react';
 import { Story, Author } from '../types';
 import { SectionHeader } from '../components/common/SectionHeader';
 import { StoryCard } from '../components/cards/StoryCard';
+import { StarRating } from '../components/common/StarRating';
+import { storyService } from '../services/storyService';
 
 interface StoryDetailViewProps {
   story: Story;
@@ -29,6 +31,12 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
   onLikeToggle,
   onFollowAuthorToggle,
 }) => {
+  useEffect(() => {
+    if (story?.id) {
+      storyService.recordStoryView(story.id);
+    }
+  }, [story?.id]);
+
   const handleShare = () => {
     if (navigator.share) {
       navigator.share({
@@ -112,14 +120,32 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
               <span>{story.viewCount.toLocaleString()} వీక్షణలు</span>
             </div>
 
+            <div className="flex items-center gap-1.5 font-medium text-red-500">
+              <Heart className="w-4 h-4 fill-red-500" />
+              <span>{story.likeCount.toLocaleString()} లైక్‌లు</span>
+            </div>
+
             <div className="flex items-center gap-1.5">
               <Calendar className="w-4 h-4" />
               <span>{story.publishedAt}</span>
             </div>
           </div>
 
+          {/* Real Star Rating Card */}
+          <div className="p-4 rounded-2xl bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36]">
+            <h4 className="text-xs font-bold text-[#7A284B] dark:text-[#D87591] mb-2 font-serif-telugu">
+              ఈ కథకు మీ రేటింగ్ ఇవ్వండి:
+            </h4>
+            <StarRating
+              storyId={story.id}
+              initialRating={story.rating}
+              size="md"
+              showSummary={true}
+            />
+          </div>
+
           {/* CTAs */}
-          <div className="flex flex-wrap items-center gap-4 pt-4">
+          <div className="flex flex-wrap items-center gap-4 pt-2">
             <button
               onClick={() => onStartReading(story)}
               className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-full bg-[#7A284B] hover:bg-[#631F3C] dark:bg-[#D87591] dark:hover:bg-[#EA8DA7] text-white text-base font-bold shadow-lg transition-all cursor-pointer transform hover:-translate-y-0.5"
@@ -142,7 +168,7 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
 
             <button
               onClick={() => onLikeToggle(story.id)}
-              className={`p-3.5 rounded-full border transition-colors cursor-pointer ${
+              className={`inline-flex items-center gap-2 px-5 py-3 rounded-full border transition-colors cursor-pointer ${
                 story.isLiked
                   ? 'bg-red-500/20 border-red-500 text-red-500'
                   : 'border-[#E8E1DA] dark:border-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE] hover:bg-[#FAF7F2]'
@@ -150,6 +176,7 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
               title="లైక్ చేయండి"
             >
               <Heart className={`w-5 h-5 ${story.isLiked ? 'fill-red-500' : ''}`} />
+              <span className="text-xs font-bold">{story.likeCount.toLocaleString()}</span>
             </button>
 
             <button

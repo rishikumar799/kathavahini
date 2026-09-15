@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Story, Novel, Author, Chapter, StoryCategory, User, NotificationItem, ReadingHistoryItem, CreatorStats, Joke } from './types';
-import { MOCK_CATEGORIES } from './services/mockData';
+import { categoryService, FormattedCategoryViewItem } from './services/categoryService';
 import { authService } from './services/authService';
 import { storyService } from './services/storyService';
 import { novelService } from './services/novelService';
@@ -68,7 +68,9 @@ export default function App() {
 
   // Data state from service layer
   const [user, setUser] = useState<User | null>(authService.getCurrentUser());
+  const hasAdminRedirectedRef = React.useRef(false);
   const [authLoading, setAuthLoading] = useState<boolean>(authService.isAuthLoading());
+  const [allStories, setAllStories] = useState<Story[]>([]);
   const [trendingStories, setTrendingStories] = useState<Story[]>([]);
   const [popularStories, setPopularStories] = useState<Story[]>([]);
   const [newReleases, setNewReleases] = useState<Story[]>([]);
@@ -80,6 +82,20 @@ export default function App() {
   const [readingHistory, setReadingHistory] = useState<ReadingHistoryItem[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [creatorStats, setCreatorStats] = useState<CreatorStats | null>(null);
+
+  // Dynamic real-time categories from CategoryService
+  const [categories, setCategories] = useState<FormattedCategoryViewItem[]>(() =>
+    categoryService.formatForViews()
+  );
+
+  // Real-time categories subscription across Home, Categories, Stories, and Writer submissions
+  useEffect(() => {
+    const unsubscribe = categoryService.subscribeCategories((rawCats) => {
+      const formatted = categoryService.formatForViews(rawCats, true);
+      setCategories(formatted);
+    });
+    return () => unsubscribe();
+  }, []);
 
   // Sync dark mode class
   useEffect(() => {
@@ -100,12 +116,29 @@ export default function App() {
     const unsubscribe = authService.subscribe((u, loading) => {
       setUser(u);
       setAuthLoading(loading);
+
+      const isUserAdmin = Boolean(
+        u && (u.role === 'admin' || u.email?.toLowerCase() === 'thekathavahini@gmail.com')
+      );
+
+      // Rule: After successful admin authentication, ADMIN -> ADMIN DASHBOARD
+      if (isUserAdmin && !hasAdminRedirectedRef.current) {
+        hasAdminRedirectedRef.current = true;
+        setCurrentTab('admin');
+        return;
+      }
+
+      // If logged out or non-admin, reset the redirect tracker
+      if (!isUserAdmin) {
+        hasAdminRedirectedRef.current = false;
+      }
+
       // Strict Admin Route Guard: If a non-admin is currently on 'admin' tab, redirect to 'home' immediately
-      if (currentTab === 'admin' && !(u && u.role === 'admin')) {
+      if (currentTab === 'admin' && !isUserAdmin) {
         setCurrentTab('home');
       }
       // Strict Writer Studio Route Guard: If user is not active writer or admin, route away
-      if (currentTab === 'dashboard' && !(u && ((u.role === 'writer' && u.status === 'active') || u.role === 'admin'))) {
+      if (currentTab === 'dashboard' && !(u && ((u.role === 'writer' && u.status === 'active') || isUserAdmin))) {
         if (u && u.role === 'writer' && u.status === 'pending') {
           setCurrentTab('apply-writer');
         } else {
@@ -118,16 +151,17 @@ export default function App() {
 
   // Strict route guard when tab changes to admin or dashboard
   useEffect(() => {
+    const isUserAdmin = Boolean(
+      user && (user.role === 'admin' || user.email?.toLowerCase() === 'thekathavahini@gmail.com')
+    );
     if (currentTab === 'admin') {
-      const isAuthorizedAdmin = Boolean(user && user.role === 'admin');
-      if (!isAuthorizedAdmin) {
+      if (!isUserAdmin) {
         setCurrentTab('home');
       }
     }
     if (currentTab === 'dashboard') {
       const isApprovedWriter = Boolean(user && user.role === 'writer' && user.status === 'active');
-      const isAdmin = Boolean(user && user.role === 'admin');
-      if (!isApprovedWriter && !isAdmin) {
+      if (!isApprovedWriter && !isUserAdmin) {
         if (user && user.role === 'writer' && user.status === 'pending') {
           setCurrentTab('apply-writer');
         } else {
@@ -139,6 +173,7 @@ export default function App() {
 
   // Fetch initial data from services
   const loadData = async () => {
+    const published = await storyService.getAllPublishedStories();
     const trending = await storyService.getTrendingStories();
     const popular = await storyService.getPopularStoriesThisWeek();
     const releases = await storyService.getNewReleases();
@@ -151,6 +186,7 @@ export default function App() {
     const notifs = await userService.getNotifications();
     const stats = await userService.getCreatorStats();
 
+    setAllStories(published);
     setTrendingStories(trending);
     setPopularStories(popular);
     setNewReleases(releases);
@@ -166,6 +202,119 @@ export default function App() {
 
   useEffect(() => {
     loadData();
+
+    // Live Real-Time Subscriptions from Firestore collections
+    const unsubStories = storyService.subscribePublishedStories((published) => {
+      setAllStories(published);
+      setTrendingStories([...published].sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0)));
+      setPopularStories([...published].sort((a, b) => (b.likeCount || 0) - (a.likeCount || 0)));
+      setNewReleases([...published].sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()));
+      setSelectedStory(curr => {
+        if (!curr) return null;
+        const exists = published.find(s => s.id === curr.id);
+        if (!exists) {
+          return null;
+        }
+        return { ...curr, ...exists };
+      });
+    });
+
+    const unsubNovels = novelService.subscribeNovels((liveNovels) => {
+      setNovels(liveNovels);
+      setSelectedNovel(curr => {
+        if (!curr) return null;
+        const exists = liveNovels.find(n => n.id === curr.id);
+        if (!exists) return null;
+        return { ...curr, ...exists };
+      });
+    });
+
+    const unsubJokes = jokeService.subscribeJokes((liveJokes) => {
+      setJokes(liveJokes);
+    });
+
+    // Event listeners for real-time reactivity across tabs & views
+    const handleStoryDeleted = (e: any) => {
+      const deletedId = e.detail?.storyId || e.detail?.id;
+      if (deletedId) {
+        setAllStories(prev => prev.filter(s => s.id !== deletedId));
+        setTrendingStories(prev => prev.filter(s => s.id !== deletedId));
+        setPopularStories(prev => prev.filter(s => s.id !== deletedId));
+        setNewReleases(prev => prev.filter(s => s.id !== deletedId));
+        setSavedStories(prev => prev.filter(s => s.id !== deletedId));
+        setReadingHistory(prev => prev.filter(h => h.storyId !== deletedId));
+        setSelectedStory(curr => {
+          if (curr && curr.id === deletedId) {
+            setCurrentTab('stories');
+            return null;
+          }
+          return curr;
+        });
+      }
+    };
+
+    const handleItemDeleted = (e: any) => {
+      const { id, type } = e.detail || {};
+      if (!id) return;
+      if (type === 'story') {
+        handleStoryDeleted(e);
+      } else if (type === 'novel') {
+        setNovels(prev => prev.filter(n => n.id !== id));
+        setSavedNovels(prev => prev.filter(n => n.id !== id));
+        setSelectedNovel(curr => (curr && curr.id === id ? null : curr));
+      } else if (type === 'joke') {
+        setJokes(prev => prev.filter(j => j.id !== id));
+      }
+    };
+
+    const handleRefresh = () => {
+      loadData();
+    };
+
+    const handleStoryLiked = (e: any) => {
+      const { storyId, isLiked, newCount } = e.detail || {};
+      if (!storyId) return;
+      const updateStoryList = (list: Story[]) =>
+        list.map(s => s.id === storyId ? { ...s, isLiked, likeCount: newCount } : s);
+      setAllStories(updateStoryList);
+      setTrendingStories(updateStoryList);
+      setPopularStories(updateStoryList);
+      setNewReleases(updateStoryList);
+      setSavedStories(updateStoryList);
+      setSelectedStory(curr => (curr && curr.id === storyId ? { ...curr, isLiked, likeCount: newCount } : curr));
+    };
+
+    const handleStoryRated = (e: any) => {
+      const { storyId, rating } = e.detail || {};
+      if (!storyId) return;
+      const updateStoryRating = (list: Story[]) =>
+        list.map(s => s.id === storyId ? { ...s, rating } : s);
+      setAllStories(updateStoryRating);
+      setTrendingStories(updateStoryRating);
+      setPopularStories(updateStoryRating);
+      setNewReleases(updateStoryRating);
+      setSavedStories(updateStoryRating);
+      setSelectedStory(curr => (curr && curr.id === storyId ? { ...curr, rating } : curr));
+    };
+
+    const handleStoryViewed = (e: any) => {
+      const { storyId } = e.detail || {};
+      if (!storyId) return;
+      const updateView = (list: Story[]) =>
+        list.map(s => s.id === storyId ? { ...s, viewCount: (s.viewCount || 0) + 1 } : s);
+      setAllStories(updateView);
+      setTrendingStories(updateView);
+      setPopularStories(updateView);
+      setNewReleases(updateView);
+      setSelectedStory(curr => (curr && curr.id === storyId ? { ...curr, viewCount: (curr.viewCount || 0) + 1 } : curr));
+    };
+
+    window.addEventListener('kathavahini:story-deleted', handleStoryDeleted);
+    window.addEventListener('kathavahini:item-deleted', handleItemDeleted);
+    window.addEventListener('kathavahini:refresh-content', handleRefresh);
+    window.addEventListener('kathavahini:story-liked', handleStoryLiked);
+    window.addEventListener('kathavahini:story-rated', handleStoryRated);
+    window.addEventListener('kathavahini:story-viewed', handleStoryViewed);
 
     // Check if initial URL or hash contains password reset route or Firebase oobCode
     if (typeof window !== 'undefined') {
@@ -184,6 +333,18 @@ export default function App() {
         setCurrentTab('reset-password');
       }
     }
+
+    return () => {
+      unsubStories();
+      unsubNovels();
+      unsubJokes();
+      window.removeEventListener('kathavahini:story-deleted', handleStoryDeleted);
+      window.removeEventListener('kathavahini:item-deleted', handleItemDeleted);
+      window.removeEventListener('kathavahini:refresh-content', handleRefresh);
+      window.removeEventListener('kathavahini:story-liked', handleStoryLiked);
+      window.removeEventListener('kathavahini:story-rated', handleStoryRated);
+      window.removeEventListener('kathavahini:story-viewed', handleStoryViewed);
+    };
   }, []);
 
   // Auth prompt helper
@@ -231,14 +392,29 @@ export default function App() {
       handleRequireAuth('కథలను దాచుకోవడానికి (Bookmark) ముందుగా లాగిన్ చేయండి.', 'login');
       return;
     }
-    await storyService.toggleBookmark(storyId);
-    await loadData();
+    const isNowBookmarked = await storyService.toggleBookmark(storyId);
+    const updateBm = (list: Story[]) =>
+      list.map(s => s.id === storyId ? { ...s, isBookmarked: isNowBookmarked } : s);
+    setAllStories(updateBm);
+    setTrendingStories(updateBm);
+    setPopularStories(updateBm);
+    setNewReleases(updateBm);
+    setSelectedStory(curr => (curr && curr.id === storyId ? { ...curr, isBookmarked: isNowBookmarked } : curr));
+    const savedSt = await libraryService.getSavedStories();
+    setSavedStories(savedSt);
   };
 
   const handleLikeToggle = async (storyId: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    await storyService.toggleLike(storyId);
-    await loadData();
+    const result = await storyService.toggleLike(storyId);
+    const updateLike = (list: Story[]) =>
+      list.map(s => s.id === storyId ? { ...s, isLiked: result.isLiked, likeCount: result.newCount } : s);
+    setAllStories(updateLike);
+    setTrendingStories(updateLike);
+    setPopularStories(updateLike);
+    setNewReleases(updateLike);
+    setSavedStories(updateLike);
+    setSelectedStory(curr => (curr && curr.id === storyId ? { ...curr, isLiked: result.isLiked, likeCount: result.newCount } : curr));
   };
 
   const handleJokeLikeToggle = async (jokeId: string) => {
@@ -282,7 +458,7 @@ export default function App() {
             featuredNovels={novels}
             featuredAuthors={authors}
             jokes={jokes}
-            categories={MOCK_CATEGORIES}
+            categories={categories}
             readingHistory={readingHistory}
             onSelectStory={handleSelectStory}
             onSelectNovel={handleSelectNovel}
@@ -299,8 +475,8 @@ export default function App() {
       case 'stories':
         return (
           <StoriesView
-            stories={trendingStories}
-            categories={MOCK_CATEGORIES}
+            stories={allStories.length > 0 ? allStories : trendingStories}
+            categories={categories}
             onSelectStory={handleSelectStory}
             onBookmarkToggle={handleBookmarkToggle}
             onLikeToggle={handleLikeToggle}
@@ -313,7 +489,7 @@ export default function App() {
         return selectedStory ? (
           <StoryDetailView
             story={selectedStory}
-            relatedStories={trendingStories.filter(s => s.id !== selectedStory.id && s.category === selectedStory.category)}
+            relatedStories={(allStories.length > 0 ? allStories : trendingStories).filter(s => s.id !== selectedStory.id && s.category === selectedStory.category)}
             onStartReading={handleStartReading}
             onSelectAuthor={handleSelectAuthor}
             onSelectStory={handleSelectStory}
@@ -330,7 +506,7 @@ export default function App() {
             featuredNovels={novels}
             featuredAuthors={authors}
             jokes={jokes}
-            categories={MOCK_CATEGORIES}
+            categories={categories}
             readingHistory={readingHistory}
             onSelectStory={handleSelectStory}
             onSelectNovel={handleSelectNovel}
@@ -412,7 +588,7 @@ export default function App() {
       case 'categories':
         return (
           <CategoriesView
-            categories={MOCK_CATEGORIES}
+            categories={categories}
             onSelectCategory={handleSelectCategory}
           />
         );
@@ -487,7 +663,7 @@ export default function App() {
               featuredNovels={novels}
               featuredAuthors={authors}
               jokes={jokes}
-              categories={MOCK_CATEGORIES}
+              categories={categories}
               readingHistory={readingHistory}
               onSelectStory={handleSelectStory}
               onSelectNovel={handleSelectNovel}
@@ -614,7 +790,7 @@ export default function App() {
             featuredNovels={novels}
             featuredAuthors={authors}
             jokes={jokes}
-            categories={MOCK_CATEGORIES}
+            categories={categories}
             readingHistory={readingHistory}
             onSelectStory={handleSelectStory}
             onSelectNovel={handleSelectNovel}
@@ -631,7 +807,9 @@ export default function App() {
   };
 
   const isReaderView = currentTab === 'story-reader';
-  const isAuthorizedAdmin = Boolean(user && user.role === 'admin' && user.email === 'thekathavahini@gmail.com');
+  const isAuthorizedAdmin = Boolean(
+    user && (user.role === 'admin' || user.email?.toLowerCase() === 'thekathavahini@gmail.com')
+  );
   const isAdminView = currentTab === 'admin' && isAuthorizedAdmin;
 
   // If on Admin tab AND authorized as Admin, render the dedicated Full-Screen Admin Control Center

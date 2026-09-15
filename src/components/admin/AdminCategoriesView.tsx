@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { Tags, Plus, Search, CheckCircle2, Archive, Check } from 'lucide-react';
+import { Tags, Plus, Search, CheckCircle2, Archive, Check, Trash2 } from 'lucide-react';
 import { CategoryItem } from '../../types';
 
 interface AdminCategoriesViewProps {
   categories: CategoryItem[];
   onAddCategory: (cat: { name: string; teluguName: string; description?: string }) => void;
   onToggleStatus: (catId: string, status: 'active' | 'archived') => void;
+  onDeleteCategory?: (catId: string) => void;
   actionLoading: boolean;
 }
 
@@ -13,9 +14,11 @@ export const AdminCategoriesView: React.FC<AdminCategoriesViewProps> = ({
   categories,
   onAddCategory,
   onToggleStatus,
+  onDeleteCategory,
   actionLoading,
 }) => {
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [teluguName, setTeluguName] = useState('');
   const [description, setDescription] = useState('');
@@ -87,17 +90,66 @@ export const AdminCategoriesView: React.FC<AdminCategoriesViewProps> = ({
                 కథల సంఖ్య: <strong className="text-[#17151A] dark:text-[#F7F3EE]">{cat.storyCount || 0}</strong>
               </span>
 
-              <button
-                onClick={() => onToggleStatus(cat.id, cat.status === 'active' ? 'archived' : 'active')}
-                disabled={actionLoading}
-                className="px-2.5 py-1 rounded-xl bg-[#FAF7F2] dark:bg-[#121118] border border-[#E8E1DA] dark:border-[#26242E] text-[11px] font-bold text-[#6F6970] dark:text-[#A29CA6] hover:text-[#17151A] cursor-pointer"
-              >
-                {cat.status === 'active' ? 'ఆర్కైవ్ చేయి' : 'యాక్టివేట్ చేయి'}
-              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => onToggleStatus(cat.id, cat.status === 'active' ? 'archived' : 'active')}
+                  disabled={actionLoading}
+                  className="px-2.5 py-1 rounded-xl bg-[#FAF7F2] dark:bg-[#121118] border border-[#E8E1DA] dark:border-[#26242E] text-[11px] font-bold text-[#6F6970] dark:text-[#A29CA6] hover:text-[#17151A] cursor-pointer"
+                >
+                  {cat.status === 'active' ? 'ఆర్కైవ్ చేయి' : 'యాక్టివేట్ చేయి'}
+                </button>
+
+                {onDeleteCategory && (
+                  <button
+                    onClick={() => setDeleteConfirmId(cat.id)}
+                    disabled={actionLoading}
+                    className="p-1.5 rounded-xl bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 cursor-pointer transition-colors"
+                    title="వర్గాన్ని పూర్తిగా తొలగించు (Delete Category)"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         ))}
       </div>
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-sm bg-white dark:bg-[#18181F] rounded-3xl p-6 border border-[#E8E1DA] dark:border-[#26242E] shadow-2xl space-y-4">
+            <h4 className="text-base font-bold font-serif-telugu text-[#17151A] dark:text-[#F7F3EE]">
+              వర్గాన్ని తొలగించాలా?
+            </h4>
+            <p className="text-xs font-serif-telugu text-[#6F6970] dark:text-[#AAA4AC] leading-relaxed">
+              ఈ వర్గాన్ని పూర్తిగా తొలగించాలనుకుంటున్నారా? ఇది మొత్తం వెబ్‌సైట్‌లో రియల్-టైమ్‌లో అప్‌డేట్ అవుతుంది.
+            </p>
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmId(null)}
+                className="px-3.5 py-1.5 rounded-xl text-xs font-bold text-[#6F6970] hover:text-[#17151A] cursor-pointer"
+              >
+                రద్దు చేయి
+              </button>
+              <button
+                type="button"
+                disabled={actionLoading}
+                onClick={() => {
+                  if (onDeleteCategory && deleteConfirmId) {
+                    onDeleteCategory(deleteConfirmId);
+                  }
+                  setDeleteConfirmId(null);
+                }}
+                className="px-4 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold shadow-sm cursor-pointer disabled:opacity-50"
+              >
+                అవును, తొలగించు
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ADD CATEGORY MODAL */}
       {isAddOpen && (

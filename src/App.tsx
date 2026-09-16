@@ -35,6 +35,7 @@ import { SearchView } from './views/SearchView';
 import { CreatorDashboardView } from './views/CreatorDashboardView';
 import { ProfileView } from './views/ProfileView';
 import { KnowledgeView } from './views/KnowledgeView';
+import { BalavinodhiniView } from './views/BalavinodhiniView';
 import { AboutView } from './views/AboutView';
 import { PrivacyPolicyView } from './views/PrivacyPolicyView';
 import { TermsView } from './views/TermsView';
@@ -87,6 +88,19 @@ export default function App() {
   const [categories, setCategories] = useState<FormattedCategoryViewItem[]>(() =>
     categoryService.formatForViews()
   );
+
+  // Compute accurate story counts for categories based on real published stories
+  const categoriesWithStoryCounts = React.useMemo(() => {
+    return categories.map(cat => {
+      const realCount = allStories.filter(
+        s => s.status === 'published' && (s.category === cat.name || s.category === cat.teluguName)
+      ).length;
+      return {
+        ...cat,
+        count: realCount > 0 ? realCount : (cat.count || 0),
+      };
+    });
+  }, [categories, allStories]);
 
   // Real-time categories subscription across Home, Categories, Stories, and Writer submissions
   useEffect(() => {
@@ -506,7 +520,7 @@ export default function App() {
             featuredNovels={novels}
             featuredAuthors={authors}
             jokes={jokes}
-            categories={categories}
+            categories={categoriesWithStoryCounts}
             readingHistory={readingHistory}
             onSelectStory={handleSelectStory}
             onSelectNovel={handleSelectNovel}
@@ -588,7 +602,7 @@ export default function App() {
       case 'categories':
         return (
           <CategoriesView
-            categories={categories}
+            categories={categoriesWithStoryCounts}
             onSelectCategory={handleSelectCategory}
           />
         );
@@ -663,7 +677,7 @@ export default function App() {
               featuredNovels={novels}
               featuredAuthors={authors}
               jokes={jokes}
-              categories={categories}
+              categories={categoriesWithStoryCounts}
               readingHistory={readingHistory}
               onSelectStory={handleSelectStory}
               onSelectNovel={handleSelectNovel}
@@ -721,6 +735,15 @@ export default function App() {
 
       case 'knowledge':
         return <KnowledgeView />;
+
+      case 'balavinodhini':
+        return (
+          <BalavinodhiniView
+            currentUser={user}
+            onOpenAuth={() => handleRequireAuth('బాలవినోదినిలో రచనలు ప్రచురించడానికి లేదా సేవ్ చేయడానికి లాగిన్ చేయండి.')}
+            onNavigate={setCurrentTab}
+          />
+        );
 
       case 'about':
         return (
@@ -790,7 +813,7 @@ export default function App() {
             featuredNovels={novels}
             featuredAuthors={authors}
             jokes={jokes}
-            categories={categories}
+            categories={categoriesWithStoryCounts}
             readingHistory={readingHistory}
             onSelectStory={handleSelectStory}
             onSelectNovel={handleSelectNovel}

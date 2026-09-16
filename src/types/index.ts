@@ -516,3 +516,192 @@ export interface Announcement {
   };
 }
 
+// ----------------------------------------------------
+// BALAVINODHINI (బాలవినోదిని) CHILDREN'S ECOSYSTEM TYPES
+// ----------------------------------------------------
+export type BalavinodhiniContentType =
+  | 'story'
+  | 'poem'
+  | 'science_article'
+  | 'joke'
+  | 'riddle'
+  | 'quiz'
+  | 'puzzle'
+  | 'history_article'
+  | 'nature_article'
+  | 'culture_article'
+  | 'drawing'
+  | 'artwork'
+  | 'comic'
+  | 'book'
+  | 'creative_project'
+  | 'audio_story';
+
+export type BalavinodhiniAgeGroup = '4-6' | '7-9' | '10-12' | '13-15' | 'all';
+
+export type BalavinodhiniTab =
+  | 'home'
+  | 'stories'
+  | 'science'
+  | 'jokes'
+  | 'riddles'
+  | 'games'
+  | 'history'
+  | 'nature'
+  | 'culture'
+  | 'creations'
+  | 'poems'
+  | 'learning'
+  | 'fun'
+  | 'bedtime'
+  | 'today'
+  | 'my-creations';
+
+export interface BalavinodhiniBookPage {
+  pageNumber: number;
+  title?: string;
+  content: string;
+  imageUrl?: string;
+}
+
+export interface BalavinodhiniComment {
+  id: string;
+  itemId: string;
+  userId: string;
+  userName: string;
+  userAvatar?: string;
+  text: string;
+  createdAt: string;
+  status: 'published' | 'hidden' | 'flagged';
+}
+
+export interface BalavinodhiniItem {
+  id: string;
+  title: string;
+  teluguTitle: string;
+  slug: string;
+  description?: string;
+  teluguDescription?: string;
+  content: string;
+  contentType: BalavinodhiniContentType;
+  section: 'balavinodhini';
+  categoryId: string; // tab id e.g. 'stories', 'science', 'poems', etc.
+  subcategoryId?: string; // subcategory name in Telugu
+  ageGroup: BalavinodhiniAgeGroup;
+  difficulty?: 'సులభం' | 'మధ్యస్థం' | 'కఠినం';
+  readingTimeMinutes?: number;
+  coverImage?: string;
+  images?: string[];
+  authorId?: string;
+  authorName?: string;
+  authorAvatar?: string;
+  authorBio?: string;
+  tags?: string[];
+  status: 'draft' | 'pending_review' | 'published' | 'rejected' | 'hidden' | 'archived';
+  moderationStatus?: 'pending' | 'approved' | 'rejected';
+  moderationNote?: string;
+  createdAt: any;
+  updatedAt: any;
+  publishedAt?: any;
+  likeCount: number;
+  likesCount?: number;
+  commentCount: number;
+  commentsCount?: number;
+  shareCount: number;
+  sharesCount?: number;
+  audioUrl?: string;
+  downloadUrl?: string;
+  isDailyContent?: boolean;
+  featured?: boolean;
+  // Specific payload fields
+  riddleAnswer?: string;
+  quizOptions?: string[];
+  quizAnswerIndex?: number;
+  quizExplanation?: string;
+  bookPages?: BalavinodhiniBookPage[];
+  drawingDataUrl?: string;
+  isLiked?: boolean;
+}
+
+export interface BalavinodhiniTodayConfig {
+  id?: string;
+  date: string;
+  storyTitle: string;
+  storyExcerpt: string;
+  storyLink?: string;
+  storyCover?: string;
+  scienceTitle: string;
+  scienceFact: string;
+  scienceExplanation: string;
+  riddleQuestion: string;
+  riddleAnswer: string;
+  dailyFact: string;
+  dailyFactExplanation: string;
+  jokeText: string;
+  jokePunchline: string;
+  creativeTaskTitle: string;
+  creativeTaskDescription: string;
+  updatedAt?: any;
+}
+
+export interface BalavinodhiniGame {
+  id: string;
+  name: string;
+  teluguName: string;
+  description: string;
+  type: string;
+  ageGroup: BalavinodhiniAgeGroup;
+  difficulty: 'సులభం' | 'మధ్యస్థం' | 'కఠినం';
+  icon: string;
+  colorGradient: string;
+  isEnabled: boolean;
+  isFeatured: boolean;
+  playCount: number;
+  rules?: string[];
+  config?: Record<string, any>;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface BalavinodhiniQuiz {
+  id: string;
+  title: string;
+  teluguTitle: string;
+  description?: string;
+  category: string;
+  ageGroup: BalavinodhiniAgeGroup;
+  difficulty: 'సులభం' | 'మధ్యస్థం' | 'కఠినం';
+  points: number;
+  timeLimitSeconds?: number;
+  questions: {
+    id: number;
+    question: string;
+    options: string[];
+    correctIndex: number;
+    explanation: string;
+  }[];
+  isEnabled: boolean;
+  status: 'published' | 'draft' | 'archived';
+  playCount?: number;
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface BalavinodhiniRiddle {
+  id: string;
+  question: string;
+  teluguQuestion: string;
+  answer: string;
+  teluguAnswer: string;
+  hint?: string;
+  explanation?: string;
+  category: string;
+  ageGroup: BalavinodhiniAgeGroup;
+  difficulty: 'సులభం' | 'మధ్యస్థం' | 'కఠినం';
+  status: 'published' | 'draft' | 'archived';
+  isFeatured: boolean;
+  likeCount?: number;
+  createdAt?: any;
+  updatedAt?: any;
+}
+

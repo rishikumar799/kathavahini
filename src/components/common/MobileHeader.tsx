@@ -127,6 +127,13 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
               జోక్స్ (Jokes)
             </button>
             <button
+              onClick={() => handleNav('balavinodhini')}
+              className="w-full text-left px-4 py-3 rounded-2xl bg-gradient-to-r from-amber-500/10 to-rose-500/10 dark:from-amber-950/20 dark:to-rose-950/20 font-bold text-[#7A284B] dark:text-[#D87591] shadow-sm border border-amber-500/30 flex items-center justify-between"
+            >
+              <span>బాలవినోదిని (Balavinodhini)</span>
+              <span className="text-base">🎈</span>
+            </button>
+            <button
               onClick={() => handleNav('knowledge')}
               className="w-full text-left px-4 py-3 rounded-2xl bg-white dark:bg-[#18181D] font-bold text-[#17151A] dark:text-[#F7F3EE] shadow-sm border border-[#E8E1DA] dark:border-[#2E2D36]"
             >

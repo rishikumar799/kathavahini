@@ -43,8 +43,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { id: 'stories', label: 'కథలు' },
     { id: 'novels', label: 'నవలలు' },
     { id: 'jokes', label: 'జోక్స్' },
-    { id: 'knowledge', label: 'విజ్ఞానాలు' },
-    { id: 'authors', label: 'రచయితలు' },
+    { id: 'balavinodhini', label: 'బాలవినోదిని' },
   ];
 
   // Close dropdown on outside click
@@ -70,6 +69,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   const isMoreActive = [
+    'knowledge', 'authors',
     'about', 'contact', 'report-issue', 'faq', 'help', 
     'privacy-policy', 'terms', 'cookie-policy', 'content-policy'
   ].includes(currentTab);
@@ -127,8 +127,41 @@ export const Navbar: React.FC<NavbarProps> = ({
 
             {/* Dropdown Menu Panel */}
             {isMoreOpen && (
-              <div className="absolute right-0 mt-2 w-72 rounded-2xl bg-white dark:bg-[#18181D] border border-[#E8E1DA] dark:border-[#2E2D36] shadow-xl p-3 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="absolute right-0 mt-2 w-72 rounded-2xl bg-white dark:bg-[#18181D] border border-[#E8E1DA] dark:border-[#2E2D36] shadow-xl p-3 z-50 animate-in fade-in slide-in-from-top-2 duration-150 max-h-[85vh] overflow-y-auto">
                 <div className="space-y-3 font-serif-telugu text-xs">
+                  {/* Category 0: సాహిత్యం & విజ్ఞానం (Relocated Vignanalu and Rachaitalu) */}
+                  <div>
+                    <span className="block px-2.5 py-1 text-[11px] font-bold text-[#7A284B] dark:text-[#D87591] uppercase tracking-wider">
+                      సాహిత్యం & విజ్ఞానం
+                    </span>
+                    <div className="space-y-0.5 mt-0.5">
+                      <button
+                        onClick={() => handleNavClick('knowledge')}
+                        className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-colors text-left cursor-pointer font-bold ${
+                          currentTab === 'knowledge'
+                            ? 'bg-[#7A284B]/10 text-[#7A284B] dark:bg-[#D87591]/20 dark:text-[#D87591]'
+                            : 'hover:bg-[#FAF7F2] dark:hover:bg-[#23222A] text-[#17151A] dark:text-[#F7F3EE]'
+                        }`}
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-[#7A284B] dark:text-[#D87591]" />
+                        <span>విజ్ఞానాలు (Knowledge)</span>
+                      </button>
+                      <button
+                        onClick={() => handleNavClick('authors')}
+                        className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-xl transition-colors text-left cursor-pointer font-bold ${
+                          currentTab === 'authors'
+                            ? 'bg-[#7A284B]/10 text-[#7A284B] dark:bg-[#D87591]/20 dark:text-[#D87591]'
+                            : 'hover:bg-[#FAF7F2] dark:hover:bg-[#23222A] text-[#17151A] dark:text-[#F7F3EE]'
+                        }`}
+                      >
+                        <Feather className="w-3.5 h-3.5 text-[#7A284B] dark:text-[#D87591]" />
+                        <span>రచయితలు (Authors)</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-[#E8E1DA]/60 dark:border-[#2E2D36]/60" />
+
                   {/* Category 1: సైట్ */}
                   <div>
                     <span className="block px-2.5 py-1 text-[11px] font-bold text-[#7A284B] dark:text-[#D87591] uppercase tracking-wider">

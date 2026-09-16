@@ -23,12 +23,26 @@ import {
   UserPlus,
   Layers,
   FileText,
-  Megaphone
+  Megaphone,
+  Sparkles,
+  Gamepad2,
+  Brain,
+  HelpCircle,
+  Calendar,
+  UserCheck
 } from 'lucide-react';
 import { User } from '../../types';
 
 export type AdminTab = 
   | 'dashboard'
+  // Balavinodhini (Kids Ecosystem)
+  | 'balavinodhini-overview'
+  | 'balavinodhini-content'
+  | 'balavinodhini-riddles'
+  | 'balavinodhini-games'
+  | 'balavinodhini-quizzes'
+  | 'balavinodhini-today'
+  | 'balavinodhini-moderation'
   // Content
   | 'stories'
   | 'novels'
@@ -94,6 +108,18 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
       title: 'DASHBOARD',
       items: [
         { id: 'dashboard', label: 'Overview', teluguLabel: 'సమీక్షా డాష్‌బోర్డ్', icon: LayoutDashboard },
+      ]
+    },
+    {
+      title: 'బాలవినోదిని (BALAVINODHINI)',
+      items: [
+        { id: 'balavinodhini-overview', label: 'Balavinodhini Overview', teluguLabel: 'బాలవినోదిని డాష్‌బోర్డ్', icon: Sparkles },
+        { id: 'balavinodhini-content', label: 'Stories & Science', teluguLabel: 'కథలు, సైన్స్ & గేయాలు', icon: BookOpen },
+        { id: 'balavinodhini-riddles', label: 'Riddles (పొడుపు కథలు)', teluguLabel: 'పొడుపు కథల బ్యాంక్', icon: HelpCircle },
+        { id: 'balavinodhini-games', label: 'Interactive Games', teluguLabel: 'బాలల ఆటల మేనేజర్', icon: Gamepad2 },
+        { id: 'balavinodhini-quizzes', label: 'Quizzes (క్విజ్)', teluguLabel: 'క్విజ్ ప్రశ్నల బ్యాంక్', icon: Brain },
+        { id: 'balavinodhini-today', label: "Today's Balavinodhini", teluguLabel: 'నేటి బాలవినోదిని కంట్రోల్', icon: Calendar },
+        { id: 'balavinodhini-moderation', label: 'Creations Moderation', teluguLabel: 'పిల్లల సృజనల సమీక్ష', icon: UserCheck },
       ]
     },
     {

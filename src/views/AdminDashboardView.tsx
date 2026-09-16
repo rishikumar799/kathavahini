@@ -50,6 +50,16 @@ import { AdminSettingsView } from '../components/admin/AdminSettingsView';
 import { AdminAnnouncementsView } from '../components/admin/AdminAnnouncementsView';
 import { AdminContentEditorModal } from '../components/admin/AdminContentEditorModal';
 import { AdminAddUserModal } from '../components/admin/AdminAddUserModal';
+import { AdminBalavinodhiniOverview } from '../components/admin/balavinodhini/AdminBalavinodhiniOverview';
+import { AdminBalavinodhiniContentManager } from '../components/admin/balavinodhini/AdminBalavinodhiniContentManager';
+import { AdminBalavinodhiniContentEditorModal } from '../components/admin/balavinodhini/AdminBalavinodhiniContentEditorModal';
+import { AdminBalavinodhiniRiddlesManager } from '../components/admin/balavinodhini/AdminBalavinodhiniRiddlesManager';
+import { AdminBalavinodhiniGamesManager } from '../components/admin/balavinodhini/AdminBalavinodhiniGamesManager';
+import { AdminBalavinodhiniQuizzesManager } from '../components/admin/balavinodhini/AdminBalavinodhiniQuizzesManager';
+import { AdminBalavinodhiniTodayManager } from '../components/admin/balavinodhini/AdminBalavinodhiniTodayManager';
+import { AdminBalavinodhiniModerationManager } from '../components/admin/balavinodhini/AdminBalavinodhiniModerationManager';
+import { balavinodhiniService } from '../services/balavinodhiniService';
+import { BalavinodhiniItem, BalavinodhiniGame } from '../types';
 
 interface AdminDashboardViewProps {
   currentUser: User | null;
@@ -115,6 +125,21 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
   const [selectedAppForReview, setSelectedAppForReview] = useState<WriterApplication | null>(null);
   const [selectedStoryForPreview, setSelectedStoryForPreview] = useState<Story | null>(null);
   const [addUserModalOpen, setAddUserModalOpen] = useState(false);
+
+  // Balavinodhini State
+  const [balavinodhiniItems, setBalavinodhiniItems] = useState<BalavinodhiniItem[]>([]);
+  const [balavinodhiniGames, setBalavinodhiniGames] = useState<BalavinodhiniGame[]>([]);
+  const [bvEditorModal, setBvEditorModal] = useState<{
+    isOpen: boolean;
+    initialData?: BalavinodhiniItem | null;
+    defaultContentType?: string;
+    defaultCategoryId?: string;
+  }>({
+    isOpen: false,
+    initialData: null,
+    defaultContentType: 'story',
+    defaultCategoryId: 'stories',
+  });
 
   // Content Editor Modal state
   const [editorModal, setEditorModal] = useState<{
@@ -209,6 +234,10 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         loadAdminData(false);
       };
 
+      const unsubBv = balavinodhiniService.subscribeItems(items => {
+        setBalavinodhiniItems(items);
+      });
+
       window.addEventListener('kathavahini:refresh-content', handleRefresh);
       window.addEventListener('kathavahini:item-deleted', handleItemDeleted);
       window.addEventListener('kathavahini:story-deleted', handleRefresh);
@@ -216,6 +245,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
       window.addEventListener('kathavahini:announcements-updated', handleRefresh);
 
       return () => {
+        unsubBv();
         window.removeEventListener('kathavahini:refresh-content', handleRefresh);
         window.removeEventListener('kathavahini:item-deleted', handleItemDeleted);
         window.removeEventListener('kathavahini:story-deleted', handleRefresh);
@@ -593,6 +623,92 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
     }
   };
 
+  // ==========================================
+  // BALAVINODHINI CRUD & CONTROL HANDLERS
+  // ==========================================
+  const handleSaveBalavinodhiniItem = async (data: Partial<BalavinodhiniItem>) => {
+    setActionLoading(true);
+    try {
+      if (data.id) {
+        await balavinodhiniService.updateItem(data.id, data);
+      } else {
+        await balavinodhiniService.createItem(data);
+      }
+      setBvEditorModal({ isOpen: false, initialData: null });
+    } catch (err) {
+      console.error('Error saving Balavinodhini item:', err);
+      throw err;
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleDeleteBalavinodhiniItem = async (id: string) => {
+    if (!confirm('ఈ కంటెంట్‌ను ఖచ్చితంగా తొలగించాలనుకుంటున్నారా?')) return;
+    try {
+      await balavinodhiniService.deleteItem(id);
+    } catch (err) {
+      console.error('Error deleting Balavinodhini item:', err);
+    }
+  };
+
+  const handleToggleBalavinodhiniPublish = async (id: string) => {
+    try {
+      await balavinodhiniService.togglePublish(id);
+    } catch (err) {
+      console.error('Error toggling publish status:', err);
+    }
+  };
+
+  const handleToggleBalavinodhiniFeatured = async (id: string) => {
+    try {
+      await balavinodhiniService.toggleFeatured(id);
+    } catch (err) {
+      console.error('Error toggling featured status:', err);
+    }
+  };
+
+  const handleApproveBalavinodhiniSubmission = async (id: string) => {
+    try {
+      await balavinodhiniService.approveItem(id);
+    } catch (err) {
+      console.error('Error approving Balavinodhini submission:', err);
+    }
+  };
+
+  const handleRejectBalavinodhiniSubmission = async (id: string, reason?: string) => {
+    try {
+      await balavinodhiniService.rejectItem(id, reason);
+    } catch (err) {
+      console.error('Error rejecting Balavinodhini submission:', err);
+    }
+  };
+
+  const handleSaveBalavinodhiniGame = async (game: BalavinodhiniGame) => {
+    try {
+      await balavinodhiniService.updateGame(game.id, game);
+    } catch (err) {
+      console.error('Error saving Balavinodhini game:', err);
+      throw err;
+    }
+  };
+
+  const handleToggleBalavinodhiniGameEnabled = async (gameId: string, isEnabled: boolean) => {
+    try {
+      await balavinodhiniService.toggleGameStatus(gameId, isEnabled);
+    } catch (err) {
+      console.error('Error toggling game status:', err);
+    }
+  };
+
+  const handleToggleBalavinodhiniGameFeatured = async (gameId: string, isFeatured: boolean) => {
+    try {
+      await balavinodhiniService.toggleGameFeatured(gameId, isFeatured);
+    } catch (err) {
+      console.error('Error toggling game featured:', err);
+    }
+  };
+
   const handleLogout = async () => {
     await authService.logout();
     onBack();
@@ -832,6 +948,100 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
             />
           )}
 
+          {/* BALAVINODHINI ADMIN MODULES */}
+          {activeTab === 'balavinodhini-overview' && (
+            <AdminBalavinodhiniOverview
+              onNavigateTab={(tab) => setActiveTab(tab as AdminTab)}
+              onOpenCreateModal={(contentType, categoryId) => {
+                setBvEditorModal({
+                  isOpen: true,
+                  initialData: null,
+                  defaultContentType: contentType || 'story',
+                  defaultCategoryId: categoryId || 'stories',
+                });
+              }}
+              onEditItem={(item) => {
+                setBvEditorModal({
+                  isOpen: true,
+                  initialData: item,
+                  defaultContentType: item.contentType,
+                  defaultCategoryId: item.categoryId,
+                });
+              }}
+            />
+          )}
+
+          {activeTab === 'balavinodhini-content' && (
+            <AdminBalavinodhiniContentManager
+              items={balavinodhiniItems}
+              initialCategory="all"
+              onOpenCreateModal={(contentType, categoryId) => {
+                setBvEditorModal({
+                  isOpen: true,
+                  initialData: null,
+                  defaultContentType: contentType || 'story',
+                  defaultCategoryId: categoryId || 'stories',
+                });
+              }}
+              onEditItem={(item) => {
+                setBvEditorModal({
+                  isOpen: true,
+                  initialData: item,
+                  defaultContentType: item.contentType,
+                  defaultCategoryId: item.categoryId,
+                });
+              }}
+              onDeleteItem={handleDeleteBalavinodhiniItem}
+              onTogglePublish={handleToggleBalavinodhiniPublish}
+              onToggleFeatured={handleToggleBalavinodhiniFeatured}
+            />
+          )}
+
+          {activeTab === 'balavinodhini-riddles' && (
+            <AdminBalavinodhiniRiddlesManager
+              items={balavinodhiniItems}
+              onCreateRiddle={handleSaveBalavinodhiniItem}
+              onUpdateRiddle={(id, updates) => handleSaveBalavinodhiniItem({ id, ...updates })}
+              onDeleteRiddle={handleDeleteBalavinodhiniItem}
+              onTogglePublish={handleToggleBalavinodhiniPublish}
+              onToggleFeatured={handleToggleBalavinodhiniFeatured}
+            />
+          )}
+
+          {activeTab === 'balavinodhini-games' && (
+            <AdminBalavinodhiniGamesManager
+              games={balavinodhiniGames.length > 0 ? balavinodhiniGames : undefined}
+              onToggleGameEnabled={handleToggleBalavinodhiniGameEnabled}
+              onToggleGameFeatured={handleToggleBalavinodhiniGameFeatured}
+              onSaveGame={handleSaveBalavinodhiniGame}
+            />
+          )}
+
+          {activeTab === 'balavinodhini-quizzes' && (
+            <AdminBalavinodhiniQuizzesManager />
+          )}
+
+          {activeTab === 'balavinodhini-today' && (
+            <AdminBalavinodhiniTodayManager />
+          )}
+
+          {activeTab === 'balavinodhini-moderation' && (
+            <AdminBalavinodhiniModerationManager
+              items={balavinodhiniItems}
+              onApprove={handleApproveBalavinodhiniSubmission}
+              onReject={handleRejectBalavinodhiniSubmission}
+              onDelete={handleDeleteBalavinodhiniItem}
+              onEdit={(item) => {
+                setBvEditorModal({
+                  isOpen: true,
+                  initialData: item,
+                  defaultContentType: item.contentType,
+                  defaultCategoryId: item.categoryId,
+                });
+              }}
+            />
+          )}
+
           {(activeTab === 'stories' || activeTab === 'pending-stories') && (
             <AdminStoriesView
               stories={stories}
@@ -961,6 +1171,16 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
         onUserCreated={loadAdminData}
         adminUid={adminUid}
         adminEmail={adminEmail}
+      />
+
+      {/* Balavinodhini Unified Content Editor Modal */}
+      <AdminBalavinodhiniContentEditorModal
+        isOpen={bvEditorModal.isOpen}
+        onClose={() => setBvEditorModal(prev => ({ ...prev, isOpen: false, initialData: null }))}
+        initialData={bvEditorModal.initialData}
+        defaultContentType={bvEditorModal.defaultContentType}
+        defaultCategoryId={bvEditorModal.defaultCategoryId}
+        onSave={handleSaveBalavinodhiniItem}
       />
     </div>
   );

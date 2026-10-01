@@ -552,6 +552,8 @@ export default function App() {
             jokes={jokes}
             categories={categories}
             readingHistory={readingHistory}
+            isAdmin={user?.role === 'admin' || user?.email?.toLowerCase() === 'thekathavahini@gmail.com'}
+            onOpenAdminHeroEditor={() => setCurrentTab('admin')}
             onSelectStory={handleSelectStory}
             onSelectNovel={handleSelectNovel}
             onSelectAuthor={handleSelectAuthor}

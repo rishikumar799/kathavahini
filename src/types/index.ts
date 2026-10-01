@@ -709,3 +709,147 @@ export interface BalavinodhiniRiddle {
   updatedAt?: any;
 }
 
+// =============================================================================
+// HERO BANNER & LANDING PAGE CONFIGURATION TYPES
+// =============================================================================
+
+export type PromotedContentType = 'story' | 'novel' | 'episode' | 'joke' | 'knowledge' | 'balavinodhini' | 'custom' | 'auto';
+
+export interface HeroSlideConfig {
+  id: string;
+  order: number;
+  enabled: boolean;
+  contentType: PromotedContentType;
+  contentId?: string; // Reference to Story ID, Novel ID, Joke ID, Knowledge ID, Balavinodhini ID
+  
+  // Custom Overrides (If true, uses content's original title/author/cover/excerpt automatically)
+  useContentDefaults: boolean;
+  imageSource?: 'content' | 'custom_upload' | 'custom_url';
+  customImage?: string; // Custom cover image URL
+  customImageStoragePath?: string;
+  customImageFileName?: string;
+  badge?: string; // e.g., "ఈ వారపు ప్రత్యేక కథ", "ప్రముఖ నవల", "హాస్య తునక"
+  headline?: string;
+  highlightWord?: string;
+  subtitle?: string;
+  primaryButtonText?: string;
+  primaryButtonAction?: string; // e.g. 'stories', 'novels', 'jokes', 'knowledge', 'balavinodhini', or item direct
+  secondaryButtonText?: string;
+  secondaryButtonAction?: string;
+  
+  // Scheduling & Expiration
+  isScheduled: boolean;
+  startAt?: string; // ISO date string (YYYY-MM-DDTHH:mm)
+  endAt?: string; // ISO date string (YYYY-MM-DDTHH:mm)
+  
+  createdAt?: any;
+  updatedAt?: any;
+}
+
+export interface HeroBannerSlide {
+  id: string;
+  badge: string; // e.g., "ఈ వారపు ప్రత్యేక కథ", "ప్రముఖ నవల", "హాస్య తునక"
+  title: string;
+  teluguTitle: string;
+  authorName: string;
+  coverImage: string;
+  contentType: PromotedContentType;
+  targetId?: string;
+  description?: string;
+  headline?: string;
+  highlightWord?: string;
+  subtitle?: string;
+  primaryButtonText?: string;
+  primaryButtonAction?: string;
+  secondaryButtonText?: string;
+  secondaryButtonAction?: string;
+  isCustom?: boolean;
+}
+
+export interface HeroBannerStats {
+  storiesCount: string;
+  storiesLabel: string;
+  writersCount: string;
+  writersLabel: string;
+  readersCount: string;
+  readersLabel: string;
+}
+
+export interface HeroBannerConfig {
+  id: string;
+  enabled: boolean;
+  maxSlidesCount: number; // 1, 2, 3, 4, 5, 6, 7, 8
+  
+  // Multi-slide list configured by Admin
+  slides: HeroSlideConfig[];
+
+  // Global Text Defaults
+  badgeText: string;
+  mainHeading: string;
+  highlightWord: string;
+  subtitle: string;
+  primaryButtonText: string;
+  primaryButtonAction: string; // 'stories' | 'novels' | 'balavinodhini' etc.
+  secondaryButtonText: string;
+  
+  // Metrics / Insights Source
+  metricsSource: 'live' | 'custom';
+  customMetrics: HeroBannerStats;
+  stats?: HeroBannerStats;
+
+  // Carousel & UX Controls
+  autoRotate: boolean;
+  autoRotateSeconds: number;
+  showNavigationButtons: boolean;
+  showIndicators: boolean;
+  pauseOnHover: boolean;
+  enableSwipe?: boolean;
+
+  // Backward compatibility fields
+  promotedMode?: 'manual' | 'automatic' | 'hybrid';
+  promotedContentType?: PromotedContentType;
+  promotedContentId?: string;
+  customBadge?: string;
+  customTitle?: string;
+  customAuthorName?: string;
+  customCoverImage?: string;
+  customTargetType?: 'story' | 'novel' | 'joke' | 'knowledge';
+  customTargetId?: string;
+  durationMode?: 'always' | 'until_date' | 'for_hours';
+  durationHours?: number;
+  startDate?: string;
+  expiresAt?: string;
+  showMetrics?: boolean;
+
+  updatedAt?: any;
+  updatedBy?: string;
+}
+
+export type LandingPageSectionId = 
+  | 'hero' 
+  | 'continue_reading' 
+  | 'trending_stories' 
+  | 'novels' 
+  | 'categories' 
+  | 'authors' 
+  | 'new_releases' 
+  | 'jokes' 
+  | 'balavinodhini' 
+  | 'creator_cta';
+
+export interface LandingPageSectionConfig {
+  id: LandingPageSectionId;
+  title: string;
+  teluguTitle: string;
+  description: string;
+  enabled: boolean;
+  order: number;
+}
+
+export interface LandingPageLayoutConfig {
+  sections: LandingPageSectionConfig[];
+  updatedAt?: any;
+  updatedBy?: string;
+}
+
+

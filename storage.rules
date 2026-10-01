@@ -149,6 +149,14 @@ service firebase.storage {
     }
 
     // -------------------------------------------------------------
+    // HERO BANNERS (CMS) - Admin Only
+    // -------------------------------------------------------------
+    match /hero_banners/{slideId}/{fileName} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidImage(10 * 1024 * 1024);
+    }
+
+    // -------------------------------------------------------------
     // FALLBACK
     // -------------------------------------------------------------
     match /{allPaths=**} {

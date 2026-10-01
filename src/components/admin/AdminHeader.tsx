@@ -33,6 +33,7 @@ const TAB_TITLES: Record<AdminTab, { title: string; telugu: string; desc: string
   'balavinodhini-quizzes': { title: 'Balavinodhini Quizzes Bank', telugu: 'క్విజ్ ప్రశ్నల బ్యాంక్', desc: 'బాలల క్విజ్ ప్రశ్నలు, సమాధానాలు మరియు ఫలితాల విశ్లేషణ' },
   'balavinodhini-today': { title: "Today's Balavinodhini Config", telugu: 'నేటి బాలవినోదిని కంట్రోల్', desc: 'నేటి కథ, నేటి ఆట మరియు నేటి క్విజ్ ఎంపికల ప్రత్యక్ష నియంత్రణ' },
   'balavinodhini-moderation': { title: 'Child Creations Moderation', telugu: 'పిల్లల సృజనల సమీక్ష', desc: 'చిన్నారులు వేసిన బొమ్మలు, రాసిన కథలు మరియు కవితల ఆమోదం/తిరస్కరణ' },
+  'hero-banner': { title: 'Hero Banner & Layout Manager', telugu: 'హెరో బ్యానర్ & ల్యాండింగ్ లేఅవుట్', desc: 'హోమ్ పేజీ హెరో బ్యానర్ కంటెంట్ ఎంపిక, ప్రమోషన్ వ్యవధి మరియు విభాగాల క్రమం' },
   'users': { title: 'User Management', telugu: 'వినియోగదారుల నిర్వహణ', desc: 'అన్ని రకాల ఖాతాల జాబితా మరియు స్థితి నియంత్రణ' },
   'readers': { title: 'Reader Directory', telugu: 'పాఠకుల జాబితా', desc: 'నమోదైన తెలుగు కథా పాఠకుల వివరాలు' },
   'writers': { title: 'Official Writers', telugu: 'అధికారిక రచయితలు', desc: 'ఆమోదం పొందిన కథావాహిని రచయితల ప్రొఫైల్స్ & కథలు' },

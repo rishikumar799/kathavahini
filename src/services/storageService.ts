@@ -64,7 +64,8 @@ export type AssetType =
   | 'samethalu_asset'
   | 'knowledge_cover'
   | 'knowledge_asset'
-  | 'announcement_image';
+  | 'announcement_image'
+  | 'hero_banner_image';
 
 export interface CentralUploadParams {
   file: File;
@@ -390,6 +391,9 @@ export class StorageService {
 
       case 'announcement_image':
         return `announcements/${cid}/${cleanFile}`;
+
+      case 'hero_banner_image':
+        return `hero_banners/${cid}/${cleanFile}`;
 
       default:
         return `uploads/${cid}/${cleanFile}`;
@@ -870,6 +874,29 @@ export class StorageService {
       file,
       assetType: 'announcement_image',
       contentId: announcementId,
+      ownerRole: 'admin',
+      options,
+      optimizeImage: true,
+    });
+  }
+
+  /**
+   * Upload custom hero banner image (Admin only, up to 10MB)
+   * Path: hero_banners/{slideId}/{uniqueFileName}
+   */
+  public async uploadHeroBannerImage(
+    slideId: string,
+    file: File,
+    progressOrOptions?: ProgressOrOptions
+  ): Promise<StorageUploadResult> {
+    const options: UploadOptions = typeof progressOrOptions === 'function'
+      ? { onProgress: progressOrOptions }
+      : (progressOrOptions || {});
+
+    return this.uploadFile({
+      file,
+      assetType: 'hero_banner_image',
+      contentId: slideId,
       ownerRole: 'admin',
       options,
       optimizeImage: true,

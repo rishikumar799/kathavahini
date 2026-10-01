@@ -50,6 +50,7 @@ import { AdminSettingsView } from '../components/admin/AdminSettingsView';
 import { AdminAnnouncementsView } from '../components/admin/AdminAnnouncementsView';
 import { AdminContentEditorModal } from '../components/admin/AdminContentEditorModal';
 import { AdminAddUserModal } from '../components/admin/AdminAddUserModal';
+import { AdminLandingPageManager } from '../components/admin/AdminLandingPageManager';
 import { AdminBalavinodhiniOverview } from '../components/admin/balavinodhini/AdminBalavinodhiniOverview';
 import { AdminBalavinodhiniContentManager } from '../components/admin/balavinodhini/AdminBalavinodhiniContentManager';
 import { AdminBalavinodhiniContentEditorModal } from '../components/admin/balavinodhini/AdminBalavinodhiniContentEditorModal';
@@ -1039,6 +1040,17 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
                   defaultCategoryId: item.categoryId,
                 });
               }}
+            />
+          )}
+
+          {activeTab === 'hero-banner' && (
+            <AdminLandingPageManager
+              currentUser={currentUser}
+              stories={stories}
+              novels={novels}
+              jokes={jokes}
+              knowledge={knowledge}
+              onNavigateTab={(t) => setActiveTab(t as AdminTab)}
             />
           )}
 

@@ -43,7 +43,8 @@ export type AdminTab =
   | 'balavinodhini-quizzes'
   | 'balavinodhini-today'
   | 'balavinodhini-moderation'
-  // Content
+  // Content & Landing Page
+  | 'hero-banner'
   | 'stories'
   | 'novels'
   | 'episodes'
@@ -123,8 +124,9 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
       ]
     },
     {
-      title: 'CONTENT',
+      title: 'CONTENT & LANDING PAGE',
       items: [
+        { id: 'hero-banner', label: 'Hero Banner & Layout', teluguLabel: 'హెరో బ్యానర్ & లేఅవుట్', icon: Sparkles },
         { id: 'stories', label: 'Stories', teluguLabel: 'కథల నిర్వహణ', icon: Library },
         { id: 'novels', label: 'Novels', teluguLabel: 'నవలలు', icon: Bookmark },
         { id: 'episodes', label: 'Episodes', teluguLabel: 'ఎపిసోడ్లు / భాగాలు', icon: Layers },

@@ -76,6 +76,7 @@ export interface SourceDocumentInfo {
   isScanned?: boolean;
   uploadedAt: string;
   extractedWordCount?: number;
+  pageCount?: number;
 }
 
 export interface ImageMetadata {
@@ -123,6 +124,7 @@ export interface Story {
   authorId: string;
   authorName?: string;
   writerId?: string;
+  ownerId?: string;
   author: Author;
   category: StoryCategory;
   tags: string[];
@@ -151,6 +153,8 @@ export interface Story {
   isLiked?: boolean;
   isBookmarked?: boolean;
   progressPercent?: number;
+  hasChunks?: boolean;
+  chunksCount?: number;
 }
 
 export interface Chapter {

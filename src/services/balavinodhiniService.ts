@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, storage } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 import { 
   BalavinodhiniItem, 
   BalavinodhiniTab, 
@@ -970,7 +971,7 @@ export class BalavinodhiniService {
     // Try Firestore update
     try {
       const docRef = doc(db, 'balavinodhini', itemId);
-      await setDoc(docRef, { likeCount: newCount, updatedAt: serverTimestamp() }, { merge: true });
+      await setDoc(docRef, sanitizeFirestoreData({ likeCount: newCount, updatedAt: serverTimestamp() }), { merge: true });
     } catch (e) {}
 
     this.notifyListeners();
@@ -1022,11 +1023,11 @@ export class BalavinodhiniService {
 
     // Save to Firestore
     try {
-      await setDoc(doc(db, 'balavinodhini', id), {
+      await setDoc(doc(db, 'balavinodhini', id), sanitizeFirestoreData({
         ...newItem,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      });
+      }));
     } catch (e) {
       console.warn('Balavinodhini Firestore save note:', e);
     }
@@ -1051,10 +1052,10 @@ export class BalavinodhiniService {
   public async setTodayConfig(config: Partial<BalavinodhiniTodayConfig>): Promise<void> {
     this.todayConfig = { ...this.todayConfig, ...config };
     try {
-      await setDoc(doc(db, 'settings', 'balavinodhini_today'), {
+      await setDoc(doc(db, 'settings', 'balavinodhini_today'), sanitizeFirestoreData({
         ...this.todayConfig,
         updatedAt: serverTimestamp(),
-      }, { merge: true });
+      }), { merge: true });
     } catch (e) {}
   }
 
@@ -1073,11 +1074,11 @@ export class BalavinodhiniService {
     }
 
     try {
-      await updateDoc(doc(db, 'balavinodhini', itemId), {
+      await updateDoc(doc(db, 'balavinodhini', itemId), sanitizeFirestoreData({
         status,
         ...(moderationStatus ? { moderationStatus } : {}),
         updatedAt: serverTimestamp(),
-      });
+      }));
     } catch (e) {}
     this.notifyListeners();
   }
@@ -1111,7 +1112,7 @@ export class BalavinodhiniService {
         if (isBookmarked) {
           await deleteDoc(docRef);
         } else {
-          await setDoc(docRef, { itemId, createdAt: serverTimestamp() });
+          await setDoc(docRef, sanitizeFirestoreData({ itemId, createdAt: serverTimestamp() }));
         }
       } catch (e) {}
     }
@@ -1173,15 +1174,15 @@ export class BalavinodhiniService {
     };
 
     try {
-      await setDoc(doc(db, 'balavinodhini', itemId, 'comments', commentId), {
+      await setDoc(doc(db, 'balavinodhini', itemId, 'comments', commentId), sanitizeFirestoreData({
         ...newComment,
         createdAt: serverTimestamp(),
-      });
+      }));
       // Increment comment count on item
       const item = await this.getItemById(itemId);
       if (item) {
         const newCount = (item.commentCount || 0) + 1;
-        await setDoc(doc(db, 'balavinodhini', itemId), { commentCount: newCount }, { merge: true });
+        await setDoc(doc(db, 'balavinodhini', itemId), sanitizeFirestoreData({ commentCount: newCount }), { merge: true });
         const idx = this.cachedItems.findIndex(i => i.id === itemId);
         if (idx !== -1) {
           this.cachedItems[idx].commentCount = newCount;
@@ -1334,11 +1335,11 @@ export class BalavinodhiniService {
 
     // Save to Firestore
     try {
-      await setDoc(doc(db, 'balavinodhini', id), {
+      await setDoc(doc(db, 'balavinodhini', id), sanitizeFirestoreData({
         ...newItem,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      });
+      }));
     } catch (e) {
       console.warn('Error saving Balavinodhini item to Firestore:', e);
     }
@@ -1365,18 +1366,18 @@ export class BalavinodhiniService {
 
     try {
       const docRef = doc(db, 'balavinodhini', id);
-      await updateDoc(docRef, {
+      await updateDoc(docRef, sanitizeFirestoreData({
         ...updates,
         updatedAt: serverTimestamp(),
-      });
+      }));
     } catch (e) {
       // In case doc didn't exist in Firestore, set it
       try {
         if (idx !== -1) {
-          await setDoc(doc(db, 'balavinodhini', id), {
+          await setDoc(doc(db, 'balavinodhini', id), sanitizeFirestoreData({
             ...this.cachedItems[idx],
             updatedAt: serverTimestamp(),
-          });
+          }));
         }
       } catch (err) {}
     }
@@ -1476,7 +1477,7 @@ export class BalavinodhiniService {
     }
     try {
       const docRef = doc(db, 'balavinodhini_games', gameId);
-      await setDoc(docRef, { ...game, ...updates, updatedAt: serverTimestamp() }, { merge: true });
+      await setDoc(docRef, sanitizeFirestoreData({ ...game, ...updates, updatedAt: serverTimestamp() }), { merge: true });
     } catch (e) {
       console.warn('Game firestore sync fallback:', e);
     }
@@ -1548,10 +1549,10 @@ export class BalavinodhiniService {
 
     try {
       const docRef = doc(db, 'settings', 'balavinodhini_today');
-      await setDoc(docRef, {
+      await setDoc(docRef, sanitizeFirestoreData({
         ...this.todayConfig,
         updatedAt: serverTimestamp(),
-      }, { merge: true });
+      }), { merge: true });
     } catch (e) {
       console.warn('Failed to update today config in Firestore:', e);
     }

@@ -11,6 +11,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 import { ContactSubmission } from '../types';
 
 export class ContactService {
@@ -20,13 +21,13 @@ export class ContactService {
    */
   public async submitContactMessage(data: Omit<ContactSubmission, 'id' | 'createdAt' | 'status'>): Promise<string> {
     const user = auth.currentUser;
-    const docRef = await addDoc(collection(db, 'contactSubmissions'), {
+    const docRef = await addDoc(collection(db, 'contactSubmissions'), sanitizeFirestoreData({
       ...data,
       userId: user?.uid || data.userId || null,
       status: 'unread',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    }));
     return docRef.id;
   }
 
@@ -65,11 +66,11 @@ export class ContactService {
    */
   public async updateSubmissionStatus(submissionId: string, status: 'unread' | 'read' | 'resolved'): Promise<void> {
     const user = auth.currentUser;
-    await updateDoc(doc(db, 'contactSubmissions', submissionId), {
+    await updateDoc(doc(db, 'contactSubmissions', submissionId), sanitizeFirestoreData({
       status,
       handledBy: user?.uid || null,
       updatedAt: serverTimestamp(),
-    });
+    }));
   }
 }
 

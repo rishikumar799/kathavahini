@@ -13,6 +13,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 import { WriterApplication } from '../types';
 
 export class WriterApplicationService {
@@ -36,7 +37,7 @@ export class WriterApplicationService {
       throw new Error('రచయిత నియమ నిబంధనల ఒప్పందాన్ని తప్పనిసరిగా ఆమోదించాలి.');
     }
 
-    const appPayload = {
+    const appPayload = sanitizeFirestoreData({
       ...data,
       applicantUid: user.uid,
       email: user.email || data.email,
@@ -55,7 +56,7 @@ export class WriterApplicationService {
       reviewedBy: null,
       rejectionReason: null,
       adminNotes: null,
-    };
+    });
 
     const docRef = await addDoc(collection(db, 'writerApplications'), appPayload);
     return docRef.id;

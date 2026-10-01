@@ -131,6 +131,40 @@ service cloud.firestore {
         isWriter() && (resource.data.authorId == request.auth.uid || resource.data.writerId == request.auth.uid)
       );
 
+      // Content Chunks subcollection for long-form scalable stories
+      match /contentChunks/{chunkId} {
+        allow read: if true;
+        allow write: if isWriter() || isAdmin();
+      }
+
+      // Page Images subcollection for scalable image-based stories
+      match /pages/{pageId} {
+        allow read: if true;
+        allow write: if isWriter() || isAdmin();
+      }
+
+      // Attached Documents subcollection (PDF / DOC / DOCX / TXT)
+      match /documents/{documentId} {
+        allow read: if true;
+        allow write: if isWriter() || isAdmin();
+      }
+
+      // Episodes subcollection for multi-part stories
+      match /episodes/{episodeId} {
+        allow read: if true;
+        allow write: if isWriter() || isAdmin();
+
+        match /pages/{pageId} {
+          allow read: if true;
+          allow write: if isWriter() || isAdmin();
+        }
+
+        match /documents/{docId} {
+          allow read: if true;
+          allow write: if isWriter() || isAdmin();
+        }
+      }
+
       // Comments subcollection
       match /comments/{commentId} {
         allow read: if true;

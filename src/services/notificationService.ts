@@ -12,6 +12,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 import { NotificationItem } from '../types';
 
 export class NotificationService {
@@ -64,10 +65,10 @@ export class NotificationService {
     if (!currentUid) return;
 
     try {
-      await updateDoc(doc(db, 'users', currentUid, 'notifications', notificationId), {
+      await updateDoc(doc(db, 'users', currentUid, 'notifications', notificationId), sanitizeFirestoreData({
         read: true,
         updatedAt: serverTimestamp(),
-      });
+      }));
     } catch (err) {
       console.warn('Error marking notification as read:', err);
     }
@@ -82,12 +83,12 @@ export class NotificationService {
     type: 'story' | 'follower' | 'like' | 'system';
     linkId?: string;
   }): Promise<string> {
-    const docRef = await addDoc(collection(db, 'users', targetUid, 'notifications'), {
+    const docRef = await addDoc(collection(db, 'users', targetUid, 'notifications'), sanitizeFirestoreData({
       ...notification,
       read: false,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    }));
     return docRef.id;
   }
 

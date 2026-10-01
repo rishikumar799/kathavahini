@@ -12,6 +12,7 @@ import {
   orderBy
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 
 export class FollowingService {
   /**
@@ -50,20 +51,20 @@ export class FollowingService {
 
       // Decrement user's followingCount
       try {
-        await updateDoc(doc(db, 'users', currentUid), {
+        await updateDoc(doc(db, 'users', currentUid), sanitizeFirestoreData({
           followingCount: increment(-1),
           updatedAt: serverTimestamp(),
-        });
+        }));
       } catch (err) {
         console.warn('Silent user following decrement:', err);
       }
 
       // Decrement author's followersCount
       try {
-        await updateDoc(doc(db, 'authors', authorId), {
+        await updateDoc(doc(db, 'authors', authorId), sanitizeFirestoreData({
           followersCount: increment(-1),
           updatedAt: serverTimestamp(),
-        });
+        }));
       } catch (err) {
         console.warn('Silent author followers decrement:', err);
       }
@@ -71,29 +72,29 @@ export class FollowingService {
       return false;
     } else {
       // Follow
-      await setDoc(followRef, {
+      await setDoc(followRef, sanitizeFirestoreData({
         authorId,
         authorName: authorName || '',
         followedAt: serverTimestamp(),
         createdAt: serverTimestamp(),
-      });
+      }));
 
       // Increment user's followingCount
       try {
-        await updateDoc(doc(db, 'users', currentUid), {
+        await updateDoc(doc(db, 'users', currentUid), sanitizeFirestoreData({
           followingCount: increment(1),
           updatedAt: serverTimestamp(),
-        });
+        }));
       } catch (err) {
         console.warn('Silent user following increment:', err);
       }
 
       // Increment author's followersCount
       try {
-        await updateDoc(doc(db, 'authors', authorId), {
+        await updateDoc(doc(db, 'authors', authorId), sanitizeFirestoreData({
           followersCount: increment(1),
           updatedAt: serverTimestamp(),
-        });
+        }));
       } catch (err) {
         console.warn('Silent author followers increment:', err);
       }

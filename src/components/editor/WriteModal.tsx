@@ -826,6 +826,7 @@ export const WriteModal: React.FC<WriteModalProps> = ({
                   {storyMode === 'image_pages' && (
                     <ImagePagesTab
                       storyId={sessionStoryId}
+                      ownerId={currentUser?.id}
                       imagePages={imagePages}
                       onChange={setImagePages}
                     />

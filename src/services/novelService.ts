@@ -12,6 +12,7 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 import { Novel, Chapter } from '../types';
 import { MOCK_NOVELS } from './mockData';
 import { deletionTracker } from './deletionTracker';
@@ -232,11 +233,11 @@ class NovelService {
     };
 
     try {
-      await setDoc(doc(db, 'novels', novelId), {
+      await setDoc(doc(db, 'novels', novelId), sanitizeFirestoreData({
         ...created,
         createdAt: serverTimestamp(),
-      });
-      await setDoc(doc(db, 'novels', novelId, 'chapters', initialChapter.id), initialChapter);
+      }));
+      await setDoc(doc(db, 'novels', novelId, 'chapters', initialChapter.id), sanitizeFirestoreData(initialChapter));
     } catch (e) {}
 
     return created;

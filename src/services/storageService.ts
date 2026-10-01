@@ -89,6 +89,31 @@ const ALLOWED_IMAGE_MIME_TYPES = [
 
 export class StorageService {
   /**
+   * Resolve authoritative MIME type from File object and filename extension
+   */
+  public getEffectiveMimeType(file: File, assetType?: AssetType): string {
+    const rawType = (file.type || '').toLowerCase().trim();
+    const name = file.name.toLowerCase();
+
+    if (name.endsWith('.pdf')) return 'application/pdf';
+    if (name.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    if (name.endsWith('.doc')) return 'application/msword';
+    if (name.endsWith('.txt')) return 'text/plain';
+    if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+    if (name.endsWith('.png')) return 'image/png';
+    if (name.endsWith('.webp')) return 'image/webp';
+    if (name.endsWith('.gif')) return 'image/gif';
+    if (name.endsWith('.svg')) return 'image/svg+xml';
+
+    if (rawType && rawType !== 'application/octet-stream') {
+      return rawType;
+    }
+
+    if (assetType === 'story_document') return 'application/pdf';
+    return 'application/octet-stream';
+  }
+
+  /**
    * Validate image file type and size (Default 10MB, Profile 5MB)
    */
   public validateImageFile(
@@ -577,8 +602,9 @@ export class StorageService {
 
     return new Promise<StorageUploadResult>((resolve, reject) => {
       let isSettled = false;
+      const effectiveContentType = this.getEffectiveMimeType(file, customMeta.assetType as AssetType);
       const uploadTask = uploadBytesResumable(storageRef, file, {
-        contentType: file.type || 'application/octet-stream',
+        contentType: effectiveContentType,
         customMetadata: customMeta,
       });
 
@@ -676,7 +702,7 @@ export class StorageService {
               storagePath: storageRef.fullPath,
               metadata: {
                 fileName: file.name,
-                contentType: file.type || 'application/octet-stream',
+                contentType: effectiveContentType,
                 size: file.size,
                 uploadedAt: new Date().toISOString(),
               },

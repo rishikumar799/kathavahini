@@ -1,8 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
-  BookOpen, Star, Eye, Heart, Bookmark, Share2, Clock, Calendar, ArrowLeft, Play, UserPlus, UserCheck 
+  BookOpen, Star, Eye, Heart, Bookmark, Share2, Clock, Calendar, ArrowLeft, Play, UserPlus, UserCheck,
+  Edit3, Trash2, AlertTriangle, Loader2, Sparkles, Image as ImageIcon
 } from 'lucide-react';
-import { Story, Author } from '../types';
+import { Story, Author, User } from '../types';
 import { SectionHeader } from '../components/common/SectionHeader';
 import { StoryCard } from '../components/cards/StoryCard';
 import { StarRating } from '../components/common/StarRating';
@@ -11,6 +12,7 @@ import { storyService } from '../services/storyService';
 interface StoryDetailViewProps {
   story: Story;
   relatedStories: Story[];
+  currentUser?: User | null;
   onStartReading: (story: Story) => void;
   onSelectAuthor: (author: Author) => void;
   onSelectStory: (story: Story) => void;
@@ -18,11 +20,14 @@ interface StoryDetailViewProps {
   onBookmarkToggle: (storyId: string) => void;
   onLikeToggle: (storyId: string) => void;
   onFollowAuthorToggle: (authorId: string) => void;
+  onEditStory?: (story: Story) => void;
+  onDeleteStory?: (storyId: string) => Promise<void> | void;
 }
 
 export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
   story,
   relatedStories,
+  currentUser,
   onStartReading,
   onSelectAuthor,
   onSelectStory,
@@ -30,7 +35,22 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
   onBookmarkToggle,
   onLikeToggle,
   onFollowAuthorToggle,
+  onEditStory,
+  onDeleteStory,
 }) => {
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Determine if viewer can manage/edit this story (Admin or Story Author/Writer)
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.email?.toLowerCase() === 'thekathavahini@gmail.com';
+  const isOwnerOrAuthor = Boolean(currentUser && (
+    currentUser.id === story.authorId || 
+    currentUser.id === story.writerId || 
+    currentUser.id === story.ownerId || 
+    currentUser.id === story.author?.id
+  ));
+  const canManageStory = Boolean(isAdmin || isOwnerOrAuthor);
+
   useEffect(() => {
     if (story?.id) {
       storyService.recordStoryView(story.id);
@@ -46,21 +66,62 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
     }
   };
 
+  const handleConfirmDelete = async () => {
+    if (!onDeleteStory) return;
+    setIsDeleting(true);
+    try {
+      await onDeleteStory(story.id);
+      setShowDeleteModal(false);
+      onBack();
+    } catch (err) {
+      console.error('Error deleting story:', err);
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div className="space-y-10 pb-16">
-      {/* Back button */}
-      <button
-        onClick={onBack}
-        className="inline-flex items-center gap-2 text-sm font-semibold text-[#7A284B] dark:text-[#D87591] hover:underline cursor-pointer"
-      >
-        <ArrowLeft className="w-4 h-4" />
-        <span>వెనక్కి వెళ్లండి</span>
-      </button>
+      {/* Back button & Owner Ribbon */}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <button
+          onClick={onBack}
+          className="inline-flex items-center gap-2 text-sm font-semibold text-[#7A284B] dark:text-[#D87591] hover:underline cursor-pointer"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>వెనక్కి వెళ్లండి</span>
+        </button>
+
+        {canManageStory && (
+          <div className="flex items-center gap-2">
+            {onEditStory && (
+              <button
+                type="button"
+                onClick={() => onEditStory(story)}
+                className="px-4 py-2 rounded-full bg-[#7A284B] hover:bg-[#631F3C] text-white text-xs font-bold inline-flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>కథను సవరించండి (Edit Story)</span>
+              </button>
+            )}
+
+            {onDeleteStory && (
+              <button
+                type="button"
+                onClick={() => setShowDeleteModal(true)}
+                className="px-4 py-2 rounded-full bg-red-600/10 hover:bg-red-600 text-red-600 hover:text-white border border-red-600/20 text-xs font-bold inline-flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>తొలగించండి (Delete)</span>
+              </button>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Main Cover & Metadata Header */}
-      <div className="bg-white dark:bg-[#18181D] rounded-3xl border border-[#E8E1DA] dark:border-[#2E2D36] p-6 sm:p-10 shadow-xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+      <div className="bg-white dark:bg-[#18181D] rounded-3xl border border-[#E8E1DA] dark:border-[#2E2D36] p-6 sm:p-10 shadow-xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-center relative overflow-hidden">
         {/* Cover Artwork */}
-        <div className="lg:col-span-5 relative aspect-[16/10] sm:aspect-[4/3] rounded-2xl overflow-hidden shadow-2xl bg-[#FAF7F2] dark:bg-[#222229]">
+        <div className="lg:col-span-5 relative aspect-[16/10] sm:aspect-[4/3] rounded-2xl overflow-hidden shadow-2xl bg-[#FAF7F2] dark:bg-[#222229] group">
           <img
             src={story.coverImage}
             alt={story.teluguTitle}
@@ -70,6 +131,19 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
           <span className="absolute top-4 left-4 px-3 py-1 rounded-full text-xs font-bold bg-white/90 text-[#7A284B] shadow-md">
             {story.category}
           </span>
+
+          {canManageStory && onEditStory && (
+            <div className="absolute bottom-4 right-4 opacity-90 group-hover:opacity-100 transition-opacity">
+              <button
+                type="button"
+                onClick={() => onEditStory(story)}
+                className="px-3 py-1.5 rounded-xl bg-black/75 hover:bg-black text-white backdrop-blur-md text-[11px] font-bold inline-flex items-center gap-1.5 shadow-md cursor-pointer"
+              >
+                <ImageIcon className="w-3.5 h-3.5" />
+                <span>ముఖచిత్రాన్ని మార్చండి (Edit Thumbnail)</span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Story Metadata & CTAs */}
@@ -239,6 +313,63 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
             ))}
           </div>
         </section>
+      )}
+
+      {/* Delete Confirmation Modal for Author and Admin */}
+      {showDeleteModal && (
+        <div 
+          onClick={() => !isDeleting && setShowDeleteModal(false)}
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md bg-white dark:bg-[#1E1E24] rounded-3xl p-6 sm:p-8 shadow-2xl border border-red-500/20 space-y-6"
+          >
+            <div className="flex items-start gap-4">
+              <div className="p-3.5 rounded-2xl bg-red-600/10 text-red-600 shrink-0">
+                <AlertTriangle className="w-7 h-7" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-bold font-serif-telugu text-[#17151A] dark:text-[#F7F3EE]">
+                  కథను తొలగించాలా? (Delete Story)
+                </h3>
+                <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] font-serif-telugu leading-relaxed">
+                  "<strong>{story.teluguTitle}</strong>" కథను మరియు దానితో ముడిపడిన అన్ని పేజీలు, చిత్రాలు మరియు పత్రాలను శాశ్వతంగా తొలగించాలనుకుంటున్నారా? ఈ చర్యను రద్దు చేయలేరు.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-black/10 dark:border-white/10">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setShowDeleteModal(false)}
+                className="px-5 py-2.5 rounded-xl bg-black/5 dark:bg-white/5 hover:bg-black/10 text-[#17151A] dark:text-[#F7F3EE] text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                రద్దు చేయండి (Cancel)
+              </button>
+
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleConfirmDelete}
+                className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all shadow-md inline-flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>తొలగిస్తోంది...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>ఖచ్చితంగా తొలగించండి</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

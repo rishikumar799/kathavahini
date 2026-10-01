@@ -9,6 +9,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 import { AdminAuditLog } from '../types';
 
 export class AuditLogService {
@@ -26,14 +27,34 @@ export class AuditLogService {
     reason?: string;
     metadata?: Record<string, any>;
   }): Promise<string> {
-    const adminUser = auth.currentUser;
-    const docRef = await addDoc(collection(db, 'adminAuditLogs'), {
-      ...logData,
-      adminUid: adminUser?.uid || 'system_admin',
-      adminEmail: adminUser?.email || 'thekathavahini@gmail.com',
-      createdAt: serverTimestamp(),
-    });
-    return docRef.id;
+    try {
+      const adminUser = auth.currentUser;
+      const cleanMetadata = logData.metadata ? sanitizeFirestoreData(logData.metadata) : undefined;
+      
+      const payload: Record<string, any> = {
+        action: logData.action,
+        targetType: logData.targetType,
+        targetId: logData.targetId,
+        adminUid: adminUser?.uid || 'system_admin',
+        adminEmail: adminUser?.email || 'thekathavahini@gmail.com',
+        createdAt: serverTimestamp(),
+      };
+
+      if (logData.targetTitle) payload.targetTitle = logData.targetTitle;
+      if (logData.previousStatus) payload.previousStatus = logData.previousStatus;
+      if (logData.newStatus) payload.newStatus = logData.newStatus;
+      if (logData.reason) payload.reason = logData.reason;
+      if (cleanMetadata && Object.keys(cleanMetadata).length > 0) {
+        payload.metadata = cleanMetadata;
+      }
+
+      const cleanPayload = sanitizeFirestoreData(payload);
+      const docRef = await addDoc(collection(db, 'adminAuditLogs'), cleanPayload);
+      return docRef.id;
+    } catch (err) {
+      console.warn('[AuditLogService] Non-fatal audit log creation notice:', err);
+      return `local-audit-${Date.now()}`;
+    }
   }
 
   /**

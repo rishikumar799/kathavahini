@@ -12,6 +12,7 @@ import {
   orderBy
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 import { Story } from '../types';
 
 export class BookmarkService {
@@ -50,22 +51,22 @@ export class BookmarkService {
       
       // Decrement bookmark counter on user document safely
       try {
-        await updateDoc(doc(db, 'users', currentUid), {
+        await updateDoc(doc(db, 'users', currentUid), sanitizeFirestoreData({
           bookmarksCount: increment(-1),
           savedStoriesCount: increment(-1),
           updatedAt: serverTimestamp(),
-        });
+        }));
       } catch (err) {
         console.warn('Silent user bookmark count decrement:', err);
       }
 
       // Decrement bookmark counter on story document
       try {
-        await updateDoc(doc(db, 'stories', story.id), {
+        await updateDoc(doc(db, 'stories', story.id), sanitizeFirestoreData({
           bookmarksCount: increment(-1),
           bookmarkCount: increment(-1),
           updatedAt: serverTimestamp(),
-        });
+        }));
       } catch (err) {
         console.warn('Silent story bookmark count decrement:', err);
       }
@@ -73,7 +74,7 @@ export class BookmarkService {
       return false;
     } else {
       // Add bookmark
-      await setDoc(bookmarkRef, {
+      await setDoc(bookmarkRef, sanitizeFirestoreData({
         storyId: story.id,
         title: story.title,
         teluguTitle: story.teluguTitle || story.title,
@@ -81,26 +82,26 @@ export class BookmarkService {
         category: story.category || 'జీవితం',
         savedAt: serverTimestamp(),
         createdAt: serverTimestamp(),
-      });
+      }));
 
       // Increment user bookmark counter
       try {
-        await updateDoc(doc(db, 'users', currentUid), {
+        await updateDoc(doc(db, 'users', currentUid), sanitizeFirestoreData({
           bookmarksCount: increment(1),
           savedStoriesCount: increment(1),
           updatedAt: serverTimestamp(),
-        });
+        }));
       } catch (err) {
         console.warn('Silent user bookmark count increment:', err);
       }
 
       // Increment story bookmark counter
       try {
-        await updateDoc(doc(db, 'stories', story.id), {
+        await updateDoc(doc(db, 'stories', story.id), sanitizeFirestoreData({
           bookmarksCount: increment(1),
           bookmarkCount: increment(1),
           updatedAt: serverTimestamp(),
-        });
+        }));
       } catch (err) {
         console.warn('Silent story bookmark count increment:', err);
       }

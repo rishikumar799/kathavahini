@@ -19,11 +19,14 @@ import {
 } from 'lucide-react';
 import { StoryImagePage } from '../../types';
 import { storageService, UploadProgressInfo, UploadStatus } from '../../services/storageService';
+import { UPLOAD_CONFIG } from '../../config/uploadConfig';
+import { storySubcollectionService } from '../../services/storySubcollectionService';
 
 interface ImagePagesTabProps {
   imagePages: StoryImagePage[];
   onChange: (pages: StoryImagePage[]) => void;
   storyId?: string;
+  ownerId?: string;
 }
 
 interface UploadQueueItem {
@@ -42,7 +45,8 @@ interface UploadQueueItem {
 export const ImagePagesTab: React.FC<ImagePagesTabProps> = ({
   imagePages,
   onChange,
-  storyId = `story-${Date.now()}`
+  storyId = `story-${Date.now()}`,
+  ownerId
 }) => {
   const multiFileInputRef = useRef<HTMLInputElement>(null);
   const singleSlotFileInputRef = useRef<HTMLInputElement>(null);
@@ -71,17 +75,17 @@ export const ImagePagesTab: React.FC<ImagePagesTabProps> = ({
   };
 
   const processUploadQueue = async (itemsToUpload: UploadQueueItem[], currentPages: StoryImagePage[]) => {
-    const concurrency = 2;
+    const concurrency = UPLOAD_CONFIG.MAX_CONCURRENT_UPLOADS;
     let nextIndex = 0;
     let pagesAccumulator = [...currentPages];
 
     const uploadSingleItem = async (item: UploadQueueItem) => {
-      const validation = storageService.validateImageFile(item.file, 15 * 1024 * 1024);
+      const validation = storageService.validateImageFile(item.file, UPLOAD_CONFIG.MAX_IMAGE_SIZE);
       if (!validation.isValid) {
         setUploadQueue(prev => prev.map(q => q.id === item.id ? {
           ...q,
           status: 'FAILED',
-          error: validation.error || 'చిత్రం చెల్లదు'
+          error: validation.error || 'చిత్రం పరిమాణం మించింది'
         } : q));
         return;
       }
@@ -291,6 +295,9 @@ export const ImagePagesTab: React.FC<ImagePagesTabProps> = ({
       altText: `పేజీ ${idx + 1}`
     }));
     onChange(updated);
+    if (storyId && !storyId.startsWith('story-temp-')) {
+      storySubcollectionService.saveStoryPages(storyId, updated, ownerId).catch(() => {});
+    }
   };
 
   const handleRemovePage = async (index: number) => {

@@ -1,5 +1,6 @@
 import { doc, getDocs, setDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 
 const STORAGE_KEY = 'kathavahini_deleted_entity_ids';
 
@@ -74,12 +75,12 @@ class DeletionTracker {
     }
 
     try {
-      await setDoc(doc(db, 'deletedItems', id), {
+      await setDoc(doc(db, 'deletedItems', id), sanitizeFirestoreData({
         id,
         type,
         deletedAt: serverTimestamp(),
         deletedBy: adminUid || 'admin',
-      }, { merge: true });
+      }), { merge: true });
     } catch (e) {
       console.warn(`Could not record deletion of ${id} to Firestore:`, e);
     }

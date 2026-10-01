@@ -18,6 +18,9 @@ import { Footer } from './components/common/Footer';
 // Modals
 import { WriteModal } from './components/editor/WriteModal';
 import { AuthModal } from './components/modals/AuthModal';
+import { AdminContentEditorModal } from './components/admin/AdminContentEditorModal';
+import { writerService } from './services/writerService';
+import { adminService } from './services/adminService';
 
 // Views
 import { HomeView } from './views/HomeView';
@@ -63,6 +66,7 @@ export default function App() {
 
   // Modals state
   const [isWriteOpen, setIsWriteOpen] = useState(false);
+  const [editingStory, setEditingStory] = useState<Story | null>(null);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [authCustomPrompt, setAuthCustomPrompt] = useState<string | undefined>();
   const [authInitialMode, setAuthInitialMode] = useState<'login' | 'register' | 'forgot-password'>('login');
@@ -460,6 +464,49 @@ export default function App() {
     setNotifications(notifs);
   };
 
+  const handleEditStory = (story: Story) => {
+    setEditingStory(story);
+  };
+
+  const handleDeleteStory = async (storyId: string) => {
+    try {
+      const isUserAdmin = Boolean(user && (user.role === 'admin' || user.email?.toLowerCase() === 'thekathavahini@gmail.com'));
+      if (isUserAdmin) {
+        await adminService.deleteStory(storyId, user?.id || 'admin_uid', user?.email || 'admin@kathavahini.com');
+      } else {
+        await writerService.deleteStory(storyId, user?.id || 'writer_uid');
+      }
+      setAllStories(prev => prev.filter(s => s.id !== storyId));
+      setTrendingStories(prev => prev.filter(s => s.id !== storyId));
+      setPopularStories(prev => prev.filter(s => s.id !== storyId));
+      setNewReleases(prev => prev.filter(s => s.id !== storyId));
+      setSavedStories(prev => prev.filter(s => s.id !== storyId));
+      setReadingHistory(prev => prev.filter(h => h.storyId !== storyId));
+      if (selectedStory?.id === storyId) {
+        setSelectedStory(null);
+        setCurrentTab('home');
+      }
+    } catch (err) {
+      console.error('Error deleting story in App:', err);
+    }
+  };
+
+  const handleSaveEditedStory = async (data: any) => {
+    if (!editingStory) return;
+    const isUserAdmin = Boolean(user && (user.role === 'admin' || user.email?.toLowerCase() === 'thekathavahini@gmail.com'));
+    if (isUserAdmin) {
+      await adminService.updateStory(editingStory.id, data, user?.id || 'admin_uid', user?.email || 'admin@kathavahini.com');
+    } else {
+      await writerService.updateStory(editingStory.id, data, user?.id || 'writer_uid');
+    }
+    setEditingStory(null);
+    await loadData();
+    if (selectedStory?.id === editingStory.id) {
+      const updated = await storyService.getStoryById(editingStory.id);
+      if (updated) setSelectedStory(updated);
+    }
+  };
+
   // Render view router
   const renderCurrentView = () => {
     switch (currentTab) {
@@ -504,6 +551,7 @@ export default function App() {
           <StoryDetailView
             story={selectedStory}
             relatedStories={(allStories.length > 0 ? allStories : trendingStories).filter(s => s.id !== selectedStory.id && s.category === selectedStory.category)}
+            currentUser={user}
             onStartReading={handleStartReading}
             onSelectAuthor={handleSelectAuthor}
             onSelectStory={handleSelectStory}
@@ -511,6 +559,8 @@ export default function App() {
             onBookmarkToggle={handleBookmarkToggle}
             onLikeToggle={handleLikeToggle}
             onFollowAuthorToggle={handleFollowAuthorToggle}
+            onEditStory={handleEditStory}
+            onDeleteStory={handleDeleteStory}
           />
         ) : (
           <HomeView
@@ -544,6 +594,8 @@ export default function App() {
             onLikeToggle={handleLikeToggle}
             onUpdateProgress={handleUpdateProgress}
             onRequireAuth={handleRequireAuth}
+            onEditStory={handleEditStory}
+            onDeleteStory={handleDeleteStory}
           />
         ) : null;
 
@@ -699,6 +751,8 @@ export default function App() {
             onOpenWrite={() => setIsWriteOpen(true)}
             onSelectStory={handleSelectStory}
             onApplyWriter={() => setCurrentTab('apply-writer')}
+            onEditStory={handleEditStory}
+            onDeleteStory={handleDeleteStory}
           />
         ) : null;
       }
@@ -964,6 +1018,15 @@ export default function App() {
         }}
         customPrompt={authCustomPrompt}
         initialMode={authInitialMode}
+      />
+
+      {/* Universal Story Content Editor Modal for Owner & Admin */}
+      <AdminContentEditorModal
+        isOpen={Boolean(editingStory)}
+        onClose={() => setEditingStory(null)}
+        contentType="story"
+        initialData={editingStory}
+        onSave={handleSaveEditedStory}
       />
     </div>
   );

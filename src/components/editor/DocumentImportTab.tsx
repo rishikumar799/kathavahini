@@ -171,13 +171,13 @@ export const DocumentImportTab: React.FC<DocumentImportTabProps> = ({
         </div>
         <div className="space-y-1">
           <h4 className="text-sm font-bold text-[#17151A] dark:text-[#F7F3EE] flex items-center gap-2">
-            <span>పి.డి.ఎఫ్ కథా పత్రం అప్‌లోడ్ (Full PDF Story Upload)</span>
+            <span>కథా పత్రం అప్‌లోడ్ (PDF / Word DOCX / DOC / TXT Story Upload)</span>
             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-[#7A284B] text-white">
-              PDF డాక్యుమెంట్
+              PDF / DOC / DOCX
             </span>
           </h4>
           <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] leading-relaxed">
-            మీ పూర్తి <strong>PDF కథా పత్రాన్ని</strong> ఇక్కడ అప్‌లోడ్ చేయండి. మీ పత్రం భద్రపరచబడి కథతో పాటు పాఠకులకు లభ్యమవుతుంది. తెలుగు అక్షరాలు ఆటోమేటిక్‌గా రీడర్ కోసం సిద్ధం చేయబడతాయి.
+            మీ పూర్తి <strong>PDF, Word (.docx, .doc), లేదా Text (.txt) కథా పత్రాన్ని</strong> ఇక్కడ అప్‌లోడ్ చేయండి. మీ మూల పత్రం క్లౌడ్ స్టోరేజ్‌లో భద్రపరచబడి కథతో పాటు పాఠకులకు లభ్యమవుతుంది.
           </p>
         </div>
       </div>
@@ -192,7 +192,7 @@ export const DocumentImportTab: React.FC<DocumentImportTabProps> = ({
               </div>
               <div className="space-y-1">
                 <h4 className="text-sm font-bold text-[#17151A] dark:text-[#F7F3EE]">
-                  పూర్తి PDF కథ విజయవంతంగా జతచేయబడింది!
+                  కథా పత్రం విజయవంతంగా జతచేయబడింది!
                 </h4>
                 <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC]">
                   ఫైల్: <strong>{appliedDocInfo.name}</strong> ({formatBytes(appliedDocInfo.size || 0)})
@@ -209,7 +209,7 @@ export const DocumentImportTab: React.FC<DocumentImportTabProps> = ({
               onClick={handleReset}
               className="px-3 py-1.5 rounded-xl bg-black/5 dark:bg-white/10 hover:bg-black/10 text-xs font-bold text-[#17151A] dark:text-[#F7F3EE] transition-colors cursor-pointer"
             >
-              మరో PDF మార్చండి
+              మరో ఫైల్ మార్చండి
             </button>
           </div>
         </div>
@@ -231,7 +231,7 @@ export const DocumentImportTab: React.FC<DocumentImportTabProps> = ({
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.docx,.doc,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+            accept=".pdf,.docx,.doc,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,text/plain"
             onChange={handleFileChange}
             className="hidden"
           />
@@ -241,15 +241,15 @@ export const DocumentImportTab: React.FC<DocumentImportTabProps> = ({
           </div>
 
           <h3 className="text-base font-bold text-[#17151A] dark:text-[#F7F3EE] mb-1 font-serif-telugu">
-            మీ PDF పత్రాన్ని ఇక్కడ లాగి వదలండి లేదా ఎంచుకోండి
+            మీ PDF / DOC / DOCX / TXT పత్రాన్ని ఇక్కడ లాగి వదలండి లేదా ఎంచుకోండి
           </h3>
           <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] mb-4 max-w-md">
-            మద్దతు గల ఫార్మాట్‌లు: <strong>PDF కథలు</strong>, DOCX, TXT (గరిష్టంగా 25MB). మీ పూర్తి పత్రం పాఠకుల కోసం భద్రపరచబడుతుంది.
+            మద్దతు గల ఫార్మాట్‌లు: <strong>PDF (.pdf)</strong>, <strong>Word (.docx, .doc)</strong>, టెక్స్ట్ (.txt) (గరిష్టంగా 25MB). మీ పూర్తి పత్రం భద్రపరచబడుతుంది.
           </p>
 
           <span className="inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-[#7A284B] hover:bg-[#631F3C] text-white text-xs font-bold shadow-md transition-colors">
             <FileText className="w-4 h-4" />
-            <span>PDF పత్రాన్ని ఎంచుకోండి (Choose PDF Story)</span>
+            <span>పత్రాన్ని ఎంచుకోండి (Choose PDF / DOC / DOCX Story)</span>
           </span>
         </div>
       )}
@@ -292,7 +292,7 @@ export const DocumentImportTab: React.FC<DocumentImportTabProps> = ({
               className="px-5 py-2.5 rounded-xl bg-[#7A284B] hover:bg-[#631F3C] text-white text-xs font-bold inline-flex items-center gap-2 shadow-sm transition-colors cursor-pointer"
             >
               <Check className="w-4 h-4" />
-              <span>ఈ పూర్తి PDF కథతో కొనసాగించండి</span>
+              <span>ఈ పూర్తి పత్ర కథతో కొనసాగించండి</span>
             </button>
             <button
               type="button"
@@ -408,7 +408,7 @@ export const DocumentImportTab: React.FC<DocumentImportTabProps> = ({
               ) : (
                 <>
                   <CheckCircle2 className="w-4 h-4" />
-                  <span>ఈ PDF పత్రాన్ని కథకు జతచేయండి (Attach PDF Story)</span>
+                  <span>ఈ పత్రాన్ని కథకు జతచేయండి (Attach Document Story)</span>
                 </>
               )}
             </button>

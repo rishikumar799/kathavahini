@@ -18,6 +18,13 @@ import {
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { db } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
+import { 
+  saveStoryContentChunks, 
+  loadStoryContentChunks, 
+  deleteStoryContentChunks 
+} from '../utils/storyChunker';
+import { storySubcollectionService } from './storySubcollectionService';
 import { 
   WriterApplication, 
   Story, 
@@ -237,6 +244,18 @@ class AdminService {
           excerpt: data.excerpt || '',
           teluguExcerpt: data.teluguExcerpt || data.excerpt || '',
           content: Array.isArray(data.content) ? data.content : [data.content || ''],
+          contentType: data.contentType || 'rich_text',
+          contentBlocks: data.contentBlocks,
+          imagePages: data.imagePages,
+          sourceDocument: data.sourceDocument || (data.documentURL || data.documentUrl ? {
+            name: data.documentFileName || data.fileName || 'Story Document',
+            type: data.documentContentType || data.mimeType || 'pdf',
+            size: data.documentSize || data.fileSize || 0,
+            storageUrl: data.documentURL || data.documentUrl,
+            storagePath: data.documentStoragePath || data.storagePath,
+            isScanned: false,
+            uploadedAt: data.uploadedAt || data.documentUploadedAt || new Date().toISOString(),
+          } : undefined),
           authorId: data.authorId || '',
           authorName: data.authorName,
           writerId: data.writerId,
@@ -299,6 +318,7 @@ class AdminService {
    * Admin Creates Unlimited Story Directly (Can be draft, published, scheduled, private, hidden)
    */
   public async createStory(storyData: {
+    id?: string;
     title: string;
     teluguTitle?: string;
     subtitle?: string;
@@ -321,36 +341,38 @@ class AdminService {
     scheduledAt?: string; // ISO string for scheduled publication
     authorName?: string;
   }, adminUid: string, adminEmail?: string): Promise<Story> {
-    const storyId = `story-${Date.now()}`;
+    const storyId = storyData.id || `story-${Date.now()}`;
     const todayString = new Date().toISOString().split('T')[0];
     const paragraphs = storyData.content.length > 0 ? storyData.content : ['కథ కంటెంట్...'];
+    const fullText = paragraphs.join(' ');
+    const charCount = fullText.length;
+    const wordCount = fullText.split(/\s+/).filter(Boolean).length;
     const excerpt = storyData.teluguExcerpt || storyData.excerpt || paragraphs[0]?.slice(0, 120) || 'కథ పరిచయం';
     const status: ContentStatus = storyData.status || 'published';
     const visibility: ContentVisibility = storyData.visibility || 'public';
     const authorName = storyData.authorName || 'కథావాహిని సంపాదక విభాగం';
     const finalCover = storyData.coverImage || storyData.coverImageUrl || (storyData.imagePages && storyData.imagePages[0]?.imageUrl) || 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800';
 
-    const newStory: Story = {
+    const rawStory: Record<string, any> = {
       id: storyId,
       title: storyData.title.trim() || 'Untitled Story',
       teluguTitle: storyData.teluguTitle?.trim() || storyData.title.trim() || 'శీర్షిక లేని కథ',
-      subtitle: storyData.subtitle?.trim(),
-      teluguSubtitle: storyData.teluguSubtitle?.trim() || storyData.subtitle?.trim(),
       slug: (storyData.title || 'story').toLowerCase().replace(/\s+/g, '-'),
       coverImage: finalCover,
       coverImageUrl: finalCover,
-      coverImagePath: storyData.coverImagePath,
-      coverImageMetadata: storyData.coverImageMetadata,
+      coverImageURL: finalCover,
+      coverImageUpdatedAt: new Date().toISOString(),
       excerpt,
       teluguExcerpt: excerpt,
-      content: paragraphs,
+      content: [], // Metadata stored on root story doc; full content chunked in subcollection
+      hasChunks: true,
       contentType: storyData.contentType || 'rich_text',
-      contentBlocks: storyData.contentBlocks,
-      imagePages: storyData.imagePages,
-      sourceDocument: storyData.sourceDocument,
       authorId: adminUid,
       writerId: adminUid,
       authorName,
+      wordCount,
+      characterCount: charCount,
+      readingTimeMinutes: Math.max(1, Math.ceil(charCount / 300)),
       author: {
         id: adminUid,
         name: authorName,
@@ -370,32 +392,98 @@ class AdminService {
       viewCount: 0,
       likeCount: 0,
       bookmarkCount: 0,
-      readingTimeMinutes: Math.max(1, Math.ceil(paragraphs.join(' ').length / 300)),
       publishedAt: status === 'published' ? todayString : '',
       status,
       visibility,
-      scheduledAt: storyData.scheduledAt || null,
       approvedAt: status === 'published' ? serverTimestamp() : null,
       approvedBy: adminUid,
       createdBy: adminUid,
       updatedBy: adminUid,
     };
 
-    await setDoc(doc(db, 'stories', storyId), {
-      ...newStory,
+    if (storyData.subtitle?.trim()) {
+      rawStory.subtitle = storyData.subtitle.trim();
+    }
+    if (storyData.teluguSubtitle?.trim() || storyData.subtitle?.trim()) {
+      rawStory.teluguSubtitle = (storyData.teluguSubtitle?.trim() || storyData.subtitle?.trim())!;
+    }
+    if (storyData.coverImagePath) {
+      rawStory.coverImagePath = storyData.coverImagePath;
+      rawStory.coverImageStoragePath = storyData.coverImagePath;
+    }
+    if (storyData.coverImageMetadata) {
+      rawStory.coverImageMetadata = storyData.coverImageMetadata;
+      if (storyData.coverImageMetadata.fileName) rawStory.coverImageFileName = storyData.coverImageMetadata.fileName;
+      if (storyData.coverImageMetadata.contentType) rawStory.coverImageContentType = storyData.coverImageMetadata.contentType;
+      if (storyData.coverImageMetadata.size) rawStory.coverImageSize = storyData.coverImageMetadata.size;
+    }
+    if (storyData.sourceDocument) {
+      rawStory.sourceDocument = storyData.sourceDocument;
+      if (storyData.sourceDocument.storageUrl) {
+        rawStory.documentURL = storyData.sourceDocument.storageUrl;
+        rawStory.documentUrl = storyData.sourceDocument.storageUrl;
+      }
+      if (storyData.sourceDocument.storagePath) {
+        rawStory.documentStoragePath = storyData.sourceDocument.storagePath;
+        rawStory.storagePath = storyData.sourceDocument.storagePath;
+      }
+      if (storyData.sourceDocument.name) {
+        rawStory.documentFileName = storyData.sourceDocument.name;
+        rawStory.fileName = storyData.sourceDocument.name;
+        rawStory.originalFileName = storyData.sourceDocument.name;
+      }
+      if (storyData.sourceDocument.type) {
+        rawStory.documentContentType = storyData.sourceDocument.type;
+        rawStory.mimeType = storyData.sourceDocument.type;
+      }
+      if (storyData.sourceDocument.size) {
+        rawStory.documentSize = storyData.sourceDocument.size;
+        rawStory.fileSize = storyData.sourceDocument.size;
+      }
+    }
+    if (storyData.contentBlocks && storyData.contentBlocks.length > 0) {
+      rawStory.contentBlocks = storyData.contentBlocks;
+    }
+    if (storyData.imagePages && storyData.imagePages.length > 0) {
+      rawStory.imagePages = storyData.imagePages;
+    }
+    if (storyData.scheduledAt) {
+      rawStory.scheduledAt = storyData.scheduledAt;
+      rawStory.scheduledPublishAt = Timestamp.fromDate(new Date(storyData.scheduledAt));
+    }
+
+    const cleanStory = sanitizeFirestoreData(rawStory) as Story;
+
+    await setDoc(doc(db, 'stories', storyId), sanitizeFirestoreData({
+      ...cleanStory,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    }));
+
+    // Save story body chunks to subcollection stories/{storyId}/contentChunks/{chunkId}
+    await saveStoryContentChunks(storyId, paragraphs);
+
+    // Save image pages to subcollection stories/{storyId}/pages/{pageId}
+    if (storyData.imagePages && storyData.imagePages.length > 0) {
+      await storySubcollectionService.saveStoryPages(storyId, storyData.imagePages, adminUid);
+    }
+    // Save document info to subcollection stories/{storyId}/documents/{docId}
+    if (storyData.sourceDocument) {
+      await storySubcollectionService.saveStoryDocument(storyId, storyData.sourceDocument, adminUid);
+    }
 
     await auditLogService.logAction({
       action: `story_${status}`,
       targetType: 'story',
       targetId: storyId,
-      targetTitle: `Story "${newStory.teluguTitle}" created with status ${status}, visibility ${visibility}`,
+      targetTitle: `Story "${cleanStory.teluguTitle}" created with status ${status}, visibility ${visibility}`,
       metadata: { status, visibility, scheduledAt: storyData.scheduledAt },
     });
 
-    return newStory;
+    return {
+      ...cleanStory,
+      content: paragraphs,
+    };
   }
 
   /**
@@ -408,11 +496,51 @@ class AdminService {
     adminEmail?: string
   ): Promise<void> {
     const storyRef = doc(db, 'stories', storyId);
-    await setDoc(storyRef, {
-      ...updateData,
+    const sanitizedUpdate: any = { ...updateData };
+
+    if (updateData.sourceDocument) {
+      sanitizedUpdate.sourceDocument = updateData.sourceDocument;
+      if (updateData.sourceDocument.storageUrl) {
+        sanitizedUpdate.documentURL = updateData.sourceDocument.storageUrl;
+        sanitizedUpdate.documentUrl = updateData.sourceDocument.storageUrl;
+      }
+      if (updateData.sourceDocument.storagePath) {
+        sanitizedUpdate.documentStoragePath = updateData.sourceDocument.storagePath;
+        sanitizedUpdate.storagePath = updateData.sourceDocument.storagePath;
+      }
+      if (updateData.sourceDocument.name) {
+        sanitizedUpdate.documentFileName = updateData.sourceDocument.name;
+        sanitizedUpdate.fileName = updateData.sourceDocument.name;
+      }
+      if (updateData.sourceDocument.type) {
+        sanitizedUpdate.documentContentType = updateData.sourceDocument.type;
+        sanitizedUpdate.mimeType = updateData.sourceDocument.type;
+      }
+      if (updateData.sourceDocument.size) {
+        sanitizedUpdate.documentSize = updateData.sourceDocument.size;
+        sanitizedUpdate.fileSize = updateData.sourceDocument.size;
+      }
+    }
+
+    if (updateData.content && Array.isArray(updateData.content)) {
+      // Save chunks to subcollection and avoid storing large array in root doc
+      await saveStoryContentChunks(storyId, updateData.content);
+      sanitizedUpdate.content = [];
+      sanitizedUpdate.hasChunks = true;
+    }
+
+    if (updateData.imagePages && Array.isArray(updateData.imagePages) && updateData.imagePages.length > 0) {
+      await storySubcollectionService.saveStoryPages(storyId, updateData.imagePages, adminUid);
+    }
+    if (updateData.sourceDocument) {
+      await storySubcollectionService.saveStoryDocument(storyId, updateData.sourceDocument, adminUid);
+    }
+
+    await setDoc(storyRef, sanitizeFirestoreData({
+      ...sanitizedUpdate,
       updatedBy: adminUid,
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    }), { merge: true });
 
     await auditLogService.logAction({
       action: 'story_updated',
@@ -445,7 +573,7 @@ class AdminService {
       updatePayload.approvedAt = serverTimestamp();
       updatePayload.approvedBy = adminUid;
     }
-    await setDoc(storyRef, updatePayload, { merge: true });
+    await setDoc(storyRef, sanitizeFirestoreData(updatePayload), { merge: true });
 
     await auditLogService.logAction({
       action: `story_status_${status}`,
@@ -467,12 +595,12 @@ class AdminService {
   ): Promise<void> {
     const mockStory = MOCK_STORIES.find(s => s.id === storyId);
     const storyRef = doc(db, 'stories', storyId);
-    await setDoc(storyRef, {
+    await setDoc(storyRef, sanitizeFirestoreData({
       ...(mockStory || {}),
       visibility,
       updatedBy: adminUid,
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    }), { merge: true });
 
     await auditLogService.logAction({
       action: `story_visibility_${visibility}`,
@@ -499,7 +627,7 @@ class AdminService {
 
     const mockStory = MOCK_STORIES.find(s => s.id === storyId);
     const storyRef = doc(db, 'stories', storyId);
-    await setDoc(storyRef, {
+    await setDoc(storyRef, sanitizeFirestoreData({
       ...(mockStory || {}),
       status: 'scheduled',
       visibility: 'public',
@@ -507,7 +635,7 @@ class AdminService {
       scheduledPublishAt: Timestamp.fromDate(new Date(scheduledAtISO)),
       updatedBy: adminUid,
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    }), { merge: true });
 
     await auditLogService.logAction({
       action: 'story_scheduled',
@@ -543,13 +671,16 @@ class AdminService {
           console.warn('Storage cleanup on story deletion notice:', storageErr);
         });
       }
-      // 3. Mark deleted in Firestore doc and delete document
-      await setDoc(doc(db, 'stories', storyId), {
+      // 3. Delete content chunks subcollection docs
+      await deleteStoryContentChunks(storyId);
+
+      // 4. Mark deleted in Firestore doc and delete document
+      await setDoc(doc(db, 'stories', storyId), sanitizeFirestoreData({
         deleted: true,
         status: 'deleted',
         deletedAt: serverTimestamp(),
         deletedBy: adminUid,
-      }, { merge: true });
+      }), { merge: true });
       await deleteDoc(doc(db, 'stories', storyId));
     } catch (e) {
       console.warn('Error deleting story document:', e);
@@ -566,7 +697,7 @@ class AdminService {
   public async approveStory(storyId: string, adminUid: string, authorId?: string, adminEmail?: string): Promise<void> {
     const mockStory = MOCK_STORIES.find(s => s.id === storyId);
     const storyRef = doc(db, 'stories', storyId);
-    await setDoc(storyRef, {
+    await setDoc(storyRef, sanitizeFirestoreData({
       ...(mockStory || {}),
       status: 'published',
       visibility: 'public',
@@ -577,14 +708,14 @@ class AdminService {
       approvedBy: adminUid,
       rejectionReason: '',
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    }), { merge: true });
 
     if (authorId) {
       try {
         const authorRef = doc(db, 'users', authorId);
-        await updateDoc(authorRef, {
+        await updateDoc(authorRef, sanitizeFirestoreData({
           publishedCount: increment(1),
-        });
+        }));
       } catch (err) {}
     }
 
@@ -600,14 +731,14 @@ class AdminService {
   public async rejectStory(storyId: string, adminUid: string, rejectionReason: string, adminEmail?: string): Promise<void> {
     const mockStory = MOCK_STORIES.find(s => s.id === storyId);
     const storyRef = doc(db, 'stories', storyId);
-    await setDoc(storyRef, {
+    await setDoc(storyRef, sanitizeFirestoreData({
       ...(mockStory || {}),
       status: 'rejected',
       rejectionReason: rejectionReason.trim(),
       reviewedAt: serverTimestamp(),
       reviewedBy: adminUid,
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    }), { merge: true });
 
     await auditLogService.logAction({
       action: 'story_rejected',
@@ -622,7 +753,7 @@ class AdminService {
   public async publishStoryNow(storyId: string, adminUid: string, adminEmail?: string): Promise<void> {
     const mockStory = MOCK_STORIES.find(s => s.id === storyId);
     const storyRef = doc(db, 'stories', storyId);
-    await setDoc(storyRef, {
+    await setDoc(storyRef, sanitizeFirestoreData({
       ...(mockStory || {}),
       status: 'published',
       visibility: 'public',
@@ -631,7 +762,7 @@ class AdminService {
       approvedBy: adminUid,
       updatedBy: adminUid,
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    }), { merge: true });
 
     await auditLogService.logAction({
       action: 'story_published_now',
@@ -644,13 +775,13 @@ class AdminService {
   public async archiveStory(storyId: string, adminUid: string, adminEmail?: string): Promise<void> {
     const mockStory = MOCK_STORIES.find(s => s.id === storyId);
     const storyRef = doc(db, 'stories', storyId);
-    await setDoc(storyRef, {
+    await setDoc(storyRef, sanitizeFirestoreData({
       ...(mockStory || {}),
       status: 'archived',
       archivedAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       updatedBy: adminUid,
-    }, { merge: true });
+    }), { merge: true });
 
     await auditLogService.logAction({
       action: 'story_archived',
@@ -742,11 +873,11 @@ class AdminService {
       updatedAt: new Date().toISOString().split('T')[0],
     };
 
-    await setDoc(doc(db, 'novels', novelId), {
+    await setDoc(doc(db, 'novels', novelId), sanitizeFirestoreData({
       ...newNovel,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    }));
 
     await auditLogService.logAction({
       action: 'novel_created',
@@ -759,10 +890,10 @@ class AdminService {
   }
 
   public async updateNovel(novelId: string, updateData: Partial<Novel>, adminUid: string, adminEmail?: string): Promise<void> {
-    await setDoc(doc(db, 'novels', novelId), {
+    await setDoc(doc(db, 'novels', novelId), sanitizeFirestoreData({
       ...updateData,
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    }), { merge: true });
 
     await auditLogService.logAction({
       action: 'novel_updated',
@@ -775,12 +906,12 @@ class AdminService {
   public async archiveNovel(novelId: string, adminUid: string, adminEmail?: string): Promise<void> {
     const mockNovel = MOCK_NOVELS.find(n => n.id === novelId);
     const novelRef = doc(db, 'novels', novelId);
-    await setDoc(novelRef, {
+    await setDoc(novelRef, sanitizeFirestoreData({
       ...(mockNovel || {}),
       status: 'archived',
       updatedAt: serverTimestamp(),
       updatedBy: adminUid,
-    }, { merge: true });
+    }), { merge: true });
 
     await auditLogService.logAction({
       action: 'novel_archived',
@@ -796,12 +927,12 @@ class AdminService {
     await deletionTracker.markDeleted(novelId, 'novel', adminUid);
 
     try {
-      await setDoc(doc(db, 'novels', novelId), {
+      await setDoc(doc(db, 'novels', novelId), sanitizeFirestoreData({
         deleted: true,
         status: 'deleted',
         deletedAt: serverTimestamp(),
         deletedBy: adminUid,
-      }, { merge: true });
+      }), { merge: true });
       await deleteDoc(doc(db, 'novels', novelId));
     } catch (e) {}
 
@@ -861,19 +992,19 @@ class AdminService {
       scheduledAt: episodeData.scheduledAt || null,
     };
 
-    await setDoc(doc(db, 'episodes', epId), {
+    await setDoc(doc(db, 'episodes', epId), sanitizeFirestoreData({
       ...newEpisode,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    }));
 
     // Update novel episode count
     try {
-      await updateDoc(doc(db, 'novels', episodeData.novelId), {
+      await updateDoc(doc(db, 'novels', episodeData.novelId), sanitizeFirestoreData({
         chaptersCount: increment(1),
         episodeCount: increment(1),
         updatedAt: serverTimestamp(),
-      });
+      }));
     } catch (e) {}
 
     await auditLogService.logAction({
@@ -893,10 +1024,10 @@ class AdminService {
     adminEmail?: string
   ): Promise<void> {
     const epRef = doc(db, 'episodes', episodeId);
-    await setDoc(epRef, {
+    await setDoc(epRef, sanitizeFirestoreData({
       ...updateData,
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    }), { merge: true });
 
     await auditLogService.logAction({
       action: 'episode_updated',
@@ -909,17 +1040,17 @@ class AdminService {
   public async deleteEpisode(episodeId: string, adminUid?: string, adminEmail?: string, novelId?: string): Promise<void> {
     await deletionTracker.markDeleted(episodeId, 'episode', adminUid || 'admin');
     try {
-      await setDoc(doc(db, 'episodes', episodeId), {
+      await setDoc(doc(db, 'episodes', episodeId), sanitizeFirestoreData({
         deleted: true,
         status: 'deleted',
         deletedAt: serverTimestamp(),
-      }, { merge: true });
+      }), { merge: true });
       await deleteDoc(doc(db, 'episodes', episodeId));
       if (novelId) {
-        await updateDoc(doc(db, 'novels', novelId), {
+        await updateDoc(doc(db, 'novels', novelId), sanitizeFirestoreData({
           chaptersCount: increment(-1),
           episodeCount: increment(-1),
-        });
+        }));
       }
     } catch (e) {}
 
@@ -991,11 +1122,11 @@ class AdminService {
       scheduledAt: jokeData.scheduledAt || null,
     };
 
-    await setDoc(doc(db, 'jokes', jokeId), {
+    await setDoc(doc(db, 'jokes', jokeId), sanitizeFirestoreData({
       ...newJoke,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    }));
 
     await auditLogService.logAction({
       action: 'joke_created',
@@ -1008,10 +1139,10 @@ class AdminService {
   }
 
   public async updateJoke(jokeId: string, updateData: Partial<Joke>, adminUid: string, adminEmail?: string): Promise<void> {
-    await setDoc(doc(db, 'jokes', jokeId), {
+    await setDoc(doc(db, 'jokes', jokeId), sanitizeFirestoreData({
       ...updateData,
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    }), { merge: true });
 
     await auditLogService.logAction({
       action: 'joke_updated',
@@ -1025,12 +1156,12 @@ class AdminService {
     removeMockJoke(jokeId);
     await deletionTracker.markDeleted(jokeId, 'joke', adminUid);
     try {
-      await setDoc(doc(db, 'jokes', jokeId), {
+      await setDoc(doc(db, 'jokes', jokeId), sanitizeFirestoreData({
         deleted: true,
         status: 'deleted',
         deletedAt: serverTimestamp(),
         deletedBy: adminUid,
-      }, { merge: true });
+      }), { merge: true });
       await deleteDoc(doc(db, 'jokes', jokeId));
     } catch (e) {}
 
@@ -1105,11 +1236,11 @@ class AdminService {
       scheduledAt: data.scheduledAt || null,
     };
 
-    await setDoc(doc(db, 'knowledge', kId), {
+    await setDoc(doc(db, 'knowledge', kId), sanitizeFirestoreData({
       ...newArticle,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    }));
 
     await auditLogService.logAction({
       action: 'knowledge_created',
@@ -1122,10 +1253,10 @@ class AdminService {
   }
 
   public async updateKnowledgeArticle(articleId: string, updateData: Partial<KnowledgeArticle>, adminUid: string, adminEmail?: string): Promise<void> {
-    await setDoc(doc(db, 'knowledge', articleId), {
+    await setDoc(doc(db, 'knowledge', articleId), sanitizeFirestoreData({
       ...updateData,
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    }), { merge: true });
 
     await auditLogService.logAction({
       action: 'knowledge_updated',
@@ -1138,12 +1269,12 @@ class AdminService {
   public async deleteKnowledgeArticle(articleId: string, adminUid: string, adminEmail?: string): Promise<void> {
     await deletionTracker.markDeleted(articleId, 'knowledge', adminUid);
     try {
-      await setDoc(doc(db, 'knowledge', articleId), {
+      await setDoc(doc(db, 'knowledge', articleId), sanitizeFirestoreData({
         deleted: true,
         status: 'deleted',
         deletedAt: serverTimestamp(),
         deletedBy: adminUid,
-      }, { merge: true });
+      }), { merge: true });
       await deleteDoc(doc(db, 'knowledge', articleId));
     } catch (e) {}
 
@@ -1221,11 +1352,11 @@ class AdminService {
       status: 'active',
       isActive: true,
     };
-    await setDoc(doc(db, 'categories', catId), {
+    await setDoc(doc(db, 'categories', catId), sanitizeFirestoreData({
       ...newCat,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    }));
 
     await auditLogService.logAction({
       action: 'category_created',
@@ -1238,12 +1369,12 @@ class AdminService {
 
   public async toggleCategoryStatus(catId: string, status: 'active' | 'archived', adminUid: string, adminEmail?: string): Promise<void> {
     try {
-      await setDoc(doc(db, 'categories', catId), {
+      await setDoc(doc(db, 'categories', catId), sanitizeFirestoreData({
         id: catId,
         status,
         isActive: status === 'active',
         updatedAt: serverTimestamp(),
-      }, { merge: true });
+      }), { merge: true });
     } catch (e) {
       console.warn('Error toggling category doc:', e);
     }
@@ -1277,14 +1408,14 @@ class AdminService {
 
     try {
       // Set status as deleted in Firestore so real-time snapshot removes it everywhere across the app
-      await setDoc(doc(db, 'categories', catId), {
+      await setDoc(doc(db, 'categories', catId), sanitizeFirestoreData({
         status: 'deleted',
         isActive: false,
         deleted: true,
         updatedAt: serverTimestamp(),
         deletedAt: serverTimestamp(),
         deletedBy: adminUid,
-      }, { merge: true });
+      }), { merge: true });
     } catch (e) {
       console.warn('Error deleting category doc:', e);
     }
@@ -1411,23 +1542,23 @@ class AdminService {
       },
     };
 
-    await setDoc(doc(db, 'users', newUid), {
+    await setDoc(doc(db, 'users', newUid), sanitizeFirestoreData({
       ...newUserDoc,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    }));
 
     // 3. Write role-specific collection (`readers/{uid}` or `writers/{uid}`)
     if (userData.role === 'reader') {
-      await setDoc(doc(db, 'readers', newUid), {
+      await setDoc(doc(db, 'readers', newUid), sanitizeFirestoreData({
         uid: newUid,
         displayName,
         email: trimmedEmail,
         photoURL: avatarUrl,
         createdAt: serverTimestamp(),
-      }, { merge: true });
+      }), { merge: true });
     } else if (userData.role === 'writer') {
-      await setDoc(doc(db, 'writers', newUid), {
+      await setDoc(doc(db, 'writers', newUid), sanitizeFirestoreData({
         uid: newUid,
         displayName,
         penName: displayName,
@@ -1442,10 +1573,10 @@ class AdminService {
         publishedStoriesCount: 0,
         totalStoriesSubmitted: 0,
         createdAt: serverTimestamp(),
-      }, { merge: true });
+      }), { merge: true });
 
       // Also create author profile
-      await setDoc(doc(db, 'authors', newUid), {
+      await setDoc(doc(db, 'authors', newUid), sanitizeFirestoreData({
         id: newUid,
         name: displayName,
         teluguName: displayName,
@@ -1458,7 +1589,7 @@ class AdminService {
         jokesCount: 0,
         isVerified: true,
         joinedDate: '2026',
-      }, { merge: true });
+      }), { merge: true });
     }
 
     // 4. Log Admin Audit
@@ -1480,10 +1611,10 @@ class AdminService {
     adminEmail?: string
   ): Promise<void> {
     const userRef = doc(db, 'users', targetUid);
-    await updateDoc(userRef, {
+    await updateDoc(userRef, sanitizeFirestoreData({
       status,
       updatedAt: serverTimestamp(),
-    });
+    }));
 
     await auditLogService.logAction({
       action: `user_status_${status}`,
@@ -1497,12 +1628,12 @@ class AdminService {
   public async deleteUser(targetUid: string, adminUid: string, adminEmail?: string): Promise<void> {
     await deletionTracker.markDeleted(targetUid, 'user', adminUid);
     try {
-      await setDoc(doc(db, 'users', targetUid), {
+      await setDoc(doc(db, 'users', targetUid), sanitizeFirestoreData({
         deleted: true,
         status: 'deleted',
         deletedAt: serverTimestamp(),
         deletedBy: adminUid,
-      }, { merge: true });
+      }), { merge: true });
       await deleteDoc(doc(db, 'users', targetUid));
       await deleteDoc(doc(db, 'readers', targetUid)).catch(() => {});
       await deleteDoc(doc(db, 'writers', targetUid)).catch(() => {});
@@ -1539,7 +1670,7 @@ class AdminService {
     const photoURL = uData.photoURL || uData.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(readerUid)}`;
 
     // Update canonical user
-    await updateDoc(userRef, {
+    await updateDoc(userRef, sanitizeFirestoreData({
       role: 'writer',
       status: 'active',
       teluguName: penName,
@@ -1547,10 +1678,10 @@ class AdminService {
       bio,
       teluguBio: bio,
       updatedAt: serverTimestamp(),
-    });
+    }));
 
     // Create/update writers collection document
-    await setDoc(doc(db, 'writers', readerUid), {
+    await setDoc(doc(db, 'writers', readerUid), sanitizeFirestoreData({
       uid: readerUid,
       displayName: penName,
       penName,
@@ -1566,10 +1697,10 @@ class AdminService {
       totalStoriesSubmitted: 0,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    }), { merge: true });
 
     // Public authors collection
-    await setDoc(doc(db, 'authors', readerUid), {
+    await setDoc(doc(db, 'authors', readerUid), sanitizeFirestoreData({
       id: readerUid,
       name: penName,
       teluguName: penName,
@@ -1582,7 +1713,7 @@ class AdminService {
       jokesCount: 0,
       isVerified: true,
       joinedDate: '2026',
-    }, { merge: true });
+    }), { merge: true });
 
     // Send notification
     try {
@@ -1686,15 +1817,15 @@ class AdminService {
     const photoURL = appData.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(applicantUid)}`;
 
     // 1. Update application doc
-    await updateDoc(appRef, {
+    await updateDoc(appRef, sanitizeFirestoreData({
       status: 'approved',
       reviewedAt: serverTimestamp(),
       reviewedBy: adminUid,
-    });
+    }));
 
     // 2. Promote user
     const userRef = doc(db, 'users', applicantUid);
-    await setDoc(userRef, {
+    await setDoc(userRef, sanitizeFirestoreData({
       role: 'writer',
       status: 'active',
       displayName: penName,
@@ -1703,10 +1834,10 @@ class AdminService {
       teluguBio: bio,
       photoURL,
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    }), { merge: true });
 
     // 3. Write writers/{uid}
-    await setDoc(doc(db, 'writers', applicantUid), {
+    await setDoc(doc(db, 'writers', applicantUid), sanitizeFirestoreData({
       uid: applicantUid,
       displayName: fullName,
       penName,
@@ -1722,10 +1853,10 @@ class AdminService {
       totalStoriesSubmitted: 0,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    }), { merge: true });
 
     // 4. Public authors/{uid}
-    await setDoc(doc(db, 'authors', applicantUid), {
+    await setDoc(doc(db, 'authors', applicantUid), sanitizeFirestoreData({
       id: applicantUid,
       name: penName,
       teluguName: penName,
@@ -1739,7 +1870,7 @@ class AdminService {
       isVerified: true,
       joinedDate: '2026',
       location: appData.city || 'ఆంధ్రప్రదేశ్, తెలంగాణ',
-    }, { merge: true });
+    }), { merge: true });
 
     // 5. Send notification
     try {
@@ -1771,27 +1902,27 @@ class AdminService {
     const appData = appSnap.exists() ? appSnap.data() : {};
     const applicantType = appData.applicantType || 'reader_conversion';
 
-    await updateDoc(appRef, {
+    await updateDoc(appRef, sanitizeFirestoreData({
       status: 'rejected',
       rejectionReason: rejectionReason.trim(),
       reviewedAt: serverTimestamp(),
       reviewedBy: adminUid,
-    });
+    }));
 
     const userRef = doc(db, 'users', applicantUid);
     try {
       if (applicantType === 'new_registration') {
-        await updateDoc(userRef, {
+        await updateDoc(userRef, sanitizeFirestoreData({
           role: 'reader',
           status: 'rejected',
           updatedAt: serverTimestamp(),
-        });
+        }));
       } else {
-        await updateDoc(userRef, {
+        await updateDoc(userRef, sanitizeFirestoreData({
           role: 'reader',
           status: 'active',
           updatedAt: serverTimestamp(),
-        });
+        }));
       }
     } catch (err) {}
 
@@ -1835,11 +1966,11 @@ class AdminService {
     adminEmail?: string
   ): Promise<void> {
     const ref = doc(db, 'issueReports', reportId);
-    await updateDoc(ref, {
+    await updateDoc(ref, sanitizeFirestoreData({
       status,
       reviewedAt: serverTimestamp(),
       reviewedBy: adminUid,
-    });
+    }));
 
     await auditLogService.logAction({
       action: `report_${status}`,
@@ -1864,10 +1995,10 @@ class AdminService {
 
   public async updateContactStatus(submissionId: string, status: 'unread' | 'read' | 'resolved'): Promise<void> {
     const ref = doc(db, 'contactSubmissions', submissionId);
-    await updateDoc(ref, {
+    await updateDoc(ref, sanitizeFirestoreData({
       status,
       updatedAt: serverTimestamp(),
-    });
+    }));
   }
 
   public async getAllComments(): Promise<Comment[]> {
@@ -1915,12 +2046,12 @@ class AdminService {
   public async deleteComment(commentId: string, adminUid: string, adminEmail?: string): Promise<void> {
     await deletionTracker.markDeleted(commentId, 'comment', adminUid);
     try {
-      await setDoc(doc(db, 'comments', commentId), {
+      await setDoc(doc(db, 'comments', commentId), sanitizeFirestoreData({
         deleted: true,
         status: 'deleted',
         deletedAt: serverTimestamp(),
         deletedBy: adminUid,
-      }, { merge: true });
+      }), { merge: true });
       await deleteDoc(doc(db, 'comments', commentId));
     } catch (e) {}
 

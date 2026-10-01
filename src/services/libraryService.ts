@@ -9,6 +9,7 @@ import {
   limit
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 import { Story, Novel, ReadingHistoryItem } from '../types';
 import { MOCK_STORIES, MOCK_NOVELS, MOCK_READING_HISTORY } from './mockData';
 import { storyService } from './storyService';
@@ -90,11 +91,11 @@ class LibraryService {
     const user = auth.currentUser;
     if (user) {
       try {
-        await setDoc(doc(db, 'users', user.uid, 'readingHistory', storyId), {
+        await setDoc(doc(db, 'users', user.uid, 'readingHistory', storyId), sanitizeFirestoreData({
           storyId,
           progressPercent,
           lastReadAt: serverTimestamp(),
-        }, { merge: true });
+        }), { merge: true });
       } catch (e) {}
     }
 

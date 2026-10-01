@@ -35,11 +35,12 @@ import {
   StoryCategory, 
   ContentStatus, 
   ContentVisibility, 
-  ImageMetadata,
-  StoryContentType,
-  ContentBlock,
-  StoryImagePage,
-  SourceDocumentInfo
+  ImageMetadata, 
+  StoryContentType, 
+  ContentBlock, 
+  StoryImagePage, 
+  SourceDocumentInfo,
+  CategoryItem 
 } from '../../types';
 import { CoverImageUploader } from '../common/CoverImageUploader';
 import { RichTextEditor } from '../editor/RichTextEditor';
@@ -47,6 +48,8 @@ import { DocumentImportTab } from '../editor/DocumentImportTab';
 import { ImagePagesTab } from '../editor/ImagePagesTab';
 import { MixedContentTab } from '../editor/MixedContentTab';
 import { StoryContentPreview } from '../editor/StoryContentPreview';
+import { storyService } from '../../services/storyService';
+import { categoryService } from '../../services/categoryService';
 
 export type ContentEditorType = 'story' | 'novel' | 'episode' | 'joke' | 'knowledge';
 
@@ -126,8 +129,21 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
     { id: `block-${Date.now()}`, type: 'paragraph', content: '' }
   ]);
 
-  // Unique session ID for uploads
+  // Dynamic Categories from backend
+  const [dynamicCategories, setDynamicCategories] = useState<CategoryItem[]>([]);
+
+  // Unique session ID for uploads (idempotency key)
   const [sessionEntityId, setSessionEntityId] = useState(() => `admin-${Date.now()}`);
+
+  // Subscribe to live backend categories
+  useEffect(() => {
+    if (!isOpen) return;
+    const unsubscribe = categoryService.subscribeCategories((cats) => {
+      const activeCats = cats.filter(c => c.status === 'active' && c.isActive !== false);
+      setDynamicCategories(activeCats);
+    });
+    return () => unsubscribe();
+  }, [isOpen]);
 
   // Novel Fields
   const [novelDescription, setNovelDescription] = useState('');
@@ -169,12 +185,19 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
         setTeluguExcerpt(initialData.teluguExcerpt || initialData.excerpt || '');
         setStoryMode(initialData.contentType || (initialData.imagePages?.length > 0 ? 'image_pages' : initialData.contentBlocks?.length > 0 ? 'mixed' : 'rich_text'));
         
-        if (Array.isArray(initialData.content)) {
+        if (Array.isArray(initialData.content) && initialData.content.length > 0) {
           setTextContent(initialData.content.join('\n\n'));
-        } else if (typeof initialData.content === 'string') {
+        } else if (typeof initialData.content === 'string' && initialData.content.trim()) {
           setTextContent(initialData.content);
         } else {
           setTextContent('');
+          if (initialData.id) {
+            storyService.getStoryById(initialData.id).then(fullStory => {
+              if (fullStory?.content && fullStory.content.length > 0) {
+                setTextContent(fullStory.content.join('\n\n'));
+              }
+            }).catch(() => {});
+          }
         }
 
         if (initialData.imagePages && initialData.imagePages.length > 0) {
@@ -263,10 +286,12 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
 
     try {
       if (contentType === 'story') {
-        if (!teluguTitle.trim() && !title.trim()) {
-          throw new Error('దయచేసి కథ శీర్షికను నమోదు చేయండి');
+        const effectiveTitle = teluguTitle.trim() || title.trim();
+        if (!effectiveTitle) {
+          throw new Error('దయచేసి కథ శీర్షికను నమోదు చేయండి (Story title is required).');
         }
 
+        const isDraft = finalStatus === 'draft';
         let paragraphs: string[] = [];
 
         if (storyMode === 'rich_text') {
@@ -274,27 +299,30 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
           if (paragraphs.length === 0 && textContent.trim()) {
             paragraphs = [textContent.trim()];
           }
+          if (paragraphs.length === 0 && !isDraft) {
+            throw new Error('దయచేసి కథ కంటెంట్‌ను నమోదు చేయండి (Story content is required for publishing).');
+          }
           if (paragraphs.length === 0) {
-            throw new Error('దయచేసి కథ కంటెంట్‌ను నమోదు చేయండి.');
+            paragraphs = ['డ్రాఫ్ట్ రచన...'];
           }
         } else if (storyMode === 'document_import') {
-          if (!sourceDocument) {
-            throw new Error('దయచేసి కథ కోసం ఒక PDF లేదా డాక్యుమెంట్ ఫైల్‌ను అప్‌లోడ్ చేయండి.');
+          if (!sourceDocument && !isDraft) {
+            throw new Error('దయచేసి కథ కోసం ఒక PDF లేదా డాక్యుమెంట్ ఫైల్‌ను అప్‌లోడ్ చేసి జతచేయండి.');
           }
           paragraphs = textContent.split('\n\n').map(p => p.trim()).filter(Boolean);
           if (paragraphs.length === 0 && textContent.trim()) {
             paragraphs = [textContent.trim()];
           }
           if (paragraphs.length === 0) {
-            paragraphs = [`పూర్తి PDF పత్ర కథ: ${sourceDocument.name}`];
+            paragraphs = [sourceDocument ? `పూర్తి కథా పత్రం: ${sourceDocument.name}` : 'డ్రాఫ్ట్ డాక్యుమెంట్ కథ...'];
           }
         } else if (storyMode === 'image_pages') {
-          if (imagePages.length === 0) {
+          if (imagePages.length === 0 && !isDraft) {
             throw new Error('దయచేసి కనీసం ఒక చిత్ర పేజీనైనా అప్‌లోడ్ చేయండి.');
           }
           paragraphs = [`చిత్ర కథ: మొత్తం ${imagePages.length} పేజీలు.`];
         } else if (storyMode === 'mixed') {
-          if (contentBlocks.length === 0) {
+          if (contentBlocks.length === 0 && !isDraft) {
             throw new Error('దయచేసి కనీసం ఒక కంటెంట్ బ్లాక్‌నైనా జోడించండి.');
           }
           paragraphs = contentBlocks
@@ -306,27 +334,35 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
           }
         }
 
-        const effectiveTitle = teluguTitle.trim() || title.trim() || 'శీర్షిక లేని కథ';
+        if (finalStatus === 'scheduled') {
+          if (!scheduledAt) {
+            throw new Error('షెడ్యూల్డ్ ప్రచురణ కోసం దయచేసి సమయాన్ని ఎంచుకోండి.');
+          }
+          if (new Date(scheduledAt).getTime() <= Date.now()) {
+            throw new Error('షెడ్యూల్ చేసిన సమయం భవిష్యత్తులో ఉండాలి.');
+          }
+        }
+
         const effectiveCover = coverImage || (imagePages.length > 0 ? imagePages[0].imageUrl : 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800');
 
         const storyPayload = {
-          id: initialData?.id,
-          title: title || effectiveTitle,
+          id: initialData?.id || sessionEntityId,
+          title: title.trim() || effectiveTitle,
           teluguTitle: effectiveTitle,
           category,
           coverImage: effectiveCover,
           coverImageUrl: effectiveCover,
           coverImagePath,
           coverImageMetadata,
-          excerpt: teluguExcerpt || excerpt || paragraphs[0]?.slice(0, 120),
-          teluguExcerpt: teluguExcerpt || excerpt || paragraphs[0]?.slice(0, 120),
+          excerpt: teluguExcerpt || excerpt || paragraphs[0]?.slice(0, 120) || 'కథ వివరణ',
+          teluguExcerpt: teluguExcerpt || excerpt || paragraphs[0]?.slice(0, 120) || 'కథ వివరణ',
           content: paragraphs,
           contentType: storyMode,
           contentBlocks: storyMode === 'mixed' ? contentBlocks : undefined,
           imagePages: storyMode === 'image_pages' ? imagePages : undefined,
           sourceDocument: sourceDocument,
           tags,
-          authorName,
+          authorName: authorName || 'కథావాహిని సంపాదకులు',
           status: finalStatus,
           visibility: finalVisibility,
           scheduledAt: finalStatus === 'scheduled' ? scheduledAt : undefined,
@@ -676,9 +712,17 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
                       onChange={e => setCategory(e.target.value as StoryCategory)}
                       className="w-full px-4 py-2.5 rounded-2xl bg-[#FAF7F2] dark:bg-[#121118] border border-[#E8E1DA] dark:border-[#26242E] text-xs font-serif-telugu focus:ring-2 focus:ring-[#7A284B] focus:outline-none"
                     >
-                      {CATEGORIES.map(c => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
+                      {dynamicCategories.length > 0 ? (
+                        dynamicCategories.map(c => (
+                          <option key={c.id} value={c.teluguName || c.name}>
+                            {c.teluguName || c.name} {c.name && c.name !== c.teluguName ? `(${c.name})` : ''}
+                          </option>
+                        ))
+                      ) : (
+                        CATEGORIES.map(c => (
+                          <option key={c} value={c}>{c}</option>
+                        ))
+                      )}
                     </select>
                   </div>
                   <div>
@@ -694,8 +738,8 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
                 </div>
               )}
 
-              {/* Cover Image Upload Row: Only shown for rich_text and mixed stories, or novels/knowledge */}
-              {(((contentType === 'story' && (storyMode === 'rich_text' || storyMode === 'mixed')) || contentType === 'novel' || contentType === 'knowledge')) && (
+              {/* Cover Image Upload Row: Available for all stories, novels, and knowledge */}
+              {(contentType === 'story' || contentType === 'novel' || contentType === 'knowledge') && (
                 <CoverImageUploader
                   value={coverImage}
                   storagePath={coverImagePath}
@@ -707,7 +751,7 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
                       ? 'నవల కవర్ చిత్రం (Novel Cover Image)'
                       : contentType === 'knowledge'
                       ? 'ఆర్టికల్ కవర్ చిత్రం (Knowledge Article Cover Image)'
-                      : 'కథ కవర్ చిత్రం (Story Cover Image)'
+                      : 'కథ ముఖచిత్రం / కవర్ చిత్రం (Story Thumbnail / Cover Image)'
                   }
                   onChange={(newUrl, newPath, newMeta) => {
                     setCoverImage(newUrl);
@@ -840,6 +884,7 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
                     {storyMode === 'image_pages' && (
                       <ImagePagesTab
                         storyId={sessionEntityId}
+                        ownerId={initialData?.ownerId || 'admin'}
                         imagePages={imagePages}
                         onChange={setImagePages}
                       />

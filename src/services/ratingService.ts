@@ -9,6 +9,7 @@ import {
   getDocs
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 import { MOCK_STORIES } from './mockData';
 
 export interface StoryRatingData {
@@ -185,16 +186,16 @@ class RatingService {
         });
       }
 
-      await setDoc(storyRef, updatePayload, { merge: true });
+      await setDoc(storyRef, sanitizeFirestoreData(updatePayload), { merge: true });
 
       // 4. Save individual user rating subcollection if logged in
       if (currentUid) {
-        await setDoc(doc(db, 'stories', storyId, 'ratings', currentUid), {
+        await setDoc(doc(db, 'stories', storyId, 'ratings', currentUid), sanitizeFirestoreData({
           userId: currentUid,
           userName: currentUserName,
           rating,
           updatedAt: serverTimestamp(),
-        }, { merge: true });
+        }), { merge: true });
       }
 
       const result: StoryRatingData = {

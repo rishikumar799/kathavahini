@@ -22,6 +22,7 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 import { User, ReadingTheme, WriterApplication } from '../types';
 
 export const MASTER_ADMIN_EMAIL = 'thekathavahini@gmail.com';
@@ -263,10 +264,10 @@ class AuthService {
         // Check if obsolete role normalization update is needed
         if (data.role === 'author') {
           try {
-            await updateDoc(userDocRef, {
+            await updateDoc(userDocRef, sanitizeFirestoreData({
               role: 'writer',
               updatedAt: serverTimestamp(),
-            });
+            }));
           } catch (err) {
             console.warn('Silent role normalization notice:', err);
           }
@@ -332,7 +333,7 @@ class AuthService {
         };
 
         try {
-          await setDoc(userDocRef, newUserData);
+          await setDoc(userDocRef, sanitizeFirestoreData(newUserData));
         } catch (setErr) {
           console.warn('Could not save user profile doc in Firestore:', setErr);
         }
@@ -479,14 +480,14 @@ class AuthService {
     };
 
     try {
-      await setDoc(userDocRef, newUserData);
+      await setDoc(userDocRef, sanitizeFirestoreData(newUserData));
     } catch (err) {
       console.warn('Could not set user document in Firestore during registration:', err);
     }
 
     // Maintain readers/{uid} document
     try {
-      await setDoc(doc(db, 'readers', userCredential.user.uid), {
+      await setDoc(doc(db, 'readers', userCredential.user.uid), sanitizeFirestoreData({
         uid: userCredential.user.uid,
         displayName: trimmedName,
         email: trimmedEmail,
@@ -496,7 +497,7 @@ class AuthService {
         commentsCount: 0,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      }, { merge: true });
+      }), { merge: true });
     } catch (err) {
       console.warn('Could not initialize readers collection document:', err);
     }
@@ -632,14 +633,14 @@ class AuthService {
     };
 
     try {
-      await setDoc(userDocRef, newUserData, { merge: true });
+      await setDoc(userDocRef, sanitizeFirestoreData(newUserData), { merge: true });
     } catch (setErr) {
       console.warn('Could not record writer profile in Firestore:', setErr);
     }
 
     // 3. Record writer account request in writerApplications collection for admin review
     try {
-      await addDoc(collection(db, 'writerApplications'), {
+      await addDoc(collection(db, 'writerApplications'), sanitizeFirestoreData({
         applicantUid: userCredential.user.uid,
         applicantType: 'new_registration',
         fullName: trimmedName,
@@ -654,7 +655,7 @@ class AuthService {
         agreementAcceptedName: data.signatureName?.trim() || trimmedName,
         status: 'pending',
         submittedAt: serverTimestamp(),
-      });
+      }));
     } catch (err) {
       console.warn('Could not record writer application:', err);
     }
@@ -791,7 +792,7 @@ class AuthService {
 
       // Ensure Firestore backend records exist with role: 'admin'
       try {
-        await setDoc(doc(db, 'users', adminUid), {
+        await setDoc(doc(db, 'users', adminUid), sanitizeFirestoreData({
           uid: adminUid,
           id: adminUid,
           name: 'కథావాహిని అడ్మిన్',
@@ -800,16 +801,16 @@ class AuthService {
           role: 'admin',
           status: 'active',
           updatedAt: serverTimestamp(),
-        }, { merge: true });
+        }), { merge: true });
 
-        await setDoc(doc(db, 'admins', adminUid), {
+        await setDoc(doc(db, 'admins', adminUid), sanitizeFirestoreData({
           uid: adminUid,
           email: MASTER_ADMIN_EMAIL,
           displayName: 'కథావాహిని అడ్మిన్',
           role: 'admin',
           status: 'active',
           updatedAt: serverTimestamp(),
-        }, { merge: true });
+        }), { merge: true });
       } catch (fsErr) {
         console.warn('Silent Firestore admin sync notice:', fsErr);
       }
@@ -859,30 +860,30 @@ class AuthService {
     // Update role-specific collection for console clarity
     try {
       if (userProfile.role === 'admin') {
-        await setDoc(doc(db, 'admins', userProfile.id), {
+        await setDoc(doc(db, 'admins', userProfile.id), sanitizeFirestoreData({
           uid: userProfile.id,
           email: userProfile.email,
           displayName: userProfile.displayName || userProfile.name,
           role: 'admin',
           status: 'active',
           updatedAt: serverTimestamp(),
-        }, { merge: true });
+        }), { merge: true });
       } else if (userProfile.role === 'writer' && userProfile.status === 'active') {
-        await setDoc(doc(db, 'writers', userProfile.id), {
+        await setDoc(doc(db, 'writers', userProfile.id), sanitizeFirestoreData({
           uid: userProfile.id,
           displayName: userProfile.displayName || userProfile.name,
           penName: userProfile.teluguName || userProfile.name,
           email: userProfile.email,
           status: 'active',
           updatedAt: serverTimestamp(),
-        }, { merge: true });
+        }), { merge: true });
       } else {
-        await setDoc(doc(db, 'readers', userProfile.id), {
+        await setDoc(doc(db, 'readers', userProfile.id), sanitizeFirestoreData({
           uid: userProfile.id,
           displayName: userProfile.displayName || userProfile.name,
           email: userProfile.email,
           updatedAt: serverTimestamp(),
-        }, { merge: true });
+        }), { merge: true });
       }
     } catch (err) {
       console.warn('Role collection sync notice:', err);
@@ -923,10 +924,10 @@ class AuthService {
     const { role, status, id, uid, ...safeData } = data as any;
 
     const userDocRef = doc(db, 'users', this.currentUser.id);
-    await updateDoc(userDocRef, {
+    await updateDoc(userDocRef, sanitizeFirestoreData({
       ...safeData,
       updatedAt: serverTimestamp(),
-    });
+    }));
 
     this.currentUser = {
       ...this.currentUser,

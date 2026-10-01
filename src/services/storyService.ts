@@ -16,6 +16,9 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
+import { loadStoryContentChunks } from '../utils/storyChunker';
+import { storySubcollectionService } from './storySubcollectionService';
 import { Story, StoryCategory } from '../types';
 import { MOCK_STORIES } from './mockData';
 import { bookmarkService } from './bookmarkService';
@@ -109,6 +112,18 @@ class StoryService {
             excerpt: data.excerpt || '',
             teluguExcerpt: data.teluguExcerpt || data.excerpt || '',
             content: Array.isArray(data.content) ? data.content : [data.content || ''],
+            contentType: data.contentType || 'rich_text',
+            contentBlocks: data.contentBlocks,
+            imagePages: data.imagePages,
+            sourceDocument: data.sourceDocument || (data.documentURL || data.documentUrl ? {
+              name: data.documentFileName || data.fileName || 'Story Document',
+              type: data.documentContentType || data.mimeType || 'pdf',
+              size: data.documentSize || data.fileSize || 0,
+              storageUrl: data.documentURL || data.documentUrl,
+              storagePath: data.documentStoragePath || data.storagePath,
+              isScanned: false,
+              uploadedAt: data.uploadedAt || data.documentUploadedAt || new Date().toISOString(),
+            } : undefined),
             authorId: data.authorId || '',
             authorName: data.authorName || data.authorPenName,
             author: data.author || {
@@ -259,11 +274,11 @@ class StoryService {
 
       // Persist real view increment in Firestore
       const storyRef = doc(db, 'stories', storyId);
-      await setDoc(storyRef, {
+      await setDoc(storyRef, sanitizeFirestoreData({
         viewCount: increment(1),
         viewsCount: increment(1),
         updatedAt: serverTimestamp(),
-      }, { merge: true });
+      }), { merge: true });
 
       // Notify app in real time
       if (typeof window !== 'undefined') {
@@ -313,16 +328,59 @@ class StoryService {
           isLiked = guestLikes.includes(id);
         }
 
+        // Seamless chunk loading: try subcollection contentChunks first, fallback to main doc content
+        let resolvedContent: string[] = [];
+        const chunkedParas = await loadStoryContentChunks(id);
+        if (chunkedParas && chunkedParas.length > 0) {
+          resolvedContent = chunkedParas;
+        } else if (Array.isArray(data.content) && data.content.length > 0) {
+          resolvedContent = data.content;
+        } else if (typeof data.content === 'string' && data.content.trim()) {
+          resolvedContent = [data.content];
+        }
+
+        // Hydrate image pages from subcollection if needed for scalable image stories
+        let resolvedImagePages = data.imagePages || [];
+        if (data.contentType === 'image_pages' || !resolvedImagePages || resolvedImagePages.length === 0) {
+          const subPages = await storySubcollectionService.loadStoryPages(id);
+          if (subPages && subPages.length > 0) {
+            resolvedImagePages = subPages;
+          }
+        }
+
+        // Hydrate source document from subcollection if needed
+        let resolvedDoc = data.sourceDocument || (data.documentURL || data.documentUrl ? {
+          name: data.documentFileName || data.fileName || 'Story Document',
+          type: data.documentContentType || data.mimeType || 'pdf',
+          size: data.documentSize || data.fileSize || 0,
+          storageUrl: data.documentURL || data.documentUrl,
+          storagePath: data.documentStoragePath || data.storagePath,
+          isScanned: false,
+          uploadedAt: data.uploadedAt || data.documentUploadedAt || new Date().toISOString(),
+        } : undefined);
+
+        if (!resolvedDoc) {
+          const subDoc = await storySubcollectionService.loadStoryDocument(id);
+          if (subDoc) resolvedDoc = subDoc;
+        }
+
         return {
           id: snap.id,
           title: data.title || '',
           teluguTitle: data.teluguTitle || data.title || '',
           slug: data.slug || 'story',
+          subtitle: data.subtitle || data.teluguSubtitle,
+          teluguSubtitle: data.teluguSubtitle || data.subtitle,
           coverImage: data.coverImage || data.coverImageUrl || 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800',
           excerpt: data.excerpt || '',
           teluguExcerpt: data.teluguExcerpt || data.excerpt || '',
-          content: Array.isArray(data.content) ? data.content : [data.content || ''],
+          content: resolvedContent,
+          contentType: data.contentType || 'rich_text',
+          contentBlocks: data.contentBlocks,
+          imagePages: resolvedImagePages,
+          sourceDocument: resolvedDoc,
           authorId: data.authorId || '',
+          ownerId: data.ownerId || data.authorId || data.writerId,
           authorName: data.authorName,
           author: data.author || {
             id: data.authorId || 'author',
@@ -402,17 +460,17 @@ class StoryService {
         isLiked = false;
         delta = -1;
       } else {
-        await setDoc(likeRef, {
+        await setDoc(likeRef, sanitizeFirestoreData({
           userId: user.uid,
           userName: user.displayName || 'పాఠకుడు',
           likedAt: serverTimestamp(),
-        }, { merge: true });
+        }), { merge: true });
         // Also record in user's likedStories index
         try {
-          await setDoc(doc(db, 'users', user.uid, 'likedStories', storyId), {
+          await setDoc(doc(db, 'users', user.uid, 'likedStories', storyId), sanitizeFirestoreData({
             storyId,
             likedAt: serverTimestamp(),
-          }, { merge: true });
+          }), { merge: true });
         } catch {}
         isLiked = true;
         delta = 1;
@@ -422,11 +480,11 @@ class StoryService {
     // Save increment/decrement to Firestore story document
     try {
       const storyRef = doc(db, 'stories', storyId);
-      await setDoc(storyRef, {
+      await setDoc(storyRef, sanitizeFirestoreData({
         likesCount: increment(delta),
         likeCount: increment(delta),
         updatedAt: serverTimestamp(),
-      }, { merge: true });
+      }), { merge: true });
     } catch (e) {
       console.warn('Silent like count update to Firestore:', e);
     }
@@ -467,6 +525,78 @@ class StoryService {
         s.tags.some(t => t.includes(q));
       return matchesCategory && matchesQuery;
     });
+  }
+
+  /**
+   * Universal Update Story (For Admin or Story Author)
+   */
+  public async updateStory(storyId: string, updateData: Partial<Story>, userId?: string): Promise<void> {
+    const currentUid = userId || auth.currentUser?.uid || 'anonymous';
+    const storyRef = doc(db, 'stories', storyId);
+    const sanitizedUpdate: any = { ...updateData };
+
+    delete sanitizedUpdate.id;
+    if (sanitizedUpdate.sourceDocument) {
+      if (sanitizedUpdate.sourceDocument.storageUrl) {
+        sanitizedUpdate.documentURL = sanitizedUpdate.sourceDocument.storageUrl;
+        sanitizedUpdate.documentUrl = sanitizedUpdate.sourceDocument.storageUrl;
+      }
+      if (sanitizedUpdate.sourceDocument.name) {
+        sanitizedUpdate.documentFileName = sanitizedUpdate.sourceDocument.name;
+      }
+    }
+
+    if (updateData.content && Array.isArray(updateData.content)) {
+      const { saveStoryContentChunks } = await import('../utils/storyChunker');
+      await saveStoryContentChunks(storyId, updateData.content);
+      sanitizedUpdate.content = [];
+      sanitizedUpdate.hasChunks = true;
+    }
+
+    if (updateData.imagePages && Array.isArray(updateData.imagePages) && updateData.imagePages.length > 0) {
+      await storySubcollectionService.saveStoryPages(storyId, updateData.imagePages, currentUid);
+    }
+    if (updateData.sourceDocument) {
+      await storySubcollectionService.saveStoryDocument(storyId, updateData.sourceDocument, currentUid);
+    }
+
+    await setDoc(storyRef, sanitizeFirestoreData({
+      ...sanitizedUpdate,
+      updatedBy: currentUid,
+      updatedAt: serverTimestamp(),
+    }), { merge: true });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('kathavahini:story-updated', {
+        detail: { storyId, updatedBy: currentUid }
+      }));
+    }
+  }
+
+  /**
+   * Universal Delete Story (For Admin or Story Author)
+   */
+  public async deleteStory(storyId: string, userId?: string): Promise<void> {
+    const currentUid = userId || auth.currentUser?.uid || 'anonymous';
+    await deletionTracker.markDeleted(storyId, 'story', currentUid);
+
+    const storyRef = doc(db, 'stories', storyId);
+    try {
+      const { deleteStoryContentChunks } = await import('../utils/storyChunker');
+      await deleteStoryContentChunks(storyId);
+    } catch {}
+
+    try {
+      await deleteDoc(storyRef);
+    } catch (e) {
+      console.warn('Error removing firestore doc on story delete:', e);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('kathavahini:story-deleted', {
+        detail: { storyId, deletedBy: currentUid }
+      }));
+    }
   }
 }
 

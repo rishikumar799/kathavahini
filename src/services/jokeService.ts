@@ -13,6 +13,7 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 import { Joke } from '../types';
 import { MOCK_JOKES, MOCK_AUTHORS } from './mockData';
 import { deletionTracker } from './deletionTracker';
@@ -108,10 +109,10 @@ class JokeService {
   public async toggleLike(jokeId: string): Promise<boolean> {
     const user = auth.currentUser;
     try {
-      await updateDoc(doc(db, 'jokes', jokeId), {
+      await updateDoc(doc(db, 'jokes', jokeId), sanitizeFirestoreData({
         likesCount: increment(1),
         likeCount: increment(1),
-      });
+      }));
       return true;
     } catch (err) {
       return true;
@@ -146,10 +147,10 @@ class JokeService {
     };
 
     try {
-      await setDoc(doc(db, 'jokes', jokeId), {
+      await setDoc(doc(db, 'jokes', jokeId), sanitizeFirestoreData({
         ...newJoke,
         createdAt: serverTimestamp(),
-      });
+      }));
     } catch (e) {}
 
     return newJoke;

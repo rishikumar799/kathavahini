@@ -11,6 +11,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 import { ReaderProfile, User } from '../types';
 
 export class ReaderService {
@@ -45,7 +46,7 @@ export class ReaderService {
    */
   public async syncReaderProfile(user: User): Promise<void> {
     try {
-      await setDoc(doc(db, 'readers', user.id), {
+      await setDoc(doc(db, 'readers', user.id), sanitizeFirestoreData({
         uid: user.id,
         userId: user.id,
         displayName: user.displayName || user.name,
@@ -58,7 +59,7 @@ export class ReaderService {
         commentsCount: 0,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-      }, { merge: true });
+      }), { merge: true });
     } catch (err) {
       console.warn('Error syncing reader document:', err);
     }

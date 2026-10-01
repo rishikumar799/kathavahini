@@ -11,6 +11,7 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 import { CategoryItem, StoryCategory } from '../types';
 import { MOCK_CATEGORIES } from './mockData';
 import { deletionTracker } from './deletionTracker';
@@ -273,7 +274,7 @@ export class CategoryService {
     const docRef = doc(db, 'categories', category.id);
     await setDoc(
       docRef,
-      {
+      sanitizeFirestoreData({
         id: category.id,
         name: category.name,
         teluguName: category.teluguName || category.name,
@@ -284,7 +285,7 @@ export class CategoryService {
         isActive: category.status === 'active',
         updatedAt: serverTimestamp(),
         createdAt: serverTimestamp(),
-      },
+      }),
       { merge: true }
     );
 
@@ -303,13 +304,13 @@ export class CategoryService {
     }
 
     try {
-      await setDoc(doc(db, 'categories', categoryId), {
+      await setDoc(doc(db, 'categories', categoryId), sanitizeFirestoreData({
         status: 'deleted',
         isActive: false,
         deleted: true,
         updatedAt: serverTimestamp(),
         deletedAt: serverTimestamp(),
-      }, { merge: true });
+      }), { merge: true });
     } catch (e) {}
 
     if (typeof window !== 'undefined') {

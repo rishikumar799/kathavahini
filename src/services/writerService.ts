@@ -5,6 +5,7 @@ import {
   getDoc, 
   setDoc, 
   addDoc, 
+  deleteDoc,
   query, 
   where, 
   orderBy, 
@@ -13,6 +14,10 @@ import {
   runTransaction
 } from 'firebase/firestore';
 import { db } from '../firebaseConfig';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
+import { saveStoryContentChunks, deleteStoryContentChunks } from '../utils/storyChunker';
+import { storageService } from './storageService';
+import { storySubcollectionService } from './storySubcollectionService';
 import { 
   WriterApplication, 
   Story, 
@@ -115,7 +120,7 @@ class WriterService {
       rejectionReason: null,
     };
 
-    const docRef = await addDoc(collection(db, 'writerApplications'), appData);
+    const docRef = await addDoc(collection(db, 'writerApplications'), sanitizeFirestoreData(appData));
     
     return {
       ...appData,
@@ -250,6 +255,7 @@ class WriterService {
    * Submit a story for review by Super Admin
    */
   public async submitStory(storyData: {
+    id?: string;
     title: string;
     teluguTitle?: string;
     subtitle?: string;
@@ -291,47 +297,40 @@ class WriterService {
       }
     }
 
-    const storyId = `story-${Date.now()}`;
+    const storyId = storyData.id || `story-${Date.now()}`;
     const paragraphs = storyData.content.length > 0 ? storyData.content : ['కథ కంటెంట్...'];
+    const fullText = paragraphs.join(' ');
+    const charCount = fullText.length;
+    const wordCount = fullText.split(/\s+/).filter(Boolean).length;
     const excerpt = storyData.teluguExcerpt || storyData.excerpt || paragraphs[0]?.slice(0, 120) || 'కథ వివరణ';
     const finalCover = storyData.coverImage || storyData.coverImageUrl || (storyData.imagePages && storyData.imagePages[0]?.imageUrl) || 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800';
 
-    const newStoryData: Story = {
+    const rawStoryData: Record<string, any> = {
       id: storyId,
       title: storyData.title.trim() || 'Untitled Story',
       teluguTitle: storyData.teluguTitle?.trim() || storyData.title.trim() || 'శీర్షిక లేని కథ',
-      subtitle: storyData.subtitle?.trim(),
-      teluguSubtitle: storyData.teluguSubtitle?.trim() || storyData.subtitle?.trim(),
       slug: (storyData.title || 'story').toLowerCase().replace(/\s+/g, '-'),
       coverImage: finalCover,
       coverImageUrl: finalCover,
-      coverImagePath: storyData.coverImagePath,
-      coverImageMetadata: storyData.coverImageMetadata,
       coverImageURL: finalCover,
-      coverImageStoragePath: storyData.coverImagePath,
-      coverImageFileName: storyData.coverImageMetadata?.fileName,
-      coverImageContentType: storyData.coverImageMetadata?.contentType,
-      coverImageSize: storyData.coverImageMetadata?.size,
       coverImageUpdatedAt: new Date().toISOString(),
-      documentURL: storyData.sourceDocument?.storageUrl,
-      documentStoragePath: storyData.sourceDocument?.storagePath,
-      documentFileName: storyData.sourceDocument?.name,
-      documentContentType: storyData.sourceDocument?.type,
-      documentSize: storyData.sourceDocument?.size,
       excerpt,
       teluguExcerpt: excerpt,
-      content: paragraphs,
+      content: [], // Main document stores metadata; body stored in subcollection contentChunks
+      hasChunks: true,
       contentType: storyData.contentType || 'rich_text',
-      contentBlocks: storyData.contentBlocks,
-      imagePages: storyData.imagePages,
-      sourceDocument: storyData.sourceDocument,
       authorId: writer.id,
       writerId: writer.id,
-      authorName: writer.teluguName || writer.displayName || writer.name,
+      ownerId: writer.id,
+      createdBy: writer.id,
+      authorName: writer.teluguName || writer.displayName || writer.name || 'కథావాహిని రచయిత',
+      wordCount,
+      characterCount: charCount,
+      readingTimeMinutes: Math.max(1, Math.ceil(charCount / 300)),
       author: {
         id: writer.id,
-        name: writer.displayName || writer.name,
-        teluguName: writer.teluguName || writer.displayName || writer.name,
+        name: writer.displayName || writer.name || 'Author',
+        teluguName: writer.teluguName || writer.displayName || writer.name || 'రచయిత',
         avatar: writer.avatar || writer.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(writer.id)}`,
         bio: writer.teluguBio || writer.bio || 'కథావాహిని రచయిత',
         teluguBio: writer.teluguBio || writer.bio || 'కథావాహిని రచయిత',
@@ -347,13 +346,63 @@ class WriterService {
       viewCount: 0,
       likeCount: 0,
       bookmarkCount: 0,
-      readingTimeMinutes: Math.max(1, Math.ceil(paragraphs.join(' ').length / 300)),
       publishedAt: todayString,
       status: 'pending' as const, // ALWAYS 'pending' - Writers CANNOT directly publish
       submittedAt: serverTimestamp(),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     };
+
+    // Only add optional fields when they have genuine defined values
+    if (storyData.subtitle?.trim()) {
+      rawStoryData.subtitle = storyData.subtitle.trim();
+    }
+    if (storyData.teluguSubtitle?.trim() || storyData.subtitle?.trim()) {
+      rawStoryData.teluguSubtitle = (storyData.teluguSubtitle?.trim() || storyData.subtitle?.trim())!;
+    }
+    if (storyData.coverImagePath) {
+      rawStoryData.coverImagePath = storyData.coverImagePath;
+      rawStoryData.coverImageStoragePath = storyData.coverImagePath;
+    }
+    if (storyData.coverImageMetadata) {
+      rawStoryData.coverImageMetadata = storyData.coverImageMetadata;
+      if (storyData.coverImageMetadata.fileName) rawStoryData.coverImageFileName = storyData.coverImageMetadata.fileName;
+      if (storyData.coverImageMetadata.contentType) rawStoryData.coverImageContentType = storyData.coverImageMetadata.contentType;
+      if (storyData.coverImageMetadata.size) rawStoryData.coverImageSize = storyData.coverImageMetadata.size;
+    }
+    if (storyData.sourceDocument) {
+      rawStoryData.sourceDocument = storyData.sourceDocument;
+      if (storyData.sourceDocument.storageUrl) {
+        rawStoryData.documentURL = storyData.sourceDocument.storageUrl;
+        rawStoryData.documentUrl = storyData.sourceDocument.storageUrl;
+      }
+      if (storyData.sourceDocument.storagePath) {
+        rawStoryData.documentStoragePath = storyData.sourceDocument.storagePath;
+        rawStoryData.storagePath = storyData.sourceDocument.storagePath;
+      }
+      if (storyData.sourceDocument.name) {
+        rawStoryData.documentFileName = storyData.sourceDocument.name;
+        rawStoryData.fileName = storyData.sourceDocument.name;
+        rawStoryData.originalFileName = storyData.sourceDocument.name;
+      }
+      if (storyData.sourceDocument.type) {
+        rawStoryData.documentContentType = storyData.sourceDocument.type;
+        rawStoryData.mimeType = storyData.sourceDocument.type;
+      }
+      if (storyData.sourceDocument.size) {
+        rawStoryData.documentSize = storyData.sourceDocument.size;
+        rawStoryData.fileSize = storyData.sourceDocument.size;
+      }
+    }
+    if (storyData.contentBlocks && storyData.contentBlocks.length > 0) {
+      rawStoryData.contentBlocks = storyData.contentBlocks;
+    }
+    if (storyData.imagePages && storyData.imagePages.length > 0) {
+      rawStoryData.imagePages = storyData.imagePages;
+    }
+
+    // Sanitize completely to guarantee NO undefined fields are sent to Firestore
+    const newStoryData = sanitizeFirestoreData(rawStoryData) as Story;
 
     if (isAdmin) {
       // Admin bypasses daily limit and creates story directly
@@ -383,21 +432,147 @@ class WriterService {
         }
 
         // Write phase: Reserve daily limit slot and create pending story atomically
-        transaction.set(dailyDocRef, {
+        transaction.set(dailyDocRef, sanitizeFirestoreData({
           date: todayString,
           storyId,
           writerUid: writer.id,
           submittedAt: serverTimestamp(),
-        });
+        }));
 
         transaction.set(storyDocRef, newStoryData);
       });
     }
 
+    // Save story body into deterministic chunks in subcollection stories/{storyId}/contentChunks/{chunkId}
+    await saveStoryContentChunks(storyId, paragraphs);
+
+    // Save image pages to subcollection stories/{storyId}/pages/{pageId}
+    if (storyData.imagePages && storyData.imagePages.length > 0) {
+      await storySubcollectionService.saveStoryPages(storyId, storyData.imagePages, writer.id);
+    }
+    // Save document info to subcollection stories/{storyId}/documents/{docId}
+    if (storyData.sourceDocument) {
+      await storySubcollectionService.saveStoryDocument(storyId, storyData.sourceDocument, writer.id);
+    }
+
     return {
       ...newStoryData,
+      content: paragraphs,
       submittedAt: new Date().toISOString(),
     };
+  }
+
+  /**
+   * Author/Writer Updates their own Story
+   */
+  public async updateStory(
+    storyId: string, 
+    updateData: Partial<Story>, 
+    writerUid: string
+  ): Promise<void> {
+    const storyRef = doc(db, 'stories', storyId);
+    const storySnap = await getDoc(storyRef);
+    if (!storySnap.exists()) {
+      throw new Error('కథ కనుగొనబడలేదు.');
+    }
+    const currentData = storySnap.data();
+    if (currentData.authorId !== writerUid && currentData.writerId !== writerUid && currentData.ownerId !== writerUid) {
+      throw new Error('మీకు ఈ కథను సవరించే అనుమతి లేదు.');
+    }
+
+    const sanitizedUpdate: any = { ...updateData };
+
+    // Prevent changing immutable audit fields
+    delete sanitizedUpdate.id;
+    delete sanitizedUpdate.authorId;
+    delete sanitizedUpdate.writerId;
+    delete sanitizedUpdate.ownerId;
+    delete sanitizedUpdate.createdAt;
+    delete sanitizedUpdate.status; // status changes must be done via review or admin
+    delete sanitizedUpdate.visibility;
+
+    if (updateData.sourceDocument) {
+      sanitizedUpdate.sourceDocument = updateData.sourceDocument;
+      if (updateData.sourceDocument.storageUrl) {
+        sanitizedUpdate.documentURL = updateData.sourceDocument.storageUrl;
+        sanitizedUpdate.documentUrl = updateData.sourceDocument.storageUrl;
+      }
+      if (updateData.sourceDocument.storagePath) {
+        sanitizedUpdate.documentStoragePath = updateData.sourceDocument.storagePath;
+        sanitizedUpdate.storagePath = updateData.sourceDocument.storagePath;
+      }
+      if (updateData.sourceDocument.name) {
+        sanitizedUpdate.documentFileName = updateData.sourceDocument.name;
+        sanitizedUpdate.fileName = updateData.sourceDocument.name;
+      }
+    }
+
+    if (updateData.content && Array.isArray(updateData.content)) {
+      await saveStoryContentChunks(storyId, updateData.content);
+      sanitizedUpdate.content = [];
+      sanitizedUpdate.hasChunks = true;
+    }
+
+    if (updateData.imagePages && Array.isArray(updateData.imagePages) && updateData.imagePages.length > 0) {
+      await storySubcollectionService.saveStoryPages(storyId, updateData.imagePages, writerUid);
+    }
+    if (updateData.sourceDocument) {
+      await storySubcollectionService.saveStoryDocument(storyId, updateData.sourceDocument, writerUid);
+    }
+
+    await setDoc(storyRef, sanitizeFirestoreData({
+      ...sanitizedUpdate,
+      updatedBy: writerUid,
+      updatedAt: serverTimestamp(),
+    }), { merge: true });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('kathavahini:story-updated', {
+        detail: { storyId, updatedBy: writerUid }
+      }));
+    }
+  }
+
+  /**
+   * Author/Writer Deletes their own Story
+   */
+  public async deleteStory(storyId: string, writerUid: string): Promise<void> {
+    const storyRef = doc(db, 'stories', storyId);
+    const storySnap = await getDoc(storyRef);
+    if (!storySnap.exists()) {
+      return;
+    }
+    const currentData = storySnap.data();
+    if (currentData.authorId !== writerUid && currentData.writerId !== writerUid && currentData.ownerId !== writerUid) {
+      throw new Error('మీకు ఈ కథను తొలగించే అనుమతి లేదు.');
+    }
+
+    // Clean up storage assets if they exist
+    try {
+      const coverPath = currentData.coverImagePath || currentData.coverImageStoragePath;
+      const docPath = currentData.documentStoragePath || currentData.sourceDocument?.storagePath;
+      const pagePaths = (currentData.imagePages || []).map((p: any) => p.imagePath).filter(Boolean);
+
+      storageService.deleteStoryAssets({
+        coverPath,
+        documentPath: docPath,
+        imagePagePaths: pagePaths,
+      }).catch(() => {});
+    } catch {}
+
+    // Delete subcollections
+    try {
+      await deleteStoryContentChunks(storyId);
+    } catch {}
+
+    // Delete document
+    await deleteDoc(storyRef);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('kathavahini:story-deleted', {
+        detail: { storyId, deletedBy: writerUid }
+      }));
+    }
   }
 
   /**

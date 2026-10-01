@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Eye, Heart, Users, Feather, TrendingUp, Plus, Clock, CheckCircle2, XCircle, AlertCircle, Sparkles, ShieldCheck 
+  Eye, Heart, Users, Feather, TrendingUp, Plus, Clock, CheckCircle2, XCircle, AlertCircle, Sparkles, ShieldCheck,
+  Edit3, Trash2, AlertTriangle, Loader2
 } from 'lucide-react';
 import { CreatorStats, Story, User } from '../types';
 import { writerService } from '../services/writerService';
@@ -13,6 +14,8 @@ interface CreatorDashboardViewProps {
   onOpenWrite: () => void;
   onSelectStory: (story: Story) => void;
   onApplyWriter: () => void;
+  onEditStory?: (story: Story) => void;
+  onDeleteStory?: (storyId: string) => Promise<void> | void;
 }
 
 export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
@@ -22,6 +25,8 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
   onOpenWrite,
   onSelectStory,
   onApplyWriter,
+  onEditStory,
+  onDeleteStory,
 }) => {
   const [filterTab, setFilterTab] = useState<'all' | 'pending' | 'published' | 'rejected'>('all');
   const [writerStories, setWriterStories] = useState<Story[]>(myStories);
@@ -30,6 +35,8 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
     countToday: 0,
   });
   const [loading, setLoading] = useState(false);
+  const [storyToDelete, setStoryToDelete] = useState<Story | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const isWriter = currentUser && (
     (currentUser.role === 'writer' && currentUser.status === 'active') || 
@@ -330,7 +337,31 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-end shrink-0">
+                  {onEditStory && (
+                    <button
+                      type="button"
+                      onClick={() => onEditStory(story)}
+                      className="px-3.5 py-2 rounded-xl text-xs font-bold bg-[#7A284B]/10 hover:bg-[#7A284B] text-[#7A284B] hover:text-white dark:text-[#D87591] dark:hover:text-white transition-all cursor-pointer inline-flex items-center gap-1.5"
+                      title="కథను సవరించండి"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>సవరించండి</span>
+                    </button>
+                  )}
+
+                  {onDeleteStory && (
+                    <button
+                      type="button"
+                      onClick={() => setStoryToDelete(story)}
+                      className="px-3 py-2 rounded-xl text-xs font-bold bg-red-600/10 hover:bg-red-600 text-red-600 hover:text-white transition-all cursor-pointer inline-flex items-center gap-1"
+                      title="కథను తొలగించండి"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>తొలగించు</span>
+                    </button>
+                  )}
+
                   <button
                     onClick={() => onSelectStory(story)}
                     className="px-4 py-2 rounded-xl text-xs font-bold bg-[#FAF7F2] dark:bg-[#222229] hover:bg-[#7A284B] hover:text-white transition-colors cursor-pointer"
@@ -343,6 +374,75 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {storyToDelete && (
+        <div 
+          onClick={() => !isDeleting && setStoryToDelete(null)}
+          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in"
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md bg-white dark:bg-[#1E1E24] rounded-3xl p-6 sm:p-8 shadow-2xl border border-red-500/20 space-y-6"
+          >
+            <div className="flex items-start gap-4">
+              <div className="p-3.5 rounded-2xl bg-red-600/10 text-red-600 shrink-0">
+                <AlertTriangle className="w-7 h-7" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-bold font-serif-telugu text-[#17151A] dark:text-[#F7F3EE]">
+                  కథను తొలగించాలా? (Delete Story)
+                </h3>
+                <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] font-serif-telugu leading-relaxed">
+                  "<strong>{storyToDelete.teluguTitle}</strong>" కథను మరియు దానితో ముడిపడిన అన్ని పేజీలు, చిత్రాలు మరియు పత్రాలను శాశ్వతంగా తొలగించాలనుకుంటున్నారా? ఈ చర్యను రద్దు చేయలేరు.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-black/10 dark:border-white/10">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setStoryToDelete(null)}
+                className="px-5 py-2.5 rounded-xl bg-black/5 dark:bg-white/5 hover:bg-black/10 text-[#17151A] dark:text-[#F7F3EE] text-xs font-bold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                రద్దు చేయండి
+              </button>
+
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={async () => {
+                  if (!onDeleteStory || !storyToDelete) return;
+                  setIsDeleting(true);
+                  try {
+                    await onDeleteStory(storyToDelete.id);
+                    setWriterStories(prev => prev.filter(s => s.id !== storyToDelete.id));
+                    setStoryToDelete(null);
+                  } catch (err) {
+                    console.error('Error deleting story in creator studio:', err);
+                  } finally {
+                    setIsDeleting(false);
+                  }
+                }}
+                className="px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold transition-all shadow-md inline-flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>తొలగిస్తోంది...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>ఖచ్చితంగా తొలగించండి</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

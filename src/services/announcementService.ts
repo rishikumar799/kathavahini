@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import { ref, deleteObject } from 'firebase/storage';
 import { db, storage, auth } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 import {
   Announcement,
   AnnouncementAudience,
@@ -301,11 +302,11 @@ class AnnouncementService {
 
         // Persist to user record in Firestore if authenticated
         if (user && user.id) {
-          const dismissedDocRef = doc(db, 'users', user.id, 'dismissedAnnouncements', announcementId);
-          await setDoc(dismissedDocRef, {
+           const dismissedDocRef = doc(db, 'users', user.id, 'dismissedAnnouncements', announcementId);
+          await setDoc(dismissedDocRef, sanitizeFirestoreData({
             announcementId,
             dismissedAt: serverTimestamp(),
-          });
+          }));
         }
       }
 
@@ -333,9 +334,9 @@ class AnnouncementService {
   private async recordMetric(announcementId: string, field: 'impressions' | 'dismissals' | 'clicks') {
     try {
       const docRef = doc(db, COLLECTION_NAME, announcementId);
-      await updateDoc(docRef, {
+      await updateDoc(docRef, sanitizeFirestoreData({
         [`metrics.${field}`]: increment(1),
-      });
+      }));
     } catch {
       // Metrics are non-critical and should never break or block the user
     }
@@ -383,7 +384,7 @@ class AnnouncementService {
     if (data.scheduledAt) payload.scheduledAt = data.scheduledAt;
     if (data.status === 'published') payload.publishedAt = now;
 
-    await setDoc(newDocRef, payload);
+    await setDoc(newDocRef, sanitizeFirestoreData(payload));
 
     // Audit log
     await auditLogService.logAction({
@@ -429,7 +430,7 @@ class AnnouncementService {
       updatePayload.publishedAt = serverTimestamp();
     }
 
-    await updateDoc(docRef, updatePayload);
+    await updateDoc(docRef, sanitizeFirestoreData(updatePayload));
 
     await auditLogService.logAction({
       action: 'announcement_updated',
@@ -505,7 +506,7 @@ class AnnouncementService {
       updatePayload.publishedAt = serverTimestamp();
     }
 
-    await updateDoc(docRef, updatePayload);
+    await updateDoc(docRef, sanitizeFirestoreData(updatePayload));
 
     await auditLogService.logAction({
       action: 'announcement_status_changed',

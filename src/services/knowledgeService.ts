@@ -13,6 +13,7 @@ import {
   onSnapshot
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 import { KnowledgeArticle } from '../types';
 import { MOCK_KNOWLEDGE_ARTICLES } from './mockData';
 import { deletionTracker } from './deletionTracker';
@@ -136,11 +137,11 @@ export class KnowledgeService {
    */
   public async saveArticle(article: KnowledgeArticle): Promise<void> {
     const docRef = doc(db, 'knowledge', article.id);
-    await setDoc(docRef, {
+    await setDoc(docRef, sanitizeFirestoreData({
       ...article,
       updatedAt: serverTimestamp(),
       createdAt: serverTimestamp(),
-    }, { merge: true });
+    }), { merge: true });
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('kathavahini:refresh-content'));
@@ -153,12 +154,12 @@ export class KnowledgeService {
   public async deleteArticle(id: string, adminUid?: string): Promise<void> {
     await deletionTracker.markDeleted(id, 'knowledge', adminUid);
     try {
-      await setDoc(doc(db, 'knowledge', id), {
+      await setDoc(doc(db, 'knowledge', id), sanitizeFirestoreData({
         status: 'deleted',
         deleted: true,
         updatedAt: serverTimestamp(),
         deletedAt: serverTimestamp(),
-      }, { merge: true });
+      }), { merge: true });
     } catch (e) {}
 
     if (typeof window !== 'undefined') {

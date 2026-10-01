@@ -10,6 +10,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 import { Author } from '../types';
 import { MOCK_AUTHORS } from './mockData';
 import { followingService } from './followingService';
@@ -141,7 +142,7 @@ class AuthorService {
    */
   public async syncAuthorDocument(author: Partial<Author> & { id: string }): Promise<void> {
     const authorRef = doc(db, 'authors', author.id);
-    await setDoc(authorRef, {
+    await setDoc(authorRef, sanitizeFirestoreData({
       uid: author.id,
       writerId: author.id,
       userId: author.id,
@@ -156,7 +157,7 @@ class AuthorService {
       publishedNovelsCount: author.novelsCount || 0,
       isVerified: true,
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    }), { merge: true });
   }
 }
 

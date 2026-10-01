@@ -257,7 +257,7 @@ export const AdminContentEditorModal: React.FC<AdminContentEditorModalProps> = (
       setKnowledgeSummary('');
       setKnowledgeText('');
     }
-  }, [isOpen, effectiveInitialType, initialData, novelContext, novelsList]);
+  }, [isOpen, effectiveInitialType, initialData?.id, initialData?.teluguTitle, initialData?.status, novelContext?.id]);
 
   if (!isOpen) return null;
 

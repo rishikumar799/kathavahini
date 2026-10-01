@@ -19,6 +19,7 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() && (
         request.auth.token.email == 'thekathavahini@gmail.com' ||
+        request.auth.token.email == 'kathavahini@gmail.com' ||
         exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
          getUserData().role == 'admin')
@@ -32,6 +33,29 @@ service cloud.firestore {
          getUserData().role == 'writer' &&
          getUserData().status == 'active')
       );
+    }
+
+    // Secure Content Ownership Helper: Evaluates authorId, writerId, ownerId, submittedBy, and author.id
+    function isContentOwner(data) {
+      return isAuthenticated() && (
+        data.authorId == request.auth.uid ||
+        data.writerId == request.auth.uid ||
+        data.ownerId == request.auth.uid ||
+        data.submittedBy == request.auth.uid ||
+        (data.author != null && data.author.id == request.auth.uid)
+      );
+    }
+
+    // Helper to check parent story ownership for subcollections
+    function isStoryParentOwner(storyId) {
+      return isAuthenticated() && exists(/databases/$(database)/documents/stories/$(storyId)) &&
+        isContentOwner(get(/databases/$(database)/documents/stories/$(storyId)).data);
+    }
+
+    // Helper to check parent novel ownership for subcollections
+    function isNovelParentOwner(novelId) {
+      return isAuthenticated() && exists(/databases/$(database)/documents/novels/$(novelId)) &&
+        isContentOwner(get(/databases/$(database)/documents/novels/$(novelId)).data);
     }
 
     // Canonical Users collection
@@ -110,58 +134,66 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
-    // Stories collection
+    // ---------------------------------------------------------------------------
+    // 1. STORIES: ADMIN (ALL ACCESS) vs WRITER (OWN CONTENT ONLY)
+    // ---------------------------------------------------------------------------
     match /stories/{storyId} {
       // Public read for published public stories; author & admin can read all states
       allow read: if ((resource.data.status == 'published' || resource.data.status == 'approved') && 
                       (resource.data.visibility == 'public' || resource.data.visibility == null)) || (
-        isAuthenticated() && (resource.data.authorId == request.auth.uid || resource.data.writerId == request.auth.uid || isAdmin())
+        isAdmin() || isContentOwner(resource.data)
       );
-      allow create: if isWriter()
-        && (request.resource.data.authorId == request.auth.uid || request.resource.data.writerId == request.auth.uid || isAdmin());
+      
+      // Create: Admin or Writer creating for themselves
+      allow create: if isAdmin() || (
+        isWriter() && (
+          request.resource.data.authorId == request.auth.uid ||
+          request.resource.data.writerId == request.auth.uid ||
+          request.resource.data.ownerId == request.auth.uid
+        )
+      );
+      
+      // Update: Admin can update anything; Writer can only update their own story; Public can update counters
       allow update: if isAdmin() || (
         isWriter()
-        && (resource.data.authorId == request.auth.uid || resource.data.writerId == request.auth.uid)
-        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'visibility', 'authorId', 'writerId', 'createdAt', 'approvedAt', 'approvedBy'])
+        && isContentOwner(resource.data)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['authorId', 'writerId', 'ownerId', 'createdAt', 'approvedAt', 'approvedBy'])
       ) || (
         // Allow public like/view/rating/bookmark counter updates
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewCount', 'viewsCount', 'likeCount', 'likesCount', 'rating', 'ratingsCount', 'ratingsSum', 'bookmarkCount', 'bookmarksCount', 'commentsCount', 'updatedAt'])
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewCount', 'viewsCount', 'likeCount', 'likesCount', 'rating', 'ratingsCount', 'ratingsSum', 'bookmarkCount', 'bookmarksCount', 'commentsCount', 'sharesCount', 'updatedAt'])
       );
-      allow delete: if isAdmin() || (
-        isWriter() && (resource.data.authorId == request.auth.uid || resource.data.writerId == request.auth.uid)
-      );
+      
+      // Delete: Admin or Author/Writer owner only
+      allow delete: if isAdmin() || (isWriter() && isContentOwner(resource.data));
 
-      // Content Chunks subcollection for long-form scalable stories
+      // Subcollections: Content chunks, pages, documents, episodes
       match /contentChunks/{chunkId} {
         allow read: if true;
-        allow write: if isWriter() || isAdmin();
+        allow write: if isAdmin() || (isWriter() && isStoryParentOwner(storyId));
       }
 
-      // Page Images subcollection for scalable image-based stories
       match /pages/{pageId} {
         allow read: if true;
-        allow write: if isWriter() || isAdmin();
+        allow write: if isAdmin() || (isWriter() && isStoryParentOwner(storyId));
       }
 
-      // Attached Documents subcollection (PDF / DOC / DOCX / TXT)
       match /documents/{documentId} {
         allow read: if true;
-        allow write: if isWriter() || isAdmin();
+        allow write: if isAdmin() || (isWriter() && isStoryParentOwner(storyId));
       }
 
-      // Episodes subcollection for multi-part stories
       match /episodes/{episodeId} {
         allow read: if true;
-        allow write: if isWriter() || isAdmin();
+        allow write: if isAdmin() || (isWriter() && isStoryParentOwner(storyId));
 
         match /pages/{pageId} {
           allow read: if true;
-          allow write: if isWriter() || isAdmin();
+          allow write: if isAdmin() || (isWriter() && isStoryParentOwner(storyId));
         }
 
         match /documents/{docId} {
           allow read: if true;
-          allow write: if isWriter() || isAdmin();
+          allow write: if isAdmin() || (isWriter() && isStoryParentOwner(storyId));
         }
       }
 
@@ -191,29 +223,110 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // Novels collection
+    // ---------------------------------------------------------------------------
+    // 2. NOVELS: ADMIN (ALL ACCESS) vs WRITER (OWN CONTENT ONLY)
+    // ---------------------------------------------------------------------------
     match /novels/{novelId} {
       allow read: if true;
-      allow create, update, delete: if isAdmin() || isWriter();
+      
+      allow create: if isAdmin() || (
+        isWriter() && (
+          request.resource.data.authorId == request.auth.uid ||
+          request.resource.data.writerId == request.auth.uid ||
+          request.resource.data.ownerId == request.auth.uid ||
+          (request.resource.data.author != null && request.resource.data.author.id == request.auth.uid)
+        )
+      );
+      
+      allow update: if isAdmin() || (
+        isWriter()
+        && isContentOwner(resource.data)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['authorId', 'writerId', 'ownerId', 'createdAt'])
+      ) || (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewsCount', 'viewCount', 'likesCount', 'likeCount', 'rating', 'ratingsCount', 'bookmarkCount', 'bookmarksCount', 'updatedAt'])
+      );
+      
+      allow delete: if isAdmin() || (isWriter() && isContentOwner(resource.data));
 
       match /chapters/{chapterId} {
         allow read: if true;
-        allow create, update, delete: if isAdmin() || isWriter();
+        allow write: if isAdmin() || (isWriter() && isNovelParentOwner(novelId));
       }
     }
 
-    // Episodes collection
+    // ---------------------------------------------------------------------------
+    // 3. EPISODES: ADMIN (ALL ACCESS) vs WRITER (OWN CONTENT ONLY)
+    // ---------------------------------------------------------------------------
     match /episodes/{episodeId} {
       allow read: if true;
-      allow create, update, delete: if isAdmin() || isWriter();
+      
+      allow create: if isAdmin() || (
+        isWriter() && (
+          request.resource.data.authorId == request.auth.uid ||
+          request.resource.data.writerId == request.auth.uid ||
+          request.resource.data.ownerId == request.auth.uid ||
+          (request.resource.data.author != null && request.resource.data.author.id == request.auth.uid)
+        )
+      );
+      
+      allow update: if isAdmin() || (
+        isWriter()
+        && isContentOwner(resource.data)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['authorId', 'writerId', 'ownerId', 'createdAt'])
+      ) || (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewsCount', 'viewCount', 'likesCount', 'likeCount', 'rating', 'updatedAt'])
+      );
+      
+      allow delete: if isAdmin() || (isWriter() && isContentOwner(resource.data));
     }
 
-    // Jokes collection
+    // ---------------------------------------------------------------------------
+    // 4. JOKES: ADMIN (ALL ACCESS) vs CREATOR/WRITER (OWN CONTENT ONLY)
+    // ---------------------------------------------------------------------------
     match /jokes/{jokeId} {
       allow read: if true;
-      allow create: if isAuthenticated();
-      allow update: if isAuthenticated() || isAdmin();
-      allow delete: if isAdmin();
+      
+      allow create: if isAuthenticated() && (
+        request.resource.data.submittedBy == request.auth.uid ||
+        request.resource.data.authorId == request.auth.uid ||
+        request.resource.data.ownerId == request.auth.uid ||
+        isAdmin()
+      );
+      
+      allow update: if isAdmin() || (
+        isAuthenticated()
+        && isContentOwner(resource.data)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['submittedBy', 'authorId', 'ownerId', 'createdAt'])
+      ) || (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount', 'likes', 'viewsCount', 'sharesCount', 'updatedAt'])
+      );
+      
+      allow delete: if isAdmin() || (isAuthenticated() && isContentOwner(resource.data));
+    }
+
+    // ---------------------------------------------------------------------------
+    // 5. KNOWLEDGE: ADMIN (ALL ACCESS) vs WRITER (OWN CONTENT ONLY)
+    // ---------------------------------------------------------------------------
+    match /knowledge/{knowledgeId} {
+      allow read: if true;
+      
+      allow create: if isAdmin() || (
+        isWriter() && (
+          request.resource.data.authorId == request.auth.uid ||
+          request.resource.data.submittedBy == request.auth.uid ||
+          request.resource.data.ownerId == request.auth.uid
+        )
+      );
+      
+      allow update: if isAdmin() || (
+        isWriter()
+        && isContentOwner(resource.data)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['authorId', 'submittedBy', 'ownerId', 'createdAt'])
+      ) || (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewsCount', 'viewCount', 'likesCount', 'likeCount', 'sharesCount', 'updatedAt'])
+      );
+      
+      allow delete: if isAdmin() || (isWriter() && isContentOwner(resource.data));
     }
 
     // Samethalu (Telugu Proverbs) collection
@@ -224,12 +337,6 @@ service cloud.firestore {
 
     // Topics collection
     match /topics/{topicId} {
-      allow read: if true;
-      allow write: if isAdmin();
-    }
-
-    // Knowledge collection
-    match /knowledge/{knowledgeId} {
       allow read: if true;
       allow write: if isAdmin();
     }
@@ -277,21 +384,22 @@ service cloud.firestore {
     }
 
     // ---------------------------------------------------------------------------
-    // BALAVINODHINI ECOSYSTEM COLLECTIONS
+    // 6. BALAVINODHINI ECOSYSTEM - EXCLUSIVE ADMIN MANAGEMENT (NO WRITER ACCESS)
     // ---------------------------------------------------------------------------
     match /balavinodhini/{itemId} {
-      // Public read for published and approved content
+      // Public read for all published Balavinodhini children content
       allow read: if true;
-      // Allow authenticated user to create creation / submission or like/comment
-      allow create: if isAuthenticated() || isAdmin();
-      // Allow author or admin to update/delete
-      allow update: if isAdmin() || (isAuthenticated() && resource.data.authorId == request.auth.uid) || true; // allow like counter updates
-      allow delete: if isAdmin() || (isAuthenticated() && resource.data.authorId == request.auth.uid);
+      // ONLY Admin has access to create, edit, update, or delete (No writer access)
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        // Allow public reader like/views counter updates
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes', 'views', 'shares', 'likesCount', 'viewsCount', 'bookmarkCount', 'commentCount', 'updatedAt'])
+      );
 
       // Comments subcollection
       match /comments/{commentId} {
         allow read: if true;
-        allow create: if isAuthenticated() || true;
+        allow create: if isAuthenticated();
         allow update, delete: if isAdmin();
       }
     }
@@ -313,9 +421,7 @@ service cloud.firestore {
 
     match /balavinodhini_creations/{creationId} {
       allow read: if true;
-      allow create: if isAuthenticated() || true;
-      allow update: if isAdmin() || (isAuthenticated() && resource.data.authorId == request.auth.uid);
-      allow delete: if isAdmin() || (isAuthenticated() && resource.data.authorId == request.auth.uid);
+      allow write: if isAdmin();
     }
 
     match /settings/{settingId} {

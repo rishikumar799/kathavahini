@@ -12,7 +12,10 @@ import {
   Smile, 
   Clock, 
   Bookmark,
-  Volume2
+  Volume2,
+  ShieldCheck,
+  Edit3,
+  Trash2
 } from 'lucide-react';
 import { 
   BalavinodhiniItem, 
@@ -39,6 +42,7 @@ import { BalavinodhiniItemDetailModal } from '../components/balavinodhini/Balavi
 import { BalavinodhiniBookReaderModal } from '../components/balavinodhini/BalavinodhiniBookReaderModal';
 import { BalavinodhiniCreationModal } from '../components/balavinodhini/BalavinodhiniCreationModal';
 import { BalavinodhiniCreatorProfileModal } from '../components/balavinodhini/BalavinodhiniCreatorProfileModal';
+import { AdminBalavinodhiniContentEditorModal } from '../components/admin/balavinodhini/AdminBalavinodhiniContentEditorModal';
 
 interface BalavinodhiniViewProps {
   currentUser: User | null;
@@ -62,11 +66,15 @@ export const BalavinodhiniView: React.FC<BalavinodhiniViewProps> = ({
   const [selectedItem, setSelectedItem] = useState<BalavinodhiniItem | null>(null);
   const [selectedBook, setSelectedBook] = useState<BalavinodhiniItem | null>(null);
   const [isCreationModalOpen, setIsCreationModalOpen] = useState(false);
+  const [editingBalavinodhiniItem, setEditingBalavinodhiniItem] = useState<BalavinodhiniItem | null>(null);
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [creatorModalData, setCreatorModalData] = useState<{
     name: string;
     bio?: string;
     avatar?: string;
   } | null>(null);
+
+  const isAdmin = currentUser?.role === 'admin';
 
   // Subscribe to real-time Balavinodhini items & today's highlights
   useEffect(() => {
@@ -187,6 +195,29 @@ export const BalavinodhiniView: React.FC<BalavinodhiniViewProps> = ({
     setCreatorModalData({ name, bio, avatar });
   };
 
+  // Admin exclusive handlers: ONLY admin can create, edit, update, delete
+  const handleSaveItem = async (itemData: Partial<BalavinodhiniItem>) => {
+    if (!isAdmin) return;
+    if (editingBalavinodhiniItem?.id) {
+      await balavinodhiniService.updateItem(editingBalavinodhiniItem.id, itemData);
+    } else {
+      await balavinodhiniService.createItem(itemData);
+    }
+    setIsEditorOpen(false);
+    setEditingBalavinodhiniItem(null);
+  };
+
+  const handleDeleteItem = async (item: BalavinodhiniItem) => {
+    if (!isAdmin) return;
+    await balavinodhiniService.deleteItem(item.id);
+    if (selectedItem?.id === item.id) {
+      setSelectedItem(null);
+    }
+    if (selectedBook?.id === item.id) {
+      setSelectedBook(null);
+    }
+  };
+
   // Fallback today config if not yet loaded from firestore
   const currentTodayConfig: BalavinodhiniTodayConfig = todayConfig || {
     date: new Date().toLocaleDateString('te-IN'),
@@ -209,6 +240,40 @@ export const BalavinodhiniView: React.FC<BalavinodhiniViewProps> = ({
     <div className="min-h-screen bg-[#0C091A] text-white py-6 sm:py-8 transition-colors">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
+        {/* ========================================================================= */}
+        {/* ADMIN EXCLUSIVE BAR: ONLY ADMIN HAS FULL ACCESS TO EDIT, UPDATE, DELETE */}
+        {/* ========================================================================= */}
+        {isAdmin && (
+          <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-amber-500/20 via-rose-500/20 to-purple-500/20 border-2 border-amber-400/40 flex flex-wrap items-center justify-between gap-3 shadow-lg animate-fadeIn">
+            <div className="flex items-center gap-2.5">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/30 flex items-center justify-center text-amber-300">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-sm sm:text-base font-bold text-amber-200 font-serif-telugu flex items-center gap-2">
+                  <span>బాలవినోదిని అడ్మిన్ నిర్వహణ ప్యానెల్ (Admin Exclusive)</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500 text-neutral-950 font-sans font-black">
+                    ADMIN ONLY
+                  </span>
+                </h3>
+                <p className="text-[11px] sm:text-xs text-amber-300/70 font-serif-telugu">
+                  రచయితలకు కాకుండా కేవలం అడ్మిన్‌కు మాత్రమే బాలవినోదిని అంశాలను సవరించడం, జోడించడం మరియు తొలగించే అధికారం కలదు.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setEditingBalavinodhiniItem(null);
+                setIsEditorOpen(true);
+              }}
+              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-neutral-950 font-bold text-xs font-serif-telugu flex items-center gap-1.5 shadow-md hover:scale-105 transition-all cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>+ కొత్త అంశాన్ని జోడించండి (Add Content)</span>
+            </button>
+          </div>
+        )}
+
         {/* ========================================================================= */}
         {/* 1. MASTER HERO BANNER WITH SEARCH & AGE FILTERS */}
         {/* ========================================================================= */}
@@ -443,6 +508,11 @@ export const BalavinodhiniView: React.FC<BalavinodhiniViewProps> = ({
             onShare={handleShare}
             onRequireAuth={onOpenAuth}
             onOpenCreatorProfile={handleOpenCreatorProfile}
+            onEdit={isAdmin ? (item) => {
+              setEditingBalavinodhiniItem(item);
+              setIsEditorOpen(true);
+            } : undefined}
+            onDelete={isAdmin ? handleDeleteItem : undefined}
           />
         )}
 
@@ -465,6 +535,20 @@ export const BalavinodhiniView: React.FC<BalavinodhiniViewProps> = ({
             onSuccessSubmit={() => {
               setActiveTab('creations');
             }}
+          />
+        )}
+
+        {/* Admin Content Editor Modal: ONLY accessible by Admin */}
+        {isAdmin && isEditorOpen && (
+          <AdminBalavinodhiniContentEditorModal
+            isOpen={isEditorOpen}
+            initialData={editingBalavinodhiniItem}
+            defaultCategoryId={activeTab !== 'home' && activeTab !== 'today' && activeTab !== 'games' ? activeTab : 'stories'}
+            onClose={() => {
+              setIsEditorOpen(false);
+              setEditingBalavinodhiniItem(null);
+            }}
+            onSave={handleSaveItem}
           />
         )}
 

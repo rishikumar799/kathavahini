@@ -129,7 +129,10 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [currentTab]);
 
-  // Subscribe to Auth changes from Firebase
+  const currentTabRef = React.useRef(currentTab);
+  currentTabRef.current = currentTab;
+
+  // Subscribe to Auth changes from Firebase once on mount
   useEffect(() => {
     const unsubscribe = authService.subscribe((u, loading) => {
       setUser(u);
@@ -151,12 +154,13 @@ export default function App() {
         hasAdminRedirectedRef.current = false;
       }
 
+      const activeTab = currentTabRef.current;
       // Strict Admin Route Guard: If a non-admin is currently on 'admin' tab, redirect to 'home' immediately
-      if (currentTab === 'admin' && !isUserAdmin) {
+      if (activeTab === 'admin' && !isUserAdmin) {
         setCurrentTab('home');
       }
       // Strict Writer Studio Route Guard: If user is not active writer or admin, route away
-      if (currentTab === 'dashboard' && !(u && ((u.role === 'writer' && u.status === 'active') || isUserAdmin))) {
+      if (activeTab === 'dashboard' && !(u && ((u.role === 'writer' && u.status === 'active') || isUserAdmin))) {
         if (u && u.role === 'writer' && u.status === 'pending') {
           setCurrentTab('apply-writer');
         } else {
@@ -165,7 +169,7 @@ export default function App() {
       }
     });
     return () => unsubscribe();
-  }, [currentTab]);
+  }, []);
 
   // Strict route guard when tab changes to admin or dashboard
   useEffect(() => {
@@ -187,7 +191,7 @@ export default function App() {
         }
       }
     }
-  }, [currentTab, user]);
+  }, [currentTab, user?.id, user?.role, user?.status]);
 
   // Fetch initial data from services
   const loadData = async () => {
@@ -230,8 +234,16 @@ export default function App() {
       setSelectedStory(curr => {
         if (!curr) return null;
         const exists = published.find(s => s.id === curr.id);
-        if (!exists) {
-          return null;
+        if (!exists) return null;
+        if (
+          curr.teluguTitle === exists.teluguTitle &&
+          curr.likeCount === exists.likeCount &&
+          curr.viewCount === exists.viewCount &&
+          curr.rating === exists.rating &&
+          curr.coverImage === exists.coverImage &&
+          curr.status === exists.status
+        ) {
+          return curr;
         }
         return { ...curr, ...exists };
       });
@@ -243,6 +255,14 @@ export default function App() {
         if (!curr) return null;
         const exists = liveNovels.find(n => n.id === curr.id);
         if (!exists) return null;
+        if (
+          curr.teluguTitle === exists.teluguTitle &&
+          curr.rating === exists.rating &&
+          curr.coverImage === exists.coverImage &&
+          curr.status === exists.status
+        ) {
+          return curr;
+        }
         return { ...curr, ...exists };
       });
     });
@@ -507,6 +527,17 @@ export default function App() {
     }
   };
 
+  const creatorStudioStories = React.useMemo(() => {
+    return trendingStories.slice(0, 5);
+  }, [trendingStories]);
+
+  const relatedStoriesForSelected = React.useMemo(() => {
+    if (!selectedStory) return [];
+    return (allStories.length > 0 ? allStories : trendingStories).filter(
+      s => s.id !== selectedStory.id && s.category === selectedStory.category
+    );
+  }, [allStories, trendingStories, selectedStory?.id, selectedStory?.category]);
+
   // Render view router
   const renderCurrentView = () => {
     switch (currentTab) {
@@ -550,7 +581,7 @@ export default function App() {
         return selectedStory ? (
           <StoryDetailView
             story={selectedStory}
-            relatedStories={(allStories.length > 0 ? allStories : trendingStories).filter(s => s.id !== selectedStory.id && s.category === selectedStory.category)}
+            relatedStories={relatedStoriesForSelected}
             currentUser={user}
             onStartReading={handleStartReading}
             onSelectAuthor={handleSelectAuthor}
@@ -747,7 +778,7 @@ export default function App() {
           <CreatorDashboardView
             stats={creatorStats}
             currentUser={user}
-            myStories={trendingStories.slice(0, 5)}
+            myStories={creatorStudioStories}
             onOpenWrite={() => setIsWriteOpen(true)}
             onSelectStory={handleSelectStory}
             onApplyWriter={() => setCurrentTab('apply-writer')}

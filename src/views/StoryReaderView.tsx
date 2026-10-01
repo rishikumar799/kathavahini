@@ -78,6 +78,7 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
   const [isUploadingNextPage, setIsUploadingNextPage] = useState<boolean>(false);
   const [uploadPageStatus, setUploadPageStatus] = useState<string | null>(null);
   const nextPageFileInputRef = useRef<HTMLInputElement>(null);
+  const lastReportedProgressRef = useRef<number>(-1);
 
   const docUrl = story.sourceDocument?.storageUrl || (story as any).documentURL || (story as any).documentUrl;
 
@@ -102,7 +103,7 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
         }
       }).catch(() => {});
     }
-  }, [story.id, story.imagePages]);
+  }, [story.id, story.imagePages?.length]);
 
   // Handle uploading next image pages right from the reader
   const handleUploadNextPageImages = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -204,24 +205,39 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
   // Track scroll progress for text/mixed stories, or page progress for image stories
   useEffect(() => {
     if (hasImagePages) {
-      const pageProg = Math.round(((activeImagePageIndex + 1) / (story.imagePages?.length || 1)) * 100);
+      const totalPages = story.imagePages?.length || resolvedImagePages.length || 1;
+      const pageProg = Math.min(100, Math.max(0, Math.round(((activeImagePageIndex + 1) / totalPages) * 100)));
       setProgressPercent(pageProg);
-      onUpdateProgress(story.id, pageProg);
+      if (lastReportedProgressRef.current !== pageProg) {
+        lastReportedProgressRef.current = pageProg;
+        onUpdateProgress(story.id, pageProg);
+      }
       return;
     }
 
+    let timeoutId: any = null;
     const handleScroll = () => {
-      const totalHeight = document.documentElement.scrollHeight - window.innerHeight;
-      if (totalHeight > 0) {
-        const currentProgress = Math.min(100, Math.max(0, Math.round((window.scrollY / totalHeight) * 100)));
-        setProgressPercent(currentProgress);
-        onUpdateProgress(story.id, currentProgress);
-      }
+      if (timeoutId) return;
+      timeoutId = setTimeout(() => {
+        timeoutId = null;
+        const totalHeight = document.documentElement.scrollHeight - window.innerHeight;
+        if (totalHeight > 0) {
+          const currentProgress = Math.min(100, Math.max(0, Math.round((window.scrollY / totalHeight) * 100)));
+          setProgressPercent(currentProgress);
+          if (Math.abs((lastReportedProgressRef.current || 0) - currentProgress) >= 10 || currentProgress === 100) {
+            lastReportedProgressRef.current = currentProgress;
+            onUpdateProgress(story.id, currentProgress);
+          }
+        }
+      }, 300);
     };
 
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [story.id, hasImagePages, activeImagePageIndex, story.imagePages?.length]);
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      window.removeEventListener('scroll', handleScroll);
+    };
+  }, [story.id, hasImagePages, activeImagePageIndex, story.imagePages?.length, resolvedImagePages.length]);
 
   const handleAddComment = (e: React.FormEvent) => {
     e.preventDefault();

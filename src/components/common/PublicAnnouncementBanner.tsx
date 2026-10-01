@@ -69,7 +69,7 @@ export const PublicAnnouncementBanner: React.FC<PublicAnnouncementBannerProps> =
       if (timerId) clearTimeout(timerId);
       window.removeEventListener('kathavahini:announcements-updated', handleAnnouncementsUpdated);
     };
-  }, [currentUser]);
+  }, [currentUser?.id, currentUser?.role]);
 
   // Keyboard accessibility: Escape key dismisses the announcement
   useEffect(() => {

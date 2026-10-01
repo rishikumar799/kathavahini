@@ -48,25 +48,36 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
   );
 
   useEffect(() => {
+    let isMounted = true;
     async function loadData() {
-      if (currentUser && isWriter) {
+      if (currentUser?.id && isWriter) {
         setLoading(true);
-        const [stories, limitCheck] = await Promise.all([
-          writerService.getWriterStories(currentUser.id),
-          writerService.checkCanSubmitToday(currentUser.id),
-        ]);
+        try {
+          const [stories, limitCheck] = await Promise.all([
+            writerService.getWriterStories(currentUser.id),
+            writerService.checkCanSubmitToday(currentUser.id),
+          ]);
 
-        if (stories.length > 0) {
-          setWriterStories(stories);
-        } else {
-          setWriterStories(myStories);
+          if (isMounted) {
+            if (stories.length > 0) {
+              setWriterStories(stories);
+            } else if (myStories && myStories.length > 0) {
+              setWriterStories(myStories);
+            }
+            setDailyLimit(limitCheck);
+          }
+        } catch (e) {
+          console.warn('Error loading creator stories:', e);
+        } finally {
+          if (isMounted) setLoading(false);
         }
-        setDailyLimit(limitCheck);
-        setLoading(false);
       }
     }
     loadData();
-  }, [currentUser, isWriter, myStories]);
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser?.id, isWriter]);
 
   const filteredStories = writerStories.filter(s => {
     if (filterTab === 'all') return true;

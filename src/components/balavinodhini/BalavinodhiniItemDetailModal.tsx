@@ -12,7 +12,12 @@ import {
   Send, 
   UserCheck, 
   ShieldAlert,
-  Type
+  Type,
+  Edit3,
+  Trash2,
+  AlertTriangle,
+  Loader2,
+  ShieldCheck
 } from 'lucide-react';
 import { BalavinodhiniItem, User } from '../../types';
 
@@ -24,6 +29,8 @@ interface BalavinodhiniItemDetailModalProps {
   onShare: (item: BalavinodhiniItem) => void;
   onRequireAuth?: () => void;
   onOpenCreatorProfile?: (authorName: string, authorBio?: string, authorAvatar?: string) => void;
+  onEdit?: (item: BalavinodhiniItem) => void;
+  onDelete?: (item: BalavinodhiniItem) => void;
 }
 
 export const BalavinodhiniItemDetailModal: React.FC<BalavinodhiniItemDetailModalProps> = ({
@@ -34,6 +41,8 @@ export const BalavinodhiniItemDetailModal: React.FC<BalavinodhiniItemDetailModal
   onShare,
   onRequireAuth,
   onOpenCreatorProfile,
+  onEdit,
+  onDelete,
 }) => {
   const [fontSize, setFontSize] = useState<'normal' | 'large' | 'huge'>('large');
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
@@ -42,6 +51,10 @@ export const BalavinodhiniItemDetailModal: React.FC<BalavinodhiniItemDetailModal
     { id: '1', name: 'శ్రీను', text: 'చాలా మంచి కథ! ఎంతో అర్థవంతంగా ఉంది.', time: 'నిన్న' },
     { id: '2', name: 'అనుపమ', text: 'పిల్లలకు చాలా ఉపయోగకరమైన విజ్ఞానం.', time: '2 రోజుల క్రితం' },
   ]);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const isAdmin = currentUser?.role === 'admin';
 
   // Escape key handler
   useEffect(() => {
@@ -164,6 +177,41 @@ export const BalavinodhiniItemDetailModal: React.FC<BalavinodhiniItemDetailModal
 
         {/* Content Body */}
         <div className="flex-1 overflow-y-auto p-6 sm:p-8 space-y-6">
+          {/* Admin Exclusive Ribbon: ONLY Admin can edit, update, or delete */}
+          {isAdmin && (
+            <div className="p-3.5 bg-gradient-to-r from-amber-500/15 via-rose-500/15 to-purple-500/15 border-2 border-amber-400/40 dark:border-amber-500/40 rounded-2xl flex flex-wrap items-center justify-between gap-3 shadow-xs">
+              <div className="flex items-center gap-2 text-xs font-bold text-amber-900 dark:text-amber-200 font-serif-telugu">
+                <ShieldCheck className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                <span>అడ్మిన్ నియంత్రణ ప్యానెల్ (Admin Exclusive)</span>
+              </div>
+              <div className="flex items-center gap-2">
+                {onEdit && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onEdit(item);
+                    }}
+                    className="px-3.5 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs font-serif-telugu flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  >
+                    <Edit3 className="w-3.5 h-3.5" />
+                    <span>సవరించండి (Edit)</span>
+                  </button>
+                )}
+                {onDelete && (
+                  <button
+                    type="button"
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs font-serif-telugu flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>తొలగించండి (Delete)</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Main Title & Metadata */}
           <div className="space-y-3 pb-4 border-b border-[#E8E1DA]/60 dark:border-[#2E2D36]/60">
             <h2 className="text-2xl sm:text-3xl font-bold font-serif-telugu text-[#17151A] dark:text-[#F7F3EE] leading-snug">
@@ -286,6 +334,72 @@ export const BalavinodhiniItemDetailModal: React.FC<BalavinodhiniItemDetailModal
           </div>
         </div>
       </div>
+
+      {/* Admin Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div 
+          className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fadeIn"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isDeleting) setShowDeleteConfirm(false);
+          }}
+        >
+          <div className="w-full max-w-md bg-white dark:bg-[#1C1B22] rounded-2xl p-6 shadow-2xl border border-rose-200 dark:border-rose-900/40 text-center space-y-4">
+            <div className="w-12 h-12 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            
+            <h3 className="text-lg font-bold text-[#17151A] dark:text-[#F7F3EE] font-serif-telugu">
+              ఈ బాలవినోదిని రచనను తొలగించాలనుకుంటున్నారా?
+            </h3>
+            
+            <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] leading-relaxed font-serif-telugu">
+              "{item.teluguTitle || item.title}" శాశ్వతంగా తొలగించబడుతుంది. ఈ చర్యను రద్దు చేయలేరు.
+            </p>
+
+            <div className="flex items-center justify-center gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-[#6F6970] dark:text-[#AAA4AC] bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition-colors font-serif-telugu cursor-pointer"
+              >
+                రద్దు చేయండి (Cancel)
+              </button>
+              
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={async () => {
+                  if (!onDelete) return;
+                  try {
+                    setIsDeleting(true);
+                    await onDelete(item);
+                    setShowDeleteConfirm(false);
+                    onClose();
+                  } catch (e) {
+                    console.error('Delete error:', e);
+                  } finally {
+                    setIsDeleting(false);
+                  }
+                }}
+                className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-md transition-all flex items-center gap-1.5 font-serif-telugu cursor-pointer disabled:opacity-50"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>తొలగిస్తోంది...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>తొలగించు (Delete)</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

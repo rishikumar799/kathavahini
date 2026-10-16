@@ -13,15 +13,19 @@ import {
   Clock,
   Layers
 } from 'lucide-react';
-import { HeroBannerConfig, HeroBannerSlide, Story, Novel, Joke, KnowledgeArticle } from '../../types';
+import { HeroBannerConfig, HeroBannerSlide, Story, Novel, Episode, Joke, KnowledgeArticle, BalavinodhiniItem } from '../../types';
 import { landingPageService } from '../../services/landingPageService';
+import { balavinodhiniService } from '../../services/balavinodhiniService';
+import { adminService } from '../../services/adminService';
 
 interface EditorialHeroBannerProps {
   config: HeroBannerConfig;
   stories: Story[];
   novels: Novel[];
+  episodes?: Episode[];
   jokes: Joke[];
   knowledge: KnowledgeArticle[];
+  balavinodhiniItems?: BalavinodhiniItem[];
   isAdmin?: boolean;
   onOpenAdminHeroEditor?: () => void;
   onSelectTab: (tab: string) => void;
@@ -34,8 +38,10 @@ export const EditorialHeroBanner: React.FC<EditorialHeroBannerProps> = ({
   config,
   stories,
   novels,
+  episodes: propEpisodes,
   jokes,
   knowledge,
+  balavinodhiniItems: propBalavinodhiniItems,
   isAdmin,
   onOpenAdminHeroEditor,
   onSelectTab,
@@ -47,21 +53,56 @@ export const EditorialHeroBanner: React.FC<EditorialHeroBannerProps> = ({
   const [activeSlideIndex, setActiveSlideIndex] = useState<number>(0);
   const [isHovered, setIsHovered] = useState<boolean>(false);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
+  const [internalBalaItems, setInternalBalaItems] = useState<BalavinodhiniItem[]>([]);
+  const [internalEpisodes, setInternalEpisodes] = useState<Episode[]>([]);
+
+  // Subscribe to Balavinodhini items if not provided via props
+  useEffect(() => {
+    if (propBalavinodhiniItems && propBalavinodhiniItems.length > 0) return;
+    const unsub = balavinodhiniService.subscribeItems((items) => {
+      setInternalBalaItems(items);
+    });
+    return () => unsub();
+  }, [propBalavinodhiniItems]);
+
+  // Load episodes if not provided via props
+  useEffect(() => {
+    if (propEpisodes && propEpisodes.length > 0) return;
+    adminService.getEpisodes().then(setInternalEpisodes).catch(() => {});
+  }, [propEpisodes]);
+
+  const effectiveBalaItems = propBalavinodhiniItems && propBalavinodhiniItems.length > 0 
+    ? propBalavinodhiniItems 
+    : internalBalaItems;
+
+  const effectiveEpisodes = propEpisodes && propEpisodes.length > 0
+    ? propEpisodes
+    : internalEpisodes;
 
   // Compute slides dynamically based on config and data
   useEffect(() => {
-    const computedSlides = landingPageService.resolveHeroSlides(
-      config,
-      stories,
-      novels,
-      jokes,
-      knowledge
-    );
-    setSlides(computedSlides);
-    if (activeSlideIndex >= computedSlides.length) {
-      setActiveSlideIndex(0);
-    }
-  }, [config, stories, novels, jokes, knowledge, activeSlideIndex]);
+    const compute = () => {
+      const computedSlides = landingPageService.resolveHeroSlides(
+        config,
+        stories,
+        novels,
+        jokes,
+        knowledge,
+        effectiveBalaItems,
+        effectiveEpisodes
+      );
+      setSlides(computedSlides);
+      if (activeSlideIndex >= computedSlides.length) {
+        setActiveSlideIndex(0);
+      }
+    };
+
+    compute();
+
+    // Re-check schedule validity every 30 seconds so expired slides automatically drop out
+    const scheduleCheckTimer = setInterval(compute, 30000);
+    return () => clearInterval(scheduleCheckTimer);
+  }, [config, stories, novels, jokes, knowledge, effectiveBalaItems, effectiveEpisodes, activeSlideIndex]);
 
   // Auto-rotation timer (pauses when user hovers over the card if pauseOnHover is enabled)
   useEffect(() => {
@@ -84,6 +125,22 @@ export const EditorialHeroBanner: React.FC<EditorialHeroBannerProps> = ({
     if (e) e.stopPropagation();
     setActiveSlideIndex((prev) => (prev + 1) % slides.length);
   };
+
+  // Keyboard navigation when user is interacting with the banner
+  useEffect(() => {
+    if (!isHovered || slides.length <= 1) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') {
+        handlePrevSlide();
+      } else if (e.key === 'ArrowRight') {
+        handleNextSlide();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isHovered, slides.length]);
 
   // Touch Swipe handlers
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -125,6 +182,8 @@ export const EditorialHeroBanner: React.FC<EditorialHeroBannerProps> = ({
       } else {
         onSelectTab('novels');
       }
+    } else if (currentSlide.contentType === 'episode') {
+      onSelectTab('novels');
     } else if (currentSlide.contentType === 'joke') {
       onSelectTab('jokes');
     } else if (currentSlide.contentType === 'knowledge') {
@@ -136,25 +195,6 @@ export const EditorialHeroBanner: React.FC<EditorialHeroBannerProps> = ({
     }
   };
 
-  // Resolved metrics (live vs custom)
-  const resolvedMetrics = React.useMemo(() => {
-    if (config.metricsSource === 'custom') {
-      return config.customMetrics || config.stats || {
-        storiesCount: '25K+',
-        storiesLabel: 'తెలుగు కథలు',
-        writersCount: '5K+',
-        writersLabel: 'రచయితలు',
-        readersCount: '1M+',
-        readersLabel: 'పాఠకులు',
-      };
-    }
-    return landingPageService.calculateLiveMetrics(
-      stories,
-      novels.length,
-      5000,
-      1000000
-    );
-  }, [config.metricsSource, config.customMetrics, config.stats, stories, novels.length]);
 
   // Render title with highlight word support
   const renderHeading = () => {
@@ -180,6 +220,58 @@ export const EditorialHeroBanner: React.FC<EditorialHeroBannerProps> = ({
       </h1>
     );
   };
+
+  if (config.enabled === false) {
+    if (!isAdmin) return null;
+    return (
+      <section className="relative overflow-hidden rounded-3xl bg-[#15131A] text-[#FAF7F2] p-6 border border-dashed border-amber-500/40 shadow-lg font-serif-telugu flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
+            <Sparkles className="w-4 h-4 text-amber-400" />
+            <span>హెరో బ్యానర్ డిసేబుల్ చేయబడింది (Hero Banner Disabled by Admin)</span>
+          </div>
+          <p className="text-xs text-[#AAA4AC] mt-1">
+            సాధారణ పాఠకులకు ఈ విభాగం కనిపించదు. అడ్మిన్ కాన్ఫిగరేషన్‌లో ప్రారంభించవచ్చు.
+          </p>
+        </div>
+        {onOpenAdminHeroEditor && (
+          <button
+            type="button"
+            onClick={onOpenAdminHeroEditor}
+            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs cursor-pointer transition-colors shadow-sm self-start"
+          >
+            ⚙️ బ్యానర్ సెట్టింగ్స్ తెరవండి
+          </button>
+        )}
+      </section>
+    );
+  }
+
+  if (slides.length === 0) {
+    if (!isAdmin) return null;
+    return (
+      <section className="relative overflow-hidden rounded-3xl bg-[#15131A] text-[#FAF7F2] p-6 border border-dashed border-amber-500/40 shadow-lg font-serif-telugu flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
+            <Sparkles className="w-4 h-4 text-amber-400" />
+            <span>హీరో బ్యానర్: యాక్టివ్ స్లైడ్లు లేవు (గడువు ముగిసింది లేదా దాచబడింది)</span>
+          </div>
+          <p className="text-xs text-[#AAA4AC] mt-1">
+            షెడ్యూల్ ముగియడం వల్ల సాధారణ పాఠకులకు హీరో బ్యానర్ దాచబడింది. అడ్మిన్ కాన్ఫిగరేషన్‌లో స్లైడ్ల వ్యవధిని పొడిగించవచ్చు లేదా ఆటో భర్తీని ఎంచుకోవచ్చు.
+          </p>
+        </div>
+        {onOpenAdminHeroEditor && (
+          <button
+            type="button"
+            onClick={onOpenAdminHeroEditor}
+            className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs cursor-pointer transition-colors shadow-sm self-start"
+          >
+            ⚙️ బ్యానర్ సెట్టింగ్స్ తెరవండి
+          </button>
+        )}
+      </section>
+    );
+  }
 
   return (
     <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#15131A] via-[#211B28] to-[#15131A] text-[#FAF7F2] p-6 sm:p-10 lg:p-14 border border-[#2E2D36] shadow-2xl">
@@ -232,36 +324,6 @@ export const EditorialHeroBanner: React.FC<EditorialHeroBannerProps> = ({
               <span>{currentSlide?.secondaryButtonText || config.secondaryButtonText || 'మీ కథ రాయండి'}</span>
             </button>
           </div>
-
-          {/* Metrics / Stats */}
-          {config.showMetrics !== false && (
-            <div className="grid grid-cols-3 gap-4 pt-6 border-t border-white/10 text-center sm:text-left">
-              <div>
-                <p className="text-xl sm:text-2xl font-bold font-serif-telugu text-white">
-                  {resolvedMetrics.storiesCount}
-                </p>
-                <p className="text-xs text-[#AAA4AC] font-serif-telugu">
-                  {resolvedMetrics.storiesLabel}
-                </p>
-              </div>
-              <div>
-                <p className="text-xl sm:text-2xl font-bold font-serif-telugu text-white">
-                  {resolvedMetrics.writersCount}
-                </p>
-                <p className="text-xs text-[#AAA4AC] font-serif-telugu">
-                  {resolvedMetrics.writersLabel}
-                </p>
-              </div>
-              <div>
-                <p className="text-xl sm:text-2xl font-bold font-serif-telugu text-white">
-                  {resolvedMetrics.readersCount}
-                </p>
-                <p className="text-xs text-[#AAA4AC] font-serif-telugu">
-                  {resolvedMetrics.readersLabel}
-                </p>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Right Column: Interactive Featured Card Carousel with Next & Previous */}

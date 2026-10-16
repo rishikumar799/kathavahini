@@ -44,6 +44,7 @@ import {
   PromotedContentType,
   Story, 
   Novel, 
+  Episode,
   Joke, 
   KnowledgeArticle, 
   BalavinodhiniItem,
@@ -51,6 +52,7 @@ import {
 } from '../../types';
 import { landingPageService, DEFAULT_HERO_CONFIG, DEFAULT_HERO_STATS, DEFAULT_LANDING_SECTIONS } from '../../services/landingPageService';
 import { balavinodhiniService } from '../../services/balavinodhiniService';
+import { adminService } from '../../services/adminService';
 import { storageService } from '../../services/storageService';
 import { EditorialHeroBanner } from '../home/EditorialHeroBanner';
 import { HeroContentPickerModal, ContentPickerItem } from './HeroContentPickerModal';
@@ -59,6 +61,7 @@ interface AdminLandingPageManagerProps {
   currentUser: User | null;
   stories: Story[];
   novels: Novel[];
+  episodes?: Episode[];
   jokes: Joke[];
   knowledge: KnowledgeArticle[];
   onNavigateTab?: (tab: string) => void;
@@ -68,6 +71,7 @@ export const AdminLandingPageManager: React.FC<AdminLandingPageManagerProps> = (
   currentUser,
   stories,
   novels,
+  episodes = [],
   jokes,
   knowledge,
 }) => {
@@ -75,6 +79,7 @@ export const AdminLandingPageManager: React.FC<AdminLandingPageManagerProps> = (
   const [heroConfig, setHeroConfig] = useState<HeroBannerConfig>(DEFAULT_HERO_CONFIG);
   const [sections, setSections] = useState<LandingPageSectionConfig[]>(DEFAULT_LANDING_SECTIONS);
   const [balavinodhiniItems, setBalavinodhiniItems] = useState<BalavinodhiniItem[]>([]);
+  const [internalEpisodes, setInternalEpisodes] = useState<Episode[]>([]);
   
   // Modal & Upload States
   const [activePickerSlideId, setActivePickerSlideId] = useState<string | null>(null);
@@ -105,12 +110,19 @@ export const AdminLandingPageManager: React.FC<AdminLandingPageManagerProps> = (
       setBalavinodhiniItems(items);
     });
 
+    // Load episodes if not provided via props
+    if (!episodes || episodes.length === 0) {
+      adminService.getEpisodes().then(setInternalEpisodes).catch(() => {});
+    }
+
     return () => {
       unsubHero();
       unsubLayout();
       unsubBala();
     };
-  }, []);
+  }, [episodes]);
+
+  const effectiveEpisodes = (episodes && episodes.length > 0) ? episodes : internalEpisodes;
 
   // Compute active slides and warning on slide count mismatch
   const currentSlideCount = heroConfig.maxSlidesCount || 3;
@@ -126,6 +138,17 @@ export const AdminLandingPageManager: React.FC<AdminLandingPageManagerProps> = (
     } else if (type === 'novel') {
       const n = novels.find(item => item.id === id);
       if (n) return { title: n.teluguTitle || n.title, author: n.author?.teluguName || n.author?.name || 'నవలా రచయిత', cover: n.coverImage, category: n.category };
+    } else if (type === 'episode') {
+      const ep = effectiveEpisodes.find(item => item.id === id);
+      if (ep) {
+        const parentNovel = novels.find(n => n.id === ep.novelId);
+        return {
+          title: ep.teluguTitle || ep.title,
+          author: ep.authorName || parentNovel?.author?.teluguName || parentNovel?.author?.name || 'రచయిత',
+          cover: parentNovel?.coverImage || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?w=800',
+          category: parentNovel ? `${parentNovel.teluguTitle || parentNovel.title} (ఎపిసోడ్ ${ep.episodeNumber})` : `ఎపిసోడ్ ${ep.episodeNumber}`,
+        };
+      }
     } else if (type === 'joke') {
       const j = jokes.find(item => item.id === id);
       if (j) return { title: j.content.slice(0, 35) + '...', author: j.author?.teluguName || j.author?.name || 'హాస్య ప్రియుడు', cover: 'https://images.unsplash.com/photo-1513151233558-d860c5398176?w=800', category: 'హాస్యం' };
@@ -314,20 +337,77 @@ export const AdminLandingPageManager: React.FC<AdminLandingPageManagerProps> = (
     }
   };
 
-  // Save Hero Banner config to Firestore
+  // Save Hero Banner config to Firestore with full validation
   const handleSaveHero = async () => {
     try {
       setSavingHero(true);
       setSaveSuccessMsg(null);
       setSaveErrorMsg(null);
 
-      await landingPageService.saveHeroConfig(heroConfig, currentUser?.id);
-      setSaveSuccessMsg('హెరో బ్యానర్ వివరాలు విజయవంతంగా క్లౌడ్‌లో భద్రపరచబడ్డాయి! (Hero Banner successfully saved!)');
+      // 1. Validation checks
+      const slidesList = heroConfig.slides || [];
+      if (slidesList.length === 0) {
+        throw new Error('కనీసం ఒక హీరో కార్డ్ ఉండాలి (At least one hero slide must be configured).');
+      }
+
+      // Check dates and schedules
+      for (let i = 0; i < slidesList.length; i++) {
+        const slide = slidesList[i];
+        if (slide.isScheduled) {
+          if (slide.startAt && slide.endAt) {
+            const startMs = new Date(slide.startAt).getTime();
+            const endMs = new Date(slide.endAt).getTime();
+            if (!isNaN(startMs) && !isNaN(endMs) && endMs <= startMs) {
+              throw new Error(`హీరో కార్డ్ ${i + 1}: ముగింపు సమయం ప్రారంభ సమయం తర్వాత ఉండాలి (End time must be after start time for Card ${i + 1}).`);
+            }
+          }
+        }
+      }
+
+      // Normalize slides to avoid undefined values and ensure clean sequential orders
+      const cleanSlides = slidesList.map((slide, idx) => ({
+        ...slide,
+        order: idx + 1,
+        enabled: slide.enabled !== false,
+        useContentDefaults: slide.useContentDefaults !== false,
+        badge: slide.badge || '',
+        headline: slide.headline || '',
+        highlightWord: slide.highlightWord || '',
+        subtitle: slide.subtitle || '',
+        primaryButtonText: slide.primaryButtonText || '',
+        primaryButtonAction: slide.primaryButtonAction || 'stories',
+        secondaryButtonText: slide.secondaryButtonText || '',
+        secondaryButtonAction: slide.secondaryButtonAction || '',
+        customImage: slide.customImage || '',
+        contentId: slide.contentId || '',
+        contentType: slide.contentType || 'story',
+        imageSource: slide.imageSource || 'content',
+        isScheduled: Boolean(slide.isScheduled),
+        startAt: slide.startAt || '',
+        endAt: slide.endAt || '',
+      }));
+
+      const cleanConfig: HeroBannerConfig = {
+        ...heroConfig,
+        slides: cleanSlides,
+        maxSlidesCount: Math.max(1, Math.min(12, heroConfig.maxSlidesCount || 3)),
+        badgeText: heroConfig.badgeText || 'తెలుగు డిజిటల్ సాహిత్య వేదిక',
+        mainHeading: heroConfig.mainHeading || 'ఈ రోజు ఒక కొత్త కథతో మొదలు పెట్టండి.',
+        highlightWord: heroConfig.highlightWord || 'కథతో',
+        subtitle: heroConfig.subtitle || 'తెలుగు కథలు, నవలలు, జోక్స్ — మీకు నచ్చిన ప్రపంచంలోకి అడుగు పెట్టండి.',
+        primaryButtonText: heroConfig.primaryButtonText || 'కథలు చదవండి',
+        primaryButtonAction: heroConfig.primaryButtonAction || 'stories',
+        secondaryButtonText: heroConfig.secondaryButtonText || 'మీ కథ రాయండి',
+      };
+
+      await landingPageService.saveHeroConfig(cleanConfig, currentUser?.id);
+      setHeroConfig(cleanConfig);
+      setSaveSuccessMsg('హెరో బ్యానర్ వివరాలు విజయవంతంగా క్లౌడ్‌లో భద్రపరచబడ్డాయి! (Hero Banner saved successfully.)');
       setTimeout(() => setSaveSuccessMsg(null), 5000);
     } catch (e: any) {
       console.error('Error saving hero banner:', e);
-      setSaveErrorMsg('హెరో బ్యానర్ భద్రపరచడంలో లోపం: ' + (e?.message || 'దయచేసి మళ్లీ ప్రయత్నించండి.'));
-      setTimeout(() => setSaveErrorMsg(null), 5000);
+      setSaveErrorMsg(e?.message || 'హెరో బ్యానర్ భద్రపరచడంలో లోపం: దయచేసి మళ్లీ ప్రయత్నించండి (Unable to save Hero Banner. Please check and try again).');
+      setTimeout(() => setSaveErrorMsg(null), 6000);
     } finally {
       setSavingHero(false);
     }
@@ -623,6 +703,46 @@ export const AdminLandingPageManager: React.FC<AdminLandingPageManagerProps> = (
                 </button>
               </div>
             </div>
+
+            {/* Expiration / Fallback Policy */}
+            <div className="p-5 rounded-2xl bg-[#FAF7F2] dark:bg-[#1C1B24] border border-[#E8E1DA] dark:border-[#26242E] space-y-3 mt-4">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-[#7A284B] dark:text-[#D87591]" />
+                <span className="text-xs font-bold text-[#17151A] dark:text-[#F7F3EE]">
+                  స్లైడ్ల గడువు ముగిసిన తర్వాత ఏమి జరగాలి? (What happens when configuration expires?):
+                </span>
+              </div>
+              <p className="text-[11px] text-[#6F6970] dark:text-[#AAA4AC]">
+                షెడ్యూల్ చేసిన స్లైడ్ల సమయం ముగిసినా లేదా కాన్ఫిగర్ చేసిన రచనలు లేకపోయినా హోమ్ పేజీలో ఏమి చూపించాలి?
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {[
+                  { id: 'fallback_recent', label: 'తాజా రచనలతో ఆటో భర్తీ (Auto Fallback)', desc: 'డేటాబేస్ నుండి తాజా ప్రచురణ కథలను ఆటోమేటిక్‌గా చూపిస్తుంది — ఎప్పటికీ ఖాళీగా కనిపించదు.' },
+                  { id: 'default_featured', label: 'డిఫాల్ట్ ఎడిటోరియల్ కార్డ్ (Default Featured)', desc: 'ప్రామాణిక కథావాహిని ఎడిటోరియల్ పరిచయ కార్డును చూపిస్తుంది.' },
+                  { id: 'hide_banner', label: 'హీరో బ్యానర్‌ను దాచండి (Hide Banner)', desc: 'షెడ్యూల్ ముగిసిన తర్వాత హోమ్ పేజీలో హీరో బ్యానర్ కనిపించదు.' },
+                ].map(opt => (
+                  <label
+                    key={opt.id}
+                    className={`p-3.5 rounded-xl border flex flex-col justify-between cursor-pointer transition-all ${
+                      (heroConfig.onExpiryAction || 'fallback_recent') === opt.id
+                        ? 'bg-[#7A284B]/10 border-[#7A284B] ring-2 ring-[#7A284B]/20'
+                        : 'bg-white dark:bg-[#15141D] border-[#E8E1DA] dark:border-[#26242E]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="radio"
+                        name="global-expiry-action"
+                        checked={(heroConfig.onExpiryAction || 'fallback_recent') === opt.id}
+                        onChange={() => setHeroConfig({ ...heroConfig, onExpiryAction: opt.id as any })}
+                      />
+                      <span className="text-xs font-bold text-[#17151A] dark:text-[#F7F3EE]">{opt.label}</span>
+                    </div>
+                    <span className="text-[10px] text-[#6F6970] dark:text-[#AAA4AC] mt-1.5">{opt.desc}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
           </div>
 
           {/* ----------------------------------------------------------------------- */}
@@ -763,6 +883,7 @@ export const AdminLandingPageManager: React.FC<AdminLandingPageManagerProps> = (
                           {[
                             { id: 'story', label: 'కథ (Story)', icon: BookOpen },
                             { id: 'novel', label: 'నవల (Novel)', icon: Layers },
+                            { id: 'episode', label: 'ఎపిసోడ్ (Episode)', icon: BookOpen },
                             { id: 'joke', label: 'హాస్యం (Joke)', icon: Smile },
                             { id: 'knowledge', label: 'విజ్ఞానం (Knowledge)', icon: Star },
                             { id: 'balavinodhini', label: 'బాలవినోదిని (Kids)', icon: Sparkles },
@@ -1123,25 +1244,54 @@ export const AdminLandingPageManager: React.FC<AdminLandingPageManagerProps> = (
                         </div>
 
                         {slide.isScheduled && (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 animate-fadeIn">
-                            <div className="space-y-1">
-                              <span className="text-[11px] font-bold text-[#6F6970] dark:text-[#AAA4AC]">ప్రారంభ సమయం (Start Date/Time):</span>
-                              <input
-                                type="datetime-local"
-                                value={slide.startAt || ''}
-                                onChange={(e) => handleUpdateSlide(slide.id, { startAt: e.target.value })}
-                                className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#100F15] border border-[#E8E1DA] dark:border-[#26242E] text-xs text-[#17151A] dark:text-white focus:ring-2 focus:ring-[#7A284B]"
-                              />
+                          <div className="space-y-3 pt-2 animate-fadeIn">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div className="space-y-1">
+                                <span className="text-[11px] font-bold text-[#6F6970] dark:text-[#AAA4AC]">ప్రారంభ సమయం (Start Date/Time):</span>
+                                <input
+                                  type="datetime-local"
+                                  value={slide.startAt || ''}
+                                  onChange={(e) => handleUpdateSlide(slide.id, { startAt: e.target.value })}
+                                  className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#100F15] border border-[#E8E1DA] dark:border-[#26242E] text-xs text-[#17151A] dark:text-white focus:ring-2 focus:ring-[#7A284B]"
+                                />
+                              </div>
+
+                              <div className="space-y-1">
+                                <span className="text-[11px] font-bold text-[#6F6970] dark:text-[#AAA4AC]">ముగింపు సమయం (End Date/Time):</span>
+                                <input
+                                  type="datetime-local"
+                                  value={slide.endAt || ''}
+                                  onChange={(e) => handleUpdateSlide(slide.id, { endAt: e.target.value })}
+                                  className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#100F15] border border-[#E8E1DA] dark:border-[#26242E] text-xs text-[#17151A] dark:text-white focus:ring-2 focus:ring-[#7A284B]"
+                                />
+                              </div>
                             </div>
 
-                            <div className="space-y-1">
-                              <span className="text-[11px] font-bold text-[#6F6970] dark:text-[#AAA4AC]">ముగింపు సమయం (End Date/Time):</span>
-                              <input
-                                type="datetime-local"
-                                value={slide.endAt || ''}
-                                onChange={(e) => handleUpdateSlide(slide.id, { endAt: e.target.value })}
-                                className="w-full px-3 py-2 rounded-xl bg-white dark:bg-[#100F15] border border-[#E8E1DA] dark:border-[#26242E] text-xs text-[#17151A] dark:text-white focus:ring-2 focus:ring-[#7A284B]"
-                              />
+                            {/* Per-card expiry behavior */}
+                            <div className="p-3 rounded-xl bg-white dark:bg-[#1F1E2A] border border-[#E8E1DA] dark:border-[#26242E] space-y-1.5">
+                              <span className="text-[11px] font-bold text-[#17151A] dark:text-[#F7F3EE]">
+                                ఈ కార్డు గడువు ముగిసిన తర్వాత (When this card expires):
+                              </span>
+                              <div className="flex flex-wrap items-center gap-4">
+                                <label className="flex items-center gap-2 text-xs text-[#17151A] dark:text-white cursor-pointer">
+                                  <input
+                                    type="radio"
+                                    name={`slide-expiry-${slide.id}`}
+                                    checked={(slide.onExpiryAction || 'fallback_recent') === 'fallback_recent'}
+                                    onChange={() => handleUpdateSlide(slide.id, { onExpiryAction: 'fallback_recent' })}
+                                  />
+                                  <span>తాజా రచనతో భర్తీ చేయండి (Fallback to latest content)</span>
+                                </label>
+                                <label className="flex items-center gap-2 text-xs text-[#17151A] dark:text-white cursor-pointer">
+                                  <input
+                                    type="radio"
+                                    name={`slide-expiry-${slide.id}`}
+                                    checked={slide.onExpiryAction === 'disable'}
+                                    onChange={() => handleUpdateSlide(slide.id, { onExpiryAction: 'disable' })}
+                                  />
+                                  <span>ఈ కార్డును మాత్రమే దాచండి (Hide this card only)</span>
+                                </label>
+                              </div>
                             </div>
                           </div>
                         )}
@@ -1552,6 +1702,7 @@ export const AdminLandingPageManager: React.FC<AdminLandingPageManagerProps> = (
         onSelect={handleContentSelected}
         stories={stories}
         novels={novels}
+        episodes={effectiveEpisodes}
         jokes={jokes}
         knowledge={knowledge}
         balavinodhiniItems={balavinodhiniItems}

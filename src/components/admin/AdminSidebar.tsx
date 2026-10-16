@@ -32,6 +32,7 @@ import {
   UserCheck
 } from 'lucide-react';
 import { User } from '../../types';
+import { BrandLogo } from '../common/BrandLogo';
 
 export type AdminTab = 
   | 'dashboard'
@@ -209,9 +210,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
         {/* Brand Header */}
         <div className="p-5 border-b border-[#26242E] flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-[#7A284B] flex items-center justify-center font-serif-telugu font-bold text-xl text-white shadow-lg shadow-[#7A284B]/30">
-              క
-            </div>
+            <BrandLogo size="md" />
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="font-bold text-sm tracking-wide text-white uppercase">KATHAVAHINI CMS</span>

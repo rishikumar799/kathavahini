@@ -1048,6 +1048,7 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
               currentUser={currentUser}
               stories={stories}
               novels={novels}
+              episodes={episodes}
               jokes={jokes}
               knowledge={knowledge}
               onNavigateTab={(t) => setActiveTab(t as AdminTab)}

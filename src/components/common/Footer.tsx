@@ -1,5 +1,6 @@
 import React from 'react';
 import { Heart, Feather, BookOpen, Sparkles, Shield, Mail } from 'lucide-react';
+import { BrandLogo } from './BrandLogo';
 
 interface FooterProps {
   onSelectTab: (tab: string) => void;
@@ -14,9 +15,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab, onOpenWrite }) => {
           {/* Col 1: Brand & Quote */}
           <div className="lg:col-span-2 space-y-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-[#7A284B] text-white flex items-center justify-center font-serif-telugu font-bold text-2xl shadow-md">
-                క
-              </div>
+              <BrandLogo size="md" />
               <div>
                 <h3 className="text-xl font-bold font-serif-telugu tracking-tight text-white">
                   కథావాహిని <span className="text-xs font-sans text-[#D87591] font-semibold uppercase">Kathavahini</span>

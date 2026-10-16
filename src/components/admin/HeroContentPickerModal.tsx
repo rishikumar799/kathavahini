@@ -17,6 +17,7 @@ import {
   PromotedContentType, 
   Story, 
   Novel, 
+  Episode,
   Joke, 
   KnowledgeArticle, 
   BalavinodhiniItem 
@@ -44,6 +45,7 @@ interface HeroContentPickerModalProps {
   onSelect: (item: ContentPickerItem) => void;
   stories: Story[];
   novels: Novel[];
+  episodes?: Episode[];
   jokes: Joke[];
   knowledge: KnowledgeArticle[];
   balavinodhiniItems?: BalavinodhiniItem[];
@@ -57,6 +59,7 @@ export const HeroContentPickerModal: React.FC<HeroContentPickerModalProps> = ({
   onSelect,
   stories,
   novels,
+  episodes = [],
   jokes,
   knowledge,
   balavinodhiniItems = [],
@@ -64,6 +67,19 @@ export const HeroContentPickerModal: React.FC<HeroContentPickerModalProps> = ({
   const [activeFilterType, setActiveFilterType] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+
+  // Pre-filter to card's content type when modal opens
+  React.useEffect(() => {
+    if (isOpen) {
+      if (selectedContentType && selectedContentType !== 'custom' && selectedContentType !== 'auto') {
+        setActiveFilterType(selectedContentType);
+      } else {
+        setActiveFilterType('all');
+      }
+      setSearchQuery('');
+      setSelectedCategory('all');
+    }
+  }, [isOpen, selectedContentType]);
 
   // Convert all domain content into normalized list
   const allContentItems = useMemo<ContentPickerItem[]>(() => {
@@ -103,7 +119,23 @@ export const HeroContentPickerModal: React.FC<HeroContentPickerModalProps> = ({
       });
     });
 
-    // 3. Jokes
+    // 3. Episodes
+    episodes.forEach(e => {
+      const parentNovel = novels.find(n => n.id === e.novelId);
+      list.push({
+        id: e.id,
+        contentType: 'episode',
+        title: e.title,
+        teluguTitle: e.teluguTitle || e.title,
+        authorName: e.authorName || parentNovel?.author?.teluguName || parentNovel?.author?.name || 'రచయిత',
+        category: parentNovel ? `${parentNovel.teluguTitle || parentNovel.title} (ఎపిసోడ్ ${e.episodeNumber})` : `ఎపిసోడ్ ${e.episodeNumber}`,
+        coverImage: parentNovel?.coverImage || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=80&w=800',
+        publishedAt: e.publishedAt,
+        status: e.status,
+      });
+    });
+
+    // 4. Jokes
     jokes.forEach(j => {
       list.push({
         id: j.id,
@@ -118,7 +150,7 @@ export const HeroContentPickerModal: React.FC<HeroContentPickerModalProps> = ({
       });
     });
 
-    // 4. Knowledge
+    // 5. Knowledge
     knowledge.forEach(k => {
       list.push({
         id: k.id,
@@ -132,7 +164,7 @@ export const HeroContentPickerModal: React.FC<HeroContentPickerModalProps> = ({
       });
     });
 
-    // 5. Balavinodhini
+    // 6. Balavinodhini
     balavinodhiniItems.forEach(b => {
       list.push({
         id: b.id,
@@ -148,7 +180,7 @@ export const HeroContentPickerModal: React.FC<HeroContentPickerModalProps> = ({
     });
 
     return list;
-  }, [stories, novels, jokes, knowledge, balavinodhiniItems]);
+  }, [stories, novels, episodes, jokes, knowledge, balavinodhiniItems]);
 
   // Extract categories for filter
   const availableCategories = useMemo(() => {
@@ -252,6 +284,7 @@ export const HeroContentPickerModal: React.FC<HeroContentPickerModalProps> = ({
                 { id: 'all', label: 'అన్నీ (All)', count: allContentItems.length },
                 { id: 'story', label: 'కథలు', count: stories.length },
                 { id: 'novel', label: 'నవలలు', count: novels.length },
+                { id: 'episode', label: 'ఎపిసోడ్లు', count: episodes.length },
                 { id: 'joke', label: 'జోక్స్', count: jokes.length },
                 { id: 'knowledge', label: 'విజ్ఞానం', count: knowledge.length },
                 { id: 'balavinodhini', label: 'బాలవినోదిని', count: balavinodhiniItems.length },

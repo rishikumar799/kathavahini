@@ -92,6 +92,16 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
   const latestRead = readingHistory[0];
 
+  const allHeroStories = React.useMemo(() => {
+    const map = new Map<string, Story>();
+    [...trendingStories, ...popularStories, ...newReleases].forEach(s => {
+      if (s && s.id && !map.has(s.id)) {
+        map.set(s.id, s);
+      }
+    });
+    return Array.from(map.values());
+  }, [trendingStories, popularStories, newReleases]);
+
   // Render specific section by ID
   const renderSection = (sectionId: LandingPageSectionId) => {
     switch (sectionId) {
@@ -100,7 +110,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           <EditorialHeroBanner
             key="section-hero"
             config={heroConfig}
-            stories={trendingStories.length > 0 ? trendingStories : popularStories}
+            stories={allHeroStories.length > 0 ? allHeroStories : (trendingStories.length > 0 ? trendingStories : popularStories)}
             novels={featuredNovels}
             jokes={jokes}
             knowledge={knowledge}

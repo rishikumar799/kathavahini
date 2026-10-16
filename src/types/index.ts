@@ -741,6 +741,7 @@ export interface HeroSlideConfig {
   isScheduled: boolean;
   startAt?: string; // ISO date string (YYYY-MM-DDTHH:mm)
   endAt?: string; // ISO date string (YYYY-MM-DDTHH:mm)
+  onExpiryAction?: 'fallback_recent' | 'disable';
   
   createdAt?: any;
   updatedAt?: any;
@@ -804,6 +805,9 @@ export interface HeroBannerConfig {
   showIndicators: boolean;
   pauseOnHover: boolean;
   enableSwipe?: boolean;
+
+  // Expiration / Fallback Policy
+  onExpiryAction?: 'fallback_recent' | 'hide_banner' | 'default_featured';
 
   // Backward compatibility fields
   promotedMode?: 'manual' | 'automatic' | 'hybrid';

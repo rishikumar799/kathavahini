@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { User } from '../../types';
 import { AdminTab } from './AdminSidebar';
+import { BrandLogo } from '../common/BrandLogo';
 
 interface AdminHeaderProps {
   currentTab: AdminTab;
@@ -117,9 +118,7 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
 
         {/* Super Admin Profile Pill */}
         <div className="flex items-center gap-2 pl-2 border-l border-[#E8E1DA] dark:border-[#26242E]">
-          <div className="w-8 h-8 rounded-full bg-[#7A284B] text-white flex items-center justify-center font-bold text-xs shadow-sm">
-            {currentUser?.displayName ? currentUser.displayName.charAt(0) : 'A'}
-          </div>
+          <BrandLogo size="sm" className="w-8 h-8 rounded-full" />
           <div className="hidden md:block text-left">
             <div className="flex items-center gap-1">
               <span className="text-xs font-bold text-[#17151A] dark:text-[#F7F3EE] leading-tight">

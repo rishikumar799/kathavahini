@@ -10,6 +10,7 @@ import {
   LandingPageSectionConfig,
   Story, 
   Novel, 
+  Episode,
   Joke, 
   KnowledgeArticle,
   BalavinodhiniItem
@@ -28,6 +29,7 @@ export const DEFAULT_HERO_CONFIG: HeroBannerConfig = {
   id: 'hero_main',
   enabled: true,
   maxSlidesCount: 3,
+  onExpiryAction: 'fallback_recent',
   slides: [
     {
       id: 'slide-default-1',
@@ -382,7 +384,8 @@ class LandingPageService {
     novels: Novel[],
     jokes: Joke[],
     knowledge: KnowledgeArticle[],
-    balavinodhiniItems: BalavinodhiniItem[] = []
+    balavinodhiniItems: BalavinodhiniItem[] = [],
+    episodes: Episode[] = []
   ): HeroBannerSlide[] {
     const slides: HeroBannerSlide[] = [];
     const maxCount = Math.max(1, Math.min(12, config.maxSlidesCount || 3));
@@ -393,15 +396,42 @@ class LandingPageService {
       .sort((a, b) => (a.order || 0) - (b.order || 0));
 
     for (const slideConfig of configuredSlides) {
-      const slide = this.buildSlideFromConfig(slideConfig, stories, novels, jokes, knowledge, balavinodhiniItems);
+      const slide = this.buildSlideFromConfig(slideConfig, stories, novels, jokes, knowledge, balavinodhiniItems, episodes);
       if (slide) {
         slides.push(slide);
         if (slides.length >= maxCount) break;
       }
     }
 
+    // Expiration & Fallback Policy
+    const expiryPolicy = config.onExpiryAction || 'fallback_recent';
+
+    // If all configured slides are expired/inactive and admin chose to hide banner:
+    if (slides.length === 0 && (config.slides || []).length > 0 && expiryPolicy === 'hide_banner') {
+      return [];
+    }
+
+    // If admin configured default editorial featured card on expiry:
+    if (slides.length === 0 && (config.slides || []).length > 0 && expiryPolicy === 'default_featured') {
+      return [{
+        id: 'hero-editorial-default',
+        badge: config.badgeText || 'ఈ వారపు ప్రత్యేక కథ',
+        title: config.mainHeading || 'ఈ రోజు ఒక కొత్త కథతో మొదలు పెట్టండి.',
+        teluguTitle: config.mainHeading || 'ఈ రోజు ఒక కొత్త కథతో మొదలు పెట్టండి.',
+        authorName: 'కథావాహిని సంపాదకవర్గం',
+        coverImage: 'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&q=80&w=800',
+        contentType: 'story',
+        headline: config.mainHeading || 'ఈ రోజు ఒక కొత్త కథతో మొదలు పెట్టండి.',
+        highlightWord: config.highlightWord || 'కథతో',
+        subtitle: config.subtitle || 'తెలుగు కథలు, నవలలు, జోక్స్ — మీకు నచ్చిన ప్రపంచంలోకి అడుగు పెట్టండి.',
+        primaryButtonText: config.primaryButtonText || 'కథలు చదవండి',
+        primaryButtonAction: config.primaryButtonAction || 'stories',
+        secondaryButtonText: config.secondaryButtonText || 'మీ కథ రాయండి',
+      }];
+    }
+
     // 2. Fallback Engine: If not enough valid slides resolved, supplement with real published items
-    if (slides.length < maxCount) {
+    if (slides.length < maxCount && expiryPolicy === 'fallback_recent') {
       const validStories = stories.filter(s => this.isContentValidAndPublished(s));
       const validNovels = novels.filter(n => this.isContentValidAndPublished(n));
       const validJokes = jokes.filter(j => this.isContentValidAndPublished(j));
@@ -572,7 +602,8 @@ class LandingPageService {
     novels: Novel[],
     jokes: Joke[],
     knowledge: KnowledgeArticle[],
-    balavinodhiniItems: BalavinodhiniItem[] = []
+    balavinodhiniItems: BalavinodhiniItem[] = [],
+    episodes: Episode[] = []
   ): HeroBannerSlide | null {
     const contentType = slideConfig.contentType;
 
@@ -605,19 +636,30 @@ class LandingPageService {
         : stories.find(s => this.isContentValidAndPublished(s));
 
       if (item && this.isContentValidAndPublished(item)) {
+        const useCustomText = slideConfig.useContentDefaults === false;
+        const effectiveHeadline = useCustomText && slideConfig.headline?.trim()
+          ? slideConfig.headline
+          : (item.teluguTitle || item.title);
+        const effectiveSubtitle = useCustomText && slideConfig.subtitle?.trim()
+          ? slideConfig.subtitle
+          : (item.teluguExcerpt || item.excerpt || 'తెలుగు కథా సాహిత్యం');
+        const effectiveCover = (slideConfig.imageSource === 'custom_upload' || slideConfig.imageSource === 'custom_url') && slideConfig.customImage
+          ? slideConfig.customImage
+          : (item.coverImage || 'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&q=80&w=800');
+
         return {
           id: slideConfig.id,
           badge: slideConfig.badge || 'ఈ వారపు ప్రత్యేక కథ',
-          title: (!slideConfig.useContentDefaults && slideConfig.headline) ? slideConfig.headline : (item.teluguTitle || item.title),
-          teluguTitle: (!slideConfig.useContentDefaults && slideConfig.headline) ? slideConfig.headline : (item.teluguTitle || item.title),
+          title: effectiveHeadline,
+          teluguTitle: effectiveHeadline,
           authorName: item.author?.teluguName || item.author?.name || 'రచయిత',
-          coverImage: slideConfig.customImage || item.coverImage || 'https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&q=80&w=800',
+          coverImage: effectiveCover,
           contentType: 'story',
           targetId: item.id,
-          description: (!slideConfig.useContentDefaults && slideConfig.subtitle) ? slideConfig.subtitle : (item.teluguExcerpt || item.excerpt),
-          headline: slideConfig.headline || item.teluguTitle || item.title,
-          highlightWord: slideConfig.highlightWord,
-          subtitle: slideConfig.subtitle || item.teluguExcerpt || item.excerpt,
+          description: effectiveSubtitle,
+          headline: effectiveHeadline,
+          highlightWord: slideConfig.highlightWord || 'కథతో',
+          subtitle: effectiveSubtitle,
           primaryButtonText: slideConfig.primaryButtonText || 'కథ చదవండి',
           primaryButtonAction: slideConfig.primaryButtonAction || 'stories',
           secondaryButtonText: slideConfig.secondaryButtonText || 'మీ కథ రాయండి',
@@ -633,22 +675,73 @@ class LandingPageService {
         : novels.find(n => this.isContentValidAndPublished(n));
 
       if (item && this.isContentValidAndPublished(item)) {
+        const useCustomText = slideConfig.useContentDefaults === false;
+        const effectiveHeadline = useCustomText && slideConfig.headline?.trim()
+          ? slideConfig.headline
+          : (item.teluguTitle || item.title);
+        const effectiveSubtitle = useCustomText && slideConfig.subtitle?.trim()
+          ? slideConfig.subtitle
+          : (item.teluguDescription || item.description || 'ధారావాహిక నవల');
+        const effectiveCover = (slideConfig.imageSource === 'custom_upload' || slideConfig.imageSource === 'custom_url') && slideConfig.customImage
+          ? slideConfig.customImage
+          : (item.coverImage || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=80&w=800');
+
         return {
           id: slideConfig.id,
           badge: slideConfig.badge || 'ప్రత్యేక నవల',
-          title: (!slideConfig.useContentDefaults && slideConfig.headline) ? slideConfig.headline : (item.teluguTitle || item.title),
-          teluguTitle: (!slideConfig.useContentDefaults && slideConfig.headline) ? slideConfig.headline : (item.teluguTitle || item.title),
+          title: effectiveHeadline,
+          teluguTitle: effectiveHeadline,
           authorName: item.author?.teluguName || item.author?.name || 'నవలా రచయిత',
-          coverImage: slideConfig.customImage || item.coverImage || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=80&w=800',
+          coverImage: effectiveCover,
           contentType: 'novel',
           targetId: item.id,
-          description: (!slideConfig.useContentDefaults && slideConfig.subtitle) ? slideConfig.subtitle : (item.teluguDescription || item.description),
-          headline: slideConfig.headline || item.teluguTitle || item.title,
-          highlightWord: slideConfig.highlightWord,
-          subtitle: slideConfig.subtitle || item.teluguDescription || item.description,
+          description: effectiveSubtitle,
+          headline: effectiveHeadline,
+          highlightWord: slideConfig.highlightWord || 'నవలలు',
+          subtitle: effectiveSubtitle,
           primaryButtonText: slideConfig.primaryButtonText || 'నవల చదవండి',
           primaryButtonAction: slideConfig.primaryButtonAction || 'novels',
           secondaryButtonText: slideConfig.secondaryButtonText || 'రచన ప్రారంభించండి',
+          secondaryButtonAction: slideConfig.secondaryButtonAction,
+        };
+      }
+    }
+
+    // Episode reference
+    if (contentType === 'episode') {
+      const item = slideConfig.contentId
+        ? episodes.find(e => e.id === slideConfig.contentId)
+        : episodes.find(e => this.isContentValidAndPublished(e));
+
+      if (item && this.isContentValidAndPublished(item)) {
+        const parentNovel = novels.find(n => n.id === item.novelId);
+        const useCustomText = slideConfig.useContentDefaults === false;
+        const effectiveHeadline = useCustomText && slideConfig.headline?.trim()
+          ? slideConfig.headline
+          : (item.teluguTitle || item.title);
+        const effectiveSubtitle = useCustomText && slideConfig.subtitle?.trim()
+          ? slideConfig.subtitle
+          : (parentNovel ? `${parentNovel.teluguTitle || parentNovel.title} — ఎపిసోడ్ ${item.episodeNumber}` : `ఎపిసోడ్ ${item.episodeNumber}`);
+        const effectiveCover = (slideConfig.imageSource === 'custom_upload' || slideConfig.imageSource === 'custom_url') && slideConfig.customImage
+          ? slideConfig.customImage
+          : (parentNovel?.coverImage || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=80&w=800');
+
+        return {
+          id: slideConfig.id,
+          badge: slideConfig.badge || `ఎపిసోడ్ ${item.episodeNumber}`,
+          title: effectiveHeadline,
+          teluguTitle: effectiveHeadline,
+          authorName: item.authorName || parentNovel?.author?.teluguName || parentNovel?.author?.name || 'నవలా రచయిత',
+          coverImage: effectiveCover,
+          contentType: 'episode',
+          targetId: item.id,
+          description: effectiveSubtitle,
+          headline: effectiveHeadline,
+          highlightWord: slideConfig.highlightWord || 'ఎపిసోడ్',
+          subtitle: effectiveSubtitle,
+          primaryButtonText: slideConfig.primaryButtonText || 'ఎపిసోడ్ చదవండి',
+          primaryButtonAction: slideConfig.primaryButtonAction || 'novels',
+          secondaryButtonText: slideConfig.secondaryButtonText || 'నవల చూడండి',
           secondaryButtonAction: slideConfig.secondaryButtonAction,
         };
       }
@@ -661,19 +754,30 @@ class LandingPageService {
         : jokes.find(j => this.isContentValidAndPublished(j));
 
       if (item && this.isContentValidAndPublished(item)) {
+        const useCustomText = slideConfig.useContentDefaults === false;
+        const effectiveHeadline = useCustomText && slideConfig.headline?.trim()
+          ? slideConfig.headline
+          : 'క్షణాల్లో నవ్వులు పూయించే హాస్య తునకలు';
+        const effectiveSubtitle = useCustomText && slideConfig.subtitle?.trim()
+          ? slideConfig.subtitle
+          : (item.content?.slice(0, 120) || 'సరదా హాస్యం');
+        const effectiveCover = (slideConfig.imageSource === 'custom_upload' || slideConfig.imageSource === 'custom_url') && slideConfig.customImage
+          ? slideConfig.customImage
+          : 'https://images.unsplash.com/photo-1513151233558-d860c5398176?auto=format&fit=crop&q=80&w=800';
+
         return {
           id: slideConfig.id,
           badge: slideConfig.badge || 'నేటి హాస్య తునక',
-          title: (!slideConfig.useContentDefaults && slideConfig.headline) ? slideConfig.headline : 'నవ్వుల పువ్వులు',
-          teluguTitle: (!slideConfig.useContentDefaults && slideConfig.headline) ? slideConfig.headline : 'నవ్వుల పువ్వులు',
+          title: effectiveHeadline,
+          teluguTitle: effectiveHeadline,
           authorName: item.author?.teluguName || item.author?.name || 'హాస్య ప్రియుడు',
-          coverImage: slideConfig.customImage || 'https://images.unsplash.com/photo-1513151233558-d860c5398176?auto=format&fit=crop&q=80&w=800',
+          coverImage: effectiveCover,
           contentType: 'joke',
           targetId: item.id,
           description: item.content,
-          headline: slideConfig.headline || 'క్షణాల్లో నవ్వులు పూయించే హాస్య తునకలు',
-          highlightWord: slideConfig.highlightWord,
-          subtitle: slideConfig.subtitle || item.content?.slice(0, 120),
+          headline: effectiveHeadline,
+          highlightWord: slideConfig.highlightWord || 'నవ్వులు',
+          subtitle: effectiveSubtitle,
           primaryButtonText: slideConfig.primaryButtonText || 'జోక్స్ చూడండి',
           primaryButtonAction: slideConfig.primaryButtonAction || 'jokes',
           secondaryButtonText: slideConfig.secondaryButtonText || 'మీ జోక్ రాయండి',
@@ -689,19 +793,30 @@ class LandingPageService {
         : knowledge.find(k => this.isContentValidAndPublished(k));
 
       if (item && this.isContentValidAndPublished(item)) {
+        const useCustomText = slideConfig.useContentDefaults === false;
+        const effectiveHeadline = useCustomText && slideConfig.headline?.trim()
+          ? slideConfig.headline
+          : (item.teluguTitle || item.title);
+        const effectiveSubtitle = useCustomText && slideConfig.subtitle?.trim()
+          ? slideConfig.subtitle
+          : (item.summary || 'సాహిత్య విజ్ఞాన విశేషాలు');
+        const effectiveCover = (slideConfig.imageSource === 'custom_upload' || slideConfig.imageSource === 'custom_url') && slideConfig.customImage
+          ? slideConfig.customImage
+          : (item.coverImage || 'https://images.unsplash.com/photo-1455390582262-044cdead277a?w=800');
+
         return {
           id: slideConfig.id,
           badge: slideConfig.badge || 'సాహిత్య విజ్ఞానం',
-          title: (!slideConfig.useContentDefaults && slideConfig.headline) ? slideConfig.headline : (item.teluguTitle || item.title),
-          teluguTitle: (!slideConfig.useContentDefaults && slideConfig.headline) ? slideConfig.headline : (item.teluguTitle || item.title),
+          title: effectiveHeadline,
+          teluguTitle: effectiveHeadline,
           authorName: item.authorName || 'కథావాహిని సంపాదకవర్గం',
-          coverImage: slideConfig.customImage || item.coverImage || 'https://images.unsplash.com/photo-1455390582262-044cdead277a?w=800',
+          coverImage: effectiveCover,
           contentType: 'knowledge',
           targetId: item.id,
-          description: (!slideConfig.useContentDefaults && slideConfig.subtitle) ? slideConfig.subtitle : item.summary,
-          headline: slideConfig.headline || item.teluguTitle || item.title,
-          highlightWord: slideConfig.highlightWord,
-          subtitle: slideConfig.subtitle || item.summary,
+          description: effectiveSubtitle,
+          headline: effectiveHeadline,
+          highlightWord: slideConfig.highlightWord || 'విజ్ఞానం',
+          subtitle: effectiveSubtitle,
           primaryButtonText: slideConfig.primaryButtonText || 'పూర్తి వివరాలు',
           primaryButtonAction: slideConfig.primaryButtonAction || 'knowledge',
           secondaryButtonText: slideConfig.secondaryButtonText || 'మరిన్ని చూడండి',
@@ -717,19 +832,30 @@ class LandingPageService {
         : balavinodhiniItems.find(b => this.isContentValidAndPublished(b));
 
       if (item && this.isContentValidAndPublished(item)) {
+        const useCustomText = slideConfig.useContentDefaults === false;
+        const effectiveHeadline = useCustomText && slideConfig.headline?.trim()
+          ? slideConfig.headline
+          : (item.teluguTitle || item.title);
+        const effectiveSubtitle = useCustomText && slideConfig.subtitle?.trim()
+          ? slideConfig.subtitle
+          : (item.description || item.content?.slice(0, 120) || 'బాలల కథా ప్రపంచం');
+        const effectiveCover = (slideConfig.imageSource === 'custom_upload' || slideConfig.imageSource === 'custom_url') && slideConfig.customImage
+          ? slideConfig.customImage
+          : (item.coverImage || 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&q=80&w=800');
+
         return {
           id: slideConfig.id,
           badge: slideConfig.badge || 'బాలవినోదిని ప్రత్యేకం',
-          title: (!slideConfig.useContentDefaults && slideConfig.headline) ? slideConfig.headline : (item.teluguTitle || item.title),
-          teluguTitle: (!slideConfig.useContentDefaults && slideConfig.headline) ? slideConfig.headline : (item.teluguTitle || item.title),
+          title: effectiveHeadline,
+          teluguTitle: effectiveHeadline,
           authorName: item.authorName || 'బాల రచయిత',
-          coverImage: slideConfig.customImage || item.coverImage || 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&q=80&w=800',
+          coverImage: effectiveCover,
           contentType: 'balavinodhini',
           targetId: item.id,
-          description: (!slideConfig.useContentDefaults && slideConfig.subtitle) ? slideConfig.subtitle : item.content?.slice(0, 100),
-          headline: slideConfig.headline || item.teluguTitle || item.title,
-          highlightWord: slideConfig.highlightWord,
-          subtitle: slideConfig.subtitle || item.description || item.content?.slice(0, 120),
+          description: effectiveSubtitle,
+          headline: effectiveHeadline,
+          highlightWord: slideConfig.highlightWord || 'బాలలు',
+          subtitle: effectiveSubtitle,
           primaryButtonText: slideConfig.primaryButtonText || 'బాలవినోదిని చూడండి',
           primaryButtonAction: slideConfig.primaryButtonAction || 'balavinodhini',
           secondaryButtonText: slideConfig.secondaryButtonText || 'పిల్లల కథలు',

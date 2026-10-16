@@ -6,6 +6,7 @@ import {
 import { User, NotificationItem } from '../../types';
 import { NotificationDrawer } from '../modals/NotificationDrawer';
 import { authService } from '../../services/authService';
+import { BrandLogo } from './BrandLogo';
 
 interface NavbarProps {
   currentTab: string;
@@ -82,9 +83,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           onClick={() => handleNavClick('home')}
           className="flex items-center gap-3 cursor-pointer group shrink-0"
         >
-          <div className="w-10 h-10 rounded-2xl bg-[#7A284B] dark:bg-[#D87591] text-white flex items-center justify-center font-serif-telugu font-bold text-2xl shadow-md group-hover:scale-105 transition-transform">
-            క
-          </div>
+          <BrandLogo size="md" className="group-hover:scale-105" />
           <div className="hidden sm:block">
             <h1 className="text-xl font-bold font-serif-telugu tracking-tight text-[#17151A] dark:text-[#F7F3EE] flex items-center gap-1">
               కథావాహిని <span className="text-xs font-sans text-[#7A284B] dark:text-[#D87591] font-semibold uppercase tracking-wider">Kathavahini</span>

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { authService, MASTER_ADMIN_EMAIL, MASTER_ADMIN_PASSWORD } from '../../services/authService';
 import { StoryCategory } from '../../types';
+import { BrandLogo } from '../common/BrandLogo';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -306,9 +307,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         {/* Modal Header */}
         <div className="text-center mb-6">
-          <div className="w-12 h-12 rounded-2xl bg-[#7A284B] text-white flex items-center justify-center mx-auto mb-3 shadow-md">
-            <span className="font-serif-telugu font-bold text-2xl">క</span>
-          </div>
+          <BrandLogo size="lg" className="mx-auto mb-3" />
           
           <h2 className="text-xl font-bold font-serif-telugu text-[#17151A] dark:text-[#F7F3EE]">
             {mode === 'login' 

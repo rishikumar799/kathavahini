@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { User } from '../../types';
 import { authService } from '../../services/authService';
+import { BrandLogo } from './BrandLogo';
 
 interface MobileHeaderProps {
   user: User | null;
@@ -54,9 +55,7 @@ export const MobileHeader: React.FC<MobileHeaderProps> = ({
             onClick={() => handleNav('home')}
             className="flex items-center gap-2 cursor-pointer"
           >
-            <div className="w-8 h-8 rounded-xl bg-[#7A284B] dark:bg-[#D87591] text-white flex items-center justify-center font-serif-telugu font-bold text-xl shadow-sm">
-              క
-            </div>
+            <BrandLogo size="sm" />
             <span className="font-serif-telugu font-bold text-lg text-[#17151A] dark:text-[#F7F3EE]">
               కథావాహిని
             </span>

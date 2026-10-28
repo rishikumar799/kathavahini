@@ -21,11 +21,14 @@ import {
   UploadCloud,
   Link as LinkIcon,
   Image as ImageIcon,
-  RotateCcw
+  RotateCcw,
+  Share2
 } from 'lucide-react';
 import { User, ReadingTheme } from '../types';
 import { authService } from '../services/authService';
 import { storageService } from '../services/storageService';
+import { shareContent } from '../utils/shareUtils';
+import { resolveAvatarUrl } from '../utils/avatarUtils';
 
 const PRESET_AVATARS = [
   { id: 'writer-1', name: 'తెలుగు పండితుడు', url: 'https://api.dicebear.com/7.x/bottts/svg?seed=telugu-scholar' },
@@ -72,6 +75,26 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   const [lastSelectedAvatarFile, setLastSelectedAvatarFile] = useState<File | null>(null);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileMsg, setProfileMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+
+  const handleShareProfile = async () => {
+    if (!user) return;
+    try {
+      const result = await shareContent({
+        contentType: 'profile',
+        id: user.id,
+        title: `${user.teluguName || user.name} - కథావాహిని ప్రొఫైల్`,
+        text: user.teluguBio || user.bio || `${user.teluguName || user.name} గారి ప్రొఫైల్ కథావాహినిలో చూడండి`,
+        coverImage: user.avatar || user.photoURL,
+      });
+      if (result.success) {
+        setShareFeedback(result.method === 'clipboard' ? 'ప్రొఫైల్ లింక్ కాపీ చేయబడింది!' : 'ప్రొఫైల్ షేర్ చేయబడింది!');
+        setTimeout(() => setShareFeedback(null), 3000);
+      }
+    } catch (e) {
+      console.warn('Share error:', e);
+    }
+  };
 
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const cancelAvatarUploadRef = useRef<(() => void) | null>(null);
@@ -281,7 +304,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         <div className="flex flex-col sm:flex-row items-center gap-5 text-center sm:text-left">
           <div className="relative group shrink-0">
             <img
-              src={user.avatar || user.photoURL}
+              src={resolveAvatarUrl(user.avatar || user.photoURL, user.teluguName || user.name)}
               alt={user.name}
               className="w-20 h-20 rounded-full object-cover ring-4 ring-[#7A284B] shadow-md"
             />
@@ -362,7 +385,22 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         </div>
 
         {/* Quick Action Buttons according to Role */}
-        <div className="flex flex-col gap-2 w-full sm:w-auto">
+        <div className="flex flex-col gap-2 w-full sm:w-auto relative">
+          {/* Universal Share Profile Button */}
+          <button
+            onClick={handleShareProfile}
+            className="px-5 py-2.5 rounded-full bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE] text-xs font-bold hover:border-[#7A284B] dark:hover:border-[#D87591] transition-all cursor-pointer inline-flex items-center justify-center gap-1.5 shadow-sm"
+          >
+            <Share2 className="w-3.5 h-3.5 text-[#7A284B] dark:text-[#D87591]" />
+            <span>ప్రొఫైల్ షేర్ చేయండి (Share Profile)</span>
+          </button>
+
+          {shareFeedback && (
+            <div className="absolute -top-9 right-0 px-3.5 py-1 rounded-full bg-emerald-600 text-white text-[11px] font-bold shadow-lg animate-fade-in whitespace-nowrap">
+              ✓ {shareFeedback}
+            </div>
+          )}
+
           {isAdmin && (
             <button
               onClick={() => onSelectTab('admin')}

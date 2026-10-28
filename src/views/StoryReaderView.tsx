@@ -26,17 +26,29 @@ import {
   Trash2,
   AlertTriangle
 } from 'lucide-react';
-import { Story, ReadingTheme, User, StoryImagePage } from '../types';
+import { Story, ReadingTheme, User, StoryImagePage, Novel, Episode, Chapter } from '../types';
 import { ReaderToolbar } from '../components/reader/ReaderToolbar';
 import { ReadingProgress } from '../components/reader/ReadingProgress';
 import { StarRating } from '../components/common/StarRating';
 import { storyService } from '../services/storyService';
 import { storageService } from '../services/storageService';
 import { storySubcollectionService } from '../services/storySubcollectionService';
+import { shareContent } from '../utils/shareUtils';
+import { resolveAvatarUrl } from '../utils/avatarUtils';
+import { resolveContentAuthor, getAuthorDisplayName } from '../utils/authorResolver';
+
+export interface NovelReadingContext {
+  novel: Novel;
+  episodes: (Episode | Chapter)[];
+  currentEpisodeIndex: number;
+  onSelectEpisodeIndex: (index: number) => void;
+  onReturnToNovel: () => void;
+}
 
 interface StoryReaderViewProps {
   story: Story;
   currentUser: User | null;
+  novelContext?: NovelReadingContext;
   onBack: () => void;
   onBookmarkToggle: (storyId: string) => void;
   onLikeToggle: (storyId: string) => void;
@@ -49,6 +61,7 @@ interface StoryReaderViewProps {
 export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
   story,
   currentUser,
+  novelContext,
   onBack,
   onBookmarkToggle,
   onLikeToggle,
@@ -75,12 +88,17 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
   const [showDocViewer, setShowDocViewer] = useState<boolean>(false);
   const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
   const [isUploadingNextPage, setIsUploadingNextPage] = useState<boolean>(false);
   const [uploadPageStatus, setUploadPageStatus] = useState<string | null>(null);
   const nextPageFileInputRef = useRef<HTMLInputElement>(null);
   const lastReportedProgressRef = useRef<number>(-1);
 
   const docUrl = story.sourceDocument?.storageUrl || (story as any).documentURL || (story as any).documentUrl;
+
+  const resolvedAuthor = resolveContentAuthor(story);
+  const authorName = getAuthorDisplayName(resolvedAuthor);
+  const authorAvatar = resolveAvatarUrl(resolvedAuthor.avatar, authorName);
 
   // Determine if viewer can manage/add images (Admin or Story Author/Writer)
   const isAdmin = currentUser?.role === 'admin' || currentUser?.email?.toLowerCase() === 'thekathavahini@gmail.com';
@@ -262,12 +280,21 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
     setCommentText('');
   };
 
-  const handleShare = () => {
-    if (navigator.share) {
-      navigator.share({
+  const handleShare = async () => {
+    try {
+      const result = await shareContent({
+        contentType: 'story',
+        id: story.id,
         title: story.teluguTitle,
         text: story.teluguExcerpt,
-      }).catch(() => {});
+        coverImage: story.coverImage,
+      });
+      if (result.success) {
+        setShareFeedback(result.method === 'clipboard' ? 'లింక్ కాపీ చేయబడింది!' : 'షేర్ విజయవంతమైంది!');
+        setTimeout(() => setShareFeedback(null), 3000);
+      }
+    } catch (e) {
+      console.warn('Share error in reader:', e);
     }
   };
 
@@ -313,7 +340,7 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
             {story.teluguTitle}
           </h2>
           <p className="text-[10px] opacity-70 font-sans truncate">
-            {story.author?.teluguName || story.authorName}
+            {authorName}
           </p>
         </div>
 
@@ -411,10 +438,15 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
           )}
 
           <div className="flex items-center justify-center gap-3 text-xs opacity-80 pt-2">
-            {story.author?.avatar && (
-              <img src={story.author.avatar} alt={story.author.teluguName} className="w-7 h-7 rounded-full object-cover" />
-            )}
-            <span className="font-bold">{story.author?.teluguName || story.authorName}</span>
+            <img 
+              src={authorAvatar} 
+              alt={authorName} 
+              className="w-7 h-7 rounded-full object-cover ring-1 ring-black/10 dark:ring-white/10" 
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = resolveAvatarUrl(null, authorName);
+              }}
+            />
+            <span className="font-bold">{authorName}</span>
             <span>•</span>
             <span>{story.readingTimeMinutes || 2} నిమిషాల చదువు</span>
           </div>
@@ -728,20 +760,86 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
           </article>
         )}
 
+        {/* Novel Episodes Navigation Banner */}
+        {novelContext && (
+          <div className="p-6 rounded-3xl bg-[#FAF7F2] dark:bg-[#18181F] border border-[#E8E1DA] dark:border-[#26242E] shadow-sm my-8 space-y-5 text-center">
+            <div className="flex items-center justify-between gap-3 text-xs text-[#6F6970] dark:text-[#A29CA6] border-b border-[#E8E1DA] dark:border-[#26242E] pb-3">
+              <span className="font-bold text-[#7A284B] dark:text-[#D87591] truncate">
+                నవల: {novelContext.novel.teluguTitle}
+              </span>
+              <span className="shrink-0 font-bold">
+                భాగం {novelContext.currentEpisodeIndex + 1} / {novelContext.episodes.length}
+              </span>
+            </div>
+
+            {/* Sequence Navigation Buttons */}
+            <div className="flex flex-wrap items-center justify-center gap-3">
+              <button
+                type="button"
+                disabled={novelContext.currentEpisodeIndex <= 0}
+                onClick={() => novelContext.onSelectEpisodeIndex(novelContext.currentEpisodeIndex - 1)}
+                className={`px-5 py-2.5 rounded-full text-xs font-bold inline-flex items-center gap-2 transition-all cursor-pointer ${
+                  novelContext.currentEpisodeIndex <= 0
+                    ? 'opacity-40 bg-black/5 dark:bg-white/5 cursor-not-allowed'
+                    : 'bg-white dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#26242E] text-[#17151A] dark:text-[#F7F3EE] hover:border-[#7A284B]'
+                }`}
+              >
+                <ChevronLeft className="w-4 h-4" />
+                <span>మునుపటి భాగం</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={novelContext.onReturnToNovel}
+                className="px-5 py-2.5 rounded-full bg-white dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#26242E] text-xs font-bold text-[#7A284B] dark:text-[#D87591] hover:underline cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span>నవల వివరాలకు వెళ్లండి</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={novelContext.currentEpisodeIndex >= novelContext.episodes.length - 1}
+                onClick={() => novelContext.onSelectEpisodeIndex(novelContext.currentEpisodeIndex + 1)}
+                className={`px-5 py-2.5 rounded-full text-xs font-bold inline-flex items-center gap-2 transition-all cursor-pointer ${
+                  novelContext.currentEpisodeIndex >= novelContext.episodes.length - 1
+                    ? 'opacity-40 bg-black/5 dark:bg-white/5 cursor-not-allowed'
+                    : 'bg-[#7A284B] text-white hover:bg-[#68223F] shadow-sm'
+                }`}
+              >
+                <span>తదుపరి భాగం</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* End of available episodes banner */}
+            {novelContext.currentEpisodeIndex >= novelContext.episodes.length - 1 && (
+              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs font-serif-telugu space-y-1">
+                <p className="font-bold text-sm">
+                  🎉 మీరు తాజా ఎపిసోడ్ వరకు చదివారు!
+                </p>
+                <p className="opacity-90">
+                  ఈ నవల ఇంకా కొనసాగుతోంది. రచయిత తదుపరి ఎపిసోడ్‌ను ప్రచురించిన వెంటనే ఇక్కడ కనిపిస్తుంది.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* End of Story Badge */}
         <div className="text-center py-12 my-8 border-t border-b border-black/10 dark:border-white/10 space-y-4">
           <CheckCircle className="w-10 h-10 mx-auto text-[#3E8065]" />
           <h3 className="text-xl font-bold font-serif-telugu">
-            కథ ముగిసింది.
+            {novelContext ? 'ఈ భాగం ముగిసింది.' : 'కథ ముగిసింది.'}
           </h3>
           <p className="text-xs opacity-70">
-            ఈ కథ మీకు నచ్చినట్లయితే లైక్ చేయండి లేదా రచయితకు అభిప్రాయం పంపండి.
+            {novelContext ? 'ఈ భాగం మీకు నచ్చినట్లయితే లైక్ చేయండి లేదా రచయితకు అభిప్రాయం పంపండి.' : 'ఈ కథ మీకు నచ్చినట్లయితే లైక్ చేయండి లేదా రచయితకు అభిప్రాయం పంపండి.'}
           </p>
 
           {/* Interactive Star Rating Section */}
           <div className="py-2 flex flex-col items-center gap-2">
             <p className="text-xs font-bold text-[#7A284B] dark:text-[#D87591]">
-              ఈ కథకు మీ రేటింగ్ ఇవ్వండి:
+              ఈ రచనకు మీ రేటింగ్ ఇవ్వండి:
             </p>
             <StarRating
               storyId={story.id}
@@ -753,7 +851,7 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
             />
           </div>
 
-          <div className="flex items-center justify-center gap-4 pt-2">
+          <div className="flex items-center justify-center gap-4 pt-2 relative">
             <button
               onClick={() => onLikeToggle(story.id)}
               className={`inline-flex items-center gap-2 px-6 py-2.5 rounded-full text-sm font-bold shadow-md transition-all cursor-pointer ${
@@ -766,13 +864,20 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
               <span>{story.isLiked ? 'లైక్ చేసారు' : 'లైక్ చేయండి'} ({story.likeCount})</span>
             </button>
 
-            <button
-              onClick={handleShare}
-              className="inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-black/10 dark:bg-white/10 hover:bg-black/20 text-sm font-bold transition-all cursor-pointer"
-            >
-              <Share2 className="w-4 h-4" />
-              <span>షేర్</span>
-            </button>
+            <div className="relative inline-block">
+              <button
+                onClick={handleShare}
+                className="inline-flex items-center gap-2 px-6 py-2.5 rounded-full bg-black/10 dark:bg-white/10 hover:bg-black/20 text-sm font-bold transition-all cursor-pointer"
+              >
+                <Share2 className="w-4 h-4" />
+                <span>షేర్</span>
+              </button>
+              {shareFeedback && (
+                <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-emerald-600 text-white text-xs font-bold whitespace-nowrap shadow-lg animate-fade-in">
+                  ✓ {shareFeedback}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -786,7 +891,7 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
           {currentUser ? (
             <form onSubmit={handleAddComment} className="flex gap-2 items-center">
               <img
-                src={currentUser.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(currentUser.id)}`}
+                src={resolveAvatarUrl(currentUser.avatar || (currentUser as any).photoURL, currentUser.teluguName || (currentUser as any).displayName || currentUser.name)}
                 alt={currentUser.name}
                 className="w-9 h-9 rounded-full object-cover shrink-0 ring-2 ring-[#7A284B]"
               />

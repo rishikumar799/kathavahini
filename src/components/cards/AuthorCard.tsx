@@ -1,6 +1,8 @@
 import React from 'react';
 import { UserCheck, UserPlus, BookOpen, Users } from 'lucide-react';
 import { Author } from '../../types';
+import { resolveAvatarUrl } from '../../utils/avatarUtils';
+import { getAuthorDisplayName } from '../../utils/authorResolver';
 
 interface AuthorCardProps {
   author: Author;
@@ -13,6 +15,9 @@ export const AuthorCard: React.FC<AuthorCardProps> = ({
   onSelect,
   onFollowToggle,
 }) => {
+  const displayName = getAuthorDisplayName(author);
+  const avatarUrl = resolveAvatarUrl(author.avatar, displayName);
+
   return (
     <div
       onClick={() => onSelect(author)}
@@ -21,9 +26,12 @@ export const AuthorCard: React.FC<AuthorCardProps> = ({
       <div className="flex items-start gap-4 mb-3">
         <div className="relative shrink-0">
           <img
-            src={author.avatar}
-            alt={author.teluguName}
+            src={avatarUrl}
+            alt={displayName}
             className="w-14 h-14 rounded-full object-cover ring-2 ring-[#7A284B]/20 dark:ring-[#D87591]/20 group-hover:scale-105 transition-transform"
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = resolveAvatarUrl(null, displayName);
+            }}
           />
           {author.isVerified && (
             <span
@@ -37,20 +45,22 @@ export const AuthorCard: React.FC<AuthorCardProps> = ({
 
         <div className="flex-1 min-w-0">
           <h3 className="text-base font-bold font-serif-telugu text-[#17151A] dark:text-[#F7F3EE] group-hover:text-[#7A284B] dark:group-hover:text-[#D87591] transition-colors truncate">
-            {author.teluguName}
+            {displayName}
           </h3>
-          <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] truncate font-sans">
-            {author.name}
-          </p>
+          {author.name && author.name !== displayName && (
+            <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] truncate font-sans">
+              {author.name}
+            </p>
+          )}
           <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] mt-0.5">
-            📍 {author.location || 'ఆంధ్రప్రదేశ్'}
+            📍 {author.location || 'తెలంగాణ / ఆంధ్రప్రదేశ్'}
           </p>
         </div>
       </div>
 
       {/* Bio excerpt */}
       <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] font-sans-telugu line-clamp-2 leading-relaxed mb-4 flex-1">
-        {author.teluguBio}
+        {author.teluguBio || author.bio}
       </p>
 
       {/* Stats & Follow Button */}
@@ -58,7 +68,7 @@ export const AuthorCard: React.FC<AuthorCardProps> = ({
         <div className="flex items-center gap-3 text-xs text-[#6F6970] dark:text-[#AAA4AC]">
           <span className="flex items-center gap-1 font-medium">
             <Users className="w-3.5 h-3.5 text-[#7A284B] dark:text-[#D87591]" />
-            {(author.followersCount / 1000).toFixed(1)}k
+            {author.followersCount >= 1000 ? `${(author.followersCount / 1000).toFixed(1)}k` : (author.followersCount || 0)}
           </span>
           <span className="flex items-center gap-1 font-medium">
             <BookOpen className="w-3.5 h-3.5 text-[#D99A3D]" />

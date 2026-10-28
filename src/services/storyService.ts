@@ -23,6 +23,7 @@ import { Story, StoryCategory } from '../types';
 import { MOCK_STORIES } from './mockData';
 import { bookmarkService } from './bookmarkService';
 import { deletionTracker } from './deletionTracker';
+import { resolveContentAuthor } from '../utils/authorResolver';
 
 const GUEST_LIKES_STORAGE_KEY = 'kathavahini_guest_liked_story_ids';
 
@@ -126,19 +127,7 @@ class StoryService {
             } : undefined),
             authorId: data.authorId || '',
             authorName: data.authorName || data.authorPenName,
-            author: data.author || {
-              id: data.authorId || 'author',
-              name: data.authorName || data.authorPenName || 'తెలుగు రచయిత',
-              teluguName: data.authorPenName || data.authorName || 'తెలుగు రచయిత',
-              avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + encodeURIComponent(data.authorId || 'auth'),
-              bio: '',
-              teluguBio: '',
-              followersCount: 0,
-              storiesCount: 1,
-              novelsCount: 0,
-              jokesCount: 0,
-              joinedDate: '2026',
-            },
+            author: resolveContentAuthor({ id: storyId, ...data }),
             category: data.category || data.categoryName || 'జీవితం',
             tags: data.tags || [],
             rating: typeof data.rating === 'number' ? Number(data.rating.toFixed(1)) : 5.0,
@@ -382,19 +371,7 @@ class StoryService {
           authorId: data.authorId || '',
           ownerId: data.ownerId || data.authorId || data.writerId,
           authorName: data.authorName,
-          author: data.author || {
-            id: data.authorId || 'author',
-            name: data.authorName || 'తెలుగు రచయిత',
-            teluguName: data.authorName || 'తెలుగు రచయిత',
-            avatar: 'https://api.dicebear.com/7.x/avataaars/svg?seed=' + encodeURIComponent(data.authorId || 'auth'),
-            bio: '',
-            teluguBio: '',
-            followersCount: 0,
-            storiesCount: 1,
-            novelsCount: 0,
-            jokesCount: 0,
-            joinedDate: '2026',
-          },
+          author: resolveContentAuthor({ id: data.id || id, ...data }),
           category: data.category || data.categoryName || 'జీవితం',
           tags: data.tags || [],
           rating: typeof data.rating === 'number' ? Number(data.rating.toFixed(1)) : 5.0,

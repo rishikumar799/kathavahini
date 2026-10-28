@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Story, Novel, Author, Chapter, StoryCategory, User, NotificationItem, ReadingHistoryItem, CreatorStats, Joke } from './types';
+import { Story, Novel, Author, Chapter, Episode, StoryCategory, User, NotificationItem, ReadingHistoryItem, CreatorStats, Joke } from './types';
 import { categoryService, FormattedCategoryViewItem } from './services/categoryService';
 import { authService } from './services/authService';
 import { storyService } from './services/storyService';
@@ -26,7 +26,7 @@ import { adminService } from './services/adminService';
 import { HomeView } from './views/HomeView';
 import { StoriesView } from './views/StoriesView';
 import { StoryDetailView } from './views/StoryDetailView';
-import { StoryReaderView } from './views/StoryReaderView';
+import { StoryReaderView, NovelReadingContext } from './views/StoryReaderView';
 import { NovelsView } from './views/NovelsView';
 import { NovelDetailView } from './views/NovelDetailView';
 import { JokesView } from './views/JokesView';
@@ -38,6 +38,7 @@ import { SearchView } from './views/SearchView';
 import { CreatorDashboardView } from './views/CreatorDashboardView';
 import { ProfileView } from './views/ProfileView';
 import { KnowledgeView } from './views/KnowledgeView';
+import { resolveContentAuthor } from './utils/authorResolver';
 import { BalavinodhiniView } from './views/BalavinodhiniView';
 import { AboutView } from './views/AboutView';
 import { PrivacyPolicyView } from './views/PrivacyPolicyView';
@@ -63,6 +64,42 @@ export default function App() {
   const [selectedNovel, setSelectedNovel] = useState<Novel | null>(null);
   const [selectedAuthor, setSelectedAuthor] = useState<Author | null>(null);
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<StoryCategory | null>(null);
+  const [activeNovelContext, setActiveNovelContext] = useState<NovelReadingContext | null>(null);
+
+  // Helper to convert a novel chapter or episode to a Story reader item
+  const convertEpisodeToStory = (
+    novel: Novel,
+    item: Chapter | Episode,
+    index: number
+  ): Story => {
+    const epNum = ('episodeNumber' in item && typeof item.episodeNumber === 'number')
+      ? item.episodeNumber
+      : (('chapterNumber' in item && typeof item.chapterNumber === 'number') ? item.chapterNumber : index + 1);
+
+    const epTitle = item.teluguTitle || item.title || `${epNum}వ భాగం`;
+
+    return {
+      id: item.id,
+      title: item.title || `${novel.title} - Episode ${epNum}`,
+      teluguTitle: `${novel.teluguTitle} - ${epTitle}`,
+      slug: novel.slug,
+      coverImage: novel.coverImage,
+      excerpt: novel.teluguDescription,
+      teluguExcerpt: novel.teluguDescription,
+      content: Array.isArray(item.content) ? item.content : [item.content || ''],
+      authorId: resolveContentAuthor(novel).id || novel.authorId,
+      author: resolveContentAuthor(novel),
+      category: novel.category,
+      tags: novel.tags || ['నవల'],
+      rating: novel.rating,
+      viewCount: novel.viewCount,
+      likeCount: novel.likeCount,
+      bookmarkCount: novel.bookmarkCount,
+      readingTimeMinutes: item.readingTimeMinutes || 5,
+      publishedAt: item.publishedAt || novel.publishedAt,
+      status: 'published',
+    };
+  };
 
   // Modals state
   const [isWriteOpen, setIsWriteOpen] = useState(false);
@@ -354,7 +391,7 @@ export default function App() {
     window.addEventListener('kathavahini:story-rated', handleStoryRated);
     window.addEventListener('kathavahini:story-viewed', handleStoryViewed);
 
-    // Check if initial URL or hash contains password reset route or Firebase oobCode
+    // Check if initial URL contains deep-links (story, novel, author, profile) or password reset
     if (typeof window !== 'undefined') {
       const path = window.location.pathname;
       const search = window.location.search;
@@ -369,13 +406,80 @@ export default function App() {
 
       if (isResetPath || hasResetMode || hasOobCode) {
         setCurrentTab('reset-password');
+      } else {
+        // Deep link resolution for Stories, Novels, Authors, and Profiles
+        const storyId = params.get('story') || (path.startsWith('/story/') ? path.split('/')[2] : null);
+        const novelId = params.get('novel') || (path.startsWith('/novel/') ? path.split('/')[2] : null);
+        const authorId = params.get('author') || params.get('writer') || (path.startsWith('/author/') ? path.split('/')[2] : null);
+        const profileId = params.get('profile') || params.get('user') || (path.startsWith('/profile/') ? path.split('/')[2] : null);
+
+        if (storyId) {
+          storyService.getStoryById(storyId).then(story => {
+            if (story) {
+              setSelectedStory(story);
+              setCurrentTab(params.get('reader') === 'true' ? 'story-reader' : 'story-detail');
+            }
+          }).catch(() => {});
+        } else if (novelId) {
+          novelService.getNovelById(novelId).then(novel => {
+            if (novel) {
+              setSelectedNovel(novel);
+              setCurrentTab('novel-detail');
+            }
+          }).catch(() => {});
+        } else if (authorId || profileId) {
+          const targetId = authorId || profileId;
+          authorService.getAuthorById(targetId!).then(author => {
+            if (author) {
+              setSelectedAuthor(author);
+              setCurrentTab('author-detail');
+            }
+          }).catch(() => {});
+        }
       }
     }
+
+    const handlePopState = (e: PopStateEvent) => {
+      const params = new URLSearchParams(window.location.search);
+      const sId = params.get('story');
+      const nId = params.get('novel');
+      const aId = params.get('author') || params.get('profile');
+
+      if (sId) {
+        storyService.getStoryById(sId).then(s => {
+          if (s) {
+            setSelectedStory(s);
+            setCurrentTab(params.get('reader') === 'true' ? 'story-reader' : 'story-detail');
+          }
+        }).catch(() => {});
+      } else if (nId) {
+        novelService.getNovelById(nId).then(n => {
+          if (n) {
+            setSelectedNovel(n);
+            setCurrentTab('novel-detail');
+          }
+        }).catch(() => {});
+      } else if (aId) {
+        authorService.getAuthorById(aId).then(a => {
+          if (a) {
+            setSelectedAuthor(a);
+            setCurrentTab('author-detail');
+          }
+        }).catch(() => {});
+      } else if (e.state?.tab) {
+        setCurrentTab(e.state.tab);
+      } else {
+        setCurrentTab('home');
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
 
     return () => {
       unsubStories();
       unsubNovels();
       unsubJokes();
+      window.removeEventListener('popstate', handlePopState);
       window.removeEventListener('kathavahini:story-deleted', handleStoryDeleted);
       window.removeEventListener('kathavahini:item-deleted', handleItemDeleted);
       window.removeEventListener('kathavahini:refresh-content', handleRefresh);
@@ -392,28 +496,56 @@ export default function App() {
     setIsAuthOpen(true);
   };
 
+  // Canonical URL synchronizer
+  const updateUrl = (tab: string, entityType?: string, entityId?: string) => {
+    if (typeof window === 'undefined') return;
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('story');
+      url.searchParams.delete('novel');
+      url.searchParams.delete('author');
+      url.searchParams.delete('profile');
+      url.searchParams.delete('reader');
+
+      if (entityType && entityId) {
+        url.searchParams.set(entityType, entityId);
+        if (tab === 'story-reader') {
+          url.searchParams.set('reader', 'true');
+        }
+      }
+      window.history.pushState({ tab, entityType, entityId }, '', url.toString());
+    } catch {}
+  };
+
   // Navigation handlers
   const handleSelectStory = (story: Story) => {
+    setActiveNovelContext(null);
     setSelectedStory(story);
     setCurrentTab('story-detail');
+    updateUrl('story-detail', 'story', story.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleStartReading = (story: Story) => {
     setSelectedStory(story);
     setCurrentTab('story-reader');
+    updateUrl('story-reader', 'story', story.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleSelectNovel = (novel: Novel) => {
+    setActiveNovelContext(null);
     setSelectedNovel(novel);
     setCurrentTab('novel-detail');
+    updateUrl('novel-detail', 'novel', novel.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleSelectAuthor = (author: Author) => {
+    setActiveNovelContext(null);
     setSelectedAuthor(author);
     setCurrentTab('author-detail');
+    updateUrl('author-detail', 'author', author.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -622,7 +754,16 @@ export default function App() {
           <StoryReaderView
             story={selectedStory}
             currentUser={user}
-            onBack={() => setCurrentTab('story-detail')}
+            novelContext={activeNovelContext || undefined}
+            onBack={() => {
+              if (activeNovelContext) {
+                setSelectedNovel(activeNovelContext.novel);
+                setCurrentTab('novel-detail');
+                setActiveNovelContext(null);
+              } else {
+                setCurrentTab('story-detail');
+              }
+            }}
             onBookmarkToggle={handleBookmarkToggle}
             onLikeToggle={handleLikeToggle}
             onUpdateProgress={handleUpdateProgress}
@@ -645,33 +786,34 @@ export default function App() {
         return selectedNovel ? (
           <NovelDetailView
             novel={selectedNovel}
-            onBack={() => setCurrentTab('novels')}
-            onSelectChapter={(n, chap) => {
-              // Convert novel chapter to story style for reader
-              const chapterAsStory: Story = {
-                id: chap.id,
-                title: chap.title,
-                teluguTitle: `${n.teluguTitle} - ${chap.teluguTitle}`,
-                slug: n.slug,
-                coverImage: n.coverImage,
-                excerpt: n.teluguDescription,
-                teluguExcerpt: n.teluguDescription,
-                content: chap.content,
-                authorId: n.authorId,
-                author: n.author,
-                category: n.category,
-                tags: n.tags,
-                rating: n.rating,
-                viewCount: n.viewCount,
-                likeCount: n.likeCount,
-                bookmarkCount: n.bookmarkCount,
-                readingTimeMinutes: chap.readingTimeMinutes,
-                publishedAt: chap.publishedAt,
-                status: 'published',
-              };
+            onBack={() => {
+              setActiveNovelContext(null);
+              setCurrentTab('novels');
+            }}
+            onSelectChapter={(n, chap, episodeIndex, allEpisodes) => {
+              const chapterAsStory = convertEpisodeToStory(n, chap, episodeIndex);
+              setActiveNovelContext({
+                novel: n,
+                episodes: allEpisodes,
+                currentEpisodeIndex: episodeIndex,
+                onSelectEpisodeIndex: (newIndex) => {
+                  const targetEp = allEpisodes[newIndex];
+                  if (!targetEp) return;
+                  const targetStory = convertEpisodeToStory(n, targetEp, newIndex);
+                  setSelectedStory(targetStory);
+                  setActiveNovelContext(prev => prev ? { ...prev, currentEpisodeIndex: newIndex } : null);
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                },
+                onReturnToNovel: () => {
+                  setSelectedNovel(n);
+                  setCurrentTab('novel-detail');
+                  setActiveNovelContext(null);
+                }
+              });
               handleStartReading(chapterAsStory);
             }}
             onBookmarkToggle={handleBookmarkToggle}
+            onSelectAuthor={handleSelectAuthor}
           />
         ) : null;
 
@@ -705,8 +847,14 @@ export default function App() {
         return selectedAuthor ? (
           <AuthorDetailView
             author={selectedAuthor}
-            authorStories={trendingStories.filter(s => s.authorId === selectedAuthor.id)}
-            authorNovels={novels.filter(n => n.authorId === selectedAuthor.id)}
+            authorStories={trendingStories.filter(s => {
+              const res = resolveContentAuthor(s);
+              return res.id === selectedAuthor.id || s.authorId === selectedAuthor.id || s.writerId === selectedAuthor.id || s.author?.id === selectedAuthor.id;
+            })}
+            authorNovels={novels.filter(n => {
+              const res = resolveContentAuthor(n);
+              return res.id === selectedAuthor.id || n.authorId === selectedAuthor.id || n.author?.id === selectedAuthor.id;
+            })}
             onBack={() => setCurrentTab('authors')}
             onSelectStory={handleSelectStory}
             onSelectNovel={handleSelectNovel}

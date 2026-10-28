@@ -13,9 +13,10 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
-import { Novel, Chapter } from '../types';
+import { Novel, Chapter, Episode, ContentStatus, ContentVisibility } from '../types';
 import { MOCK_NOVELS } from './mockData';
 import { deletionTracker } from './deletionTracker';
+import { resolveContentAuthor } from '../utils/authorResolver';
 
 class NovelService {
   /**
@@ -101,7 +102,7 @@ class NovelService {
             description: data.description || '',
             teluguDescription: data.teluguDescription || data.description || '',
             authorId: data.authorId || '',
-            author: data.author || MOCK_NOVELS[0].author,
+            author: resolveContentAuthor({ id: novelId, ...data }),
             category: data.category || 'కుటుంబం',
             tags: data.tags || ['నవల'],
             status: data.status || 'ongoing',
@@ -159,7 +160,7 @@ class NovelService {
           description: data.description || '',
           teluguDescription: data.teluguDescription || data.description || '',
           authorId: data.authorId || '',
-          author: data.author || MOCK_NOVELS[0].author,
+          author: resolveContentAuthor({ id: snap.id, ...data }),
           category: data.category || 'కుటుంబం',
           tags: data.tags || ['నవల'],
           status: data.status || 'ongoing',
@@ -217,8 +218,8 @@ class NovelService {
       coverImage: newNovel.coverImage || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=80&w=800',
       description: newNovel.description || 'New Telugu Novel',
       teluguDescription: newNovel.teluguDescription || newNovel.description || 'కొత్త తెలుగు నవల',
-      authorId: newNovel.authorId || 'auth-1',
-      author: newNovel.author || MOCK_NOVELS[0].author,
+      authorId: newNovel.authorId || '',
+      author: resolveContentAuthor(newNovel),
       category: newNovel.category || 'కుటుంబం',
       tags: newNovel.tags || ['నవల'],
       status: newNovel.status || 'ongoing',
@@ -241,6 +242,112 @@ class NovelService {
     } catch (e) {}
 
     return created;
+  }
+
+  /**
+   * Fetch published episodes for a specific novel in ascending sequence
+   * Checks both top-level `episodes` collection and novel subcollection `chapters`
+   */
+  public async getEpisodesForNovel(novelId: string): Promise<Episode[]> {
+    try {
+      await deletionTracker.init();
+      const episodesList: Episode[] = [];
+
+      // 1. Query top-level `episodes` collection where novelId matches
+      try {
+        const epQuery = query(
+          collection(db, 'episodes'),
+          where('novelId', '==', novelId)
+        );
+        const epSnap = await getDocs(epQuery);
+        for (const epDoc of epSnap.docs) {
+          if (deletionTracker.isDeleted(epDoc.id)) continue;
+          const data = epDoc.data();
+          if (data.deleted === true || data.status === 'deleted') continue;
+          if (data.visibility === 'hidden' || data.visibility === 'private') continue;
+          if (data.status && data.status !== 'published') continue;
+
+          episodesList.push({
+            id: epDoc.id,
+            novelId,
+            novelTitle: data.novelTitle || '',
+            episodeNumber: Number(data.episodeNumber) || 1,
+            title: data.title || '',
+            teluguTitle: data.teluguTitle || data.title || `${data.episodeNumber || 1}వ భాగం`,
+            content: Array.isArray(data.content) ? data.content : [data.content || ''],
+            authorId: data.authorId || '',
+            authorName: data.authorName,
+            status: 'published',
+            visibility: 'public',
+            readingTimeMinutes: data.readingTimeMinutes || 5,
+            publishedAt: data.publishedAt instanceof Timestamp 
+              ? data.publishedAt.toDate().toISOString().split('T')[0] 
+              : (data.publishedAt || ''),
+          });
+        }
+      } catch (err) {
+        console.warn('Note querying top-level episodes collection:', err);
+      }
+
+      // 2. If episodes collection had results, sort them strictly ascending by episodeNumber
+      if (episodesList.length > 0) {
+        return episodesList.sort((a, b) => (a.episodeNumber || 0) - (b.episodeNumber || 0));
+      }
+
+      // 3. Fallback: query subcollection `novels/{novelId}/chapters`
+      try {
+        const chapSnap = await getDocs(collection(db, 'novels', novelId, 'chapters'));
+        const chapters: Episode[] = chapSnap.docs
+          .filter(c => !deletionTracker.isDeleted(c.id) && !c.data()?.deleted && c.data()?.status !== 'deleted')
+          .map(c => {
+            const cd = c.data();
+            return {
+              id: c.id,
+              novelId,
+              episodeNumber: Number(cd.chapterNumber || cd.episodeNumber) || 1,
+              title: cd.title || '',
+              teluguTitle: cd.teluguTitle || cd.title || `${cd.chapterNumber || 1}వ అధ్యాయం`,
+              content: Array.isArray(cd.content) ? cd.content : [cd.content || ''],
+              authorId: cd.authorId || '',
+              status: 'published',
+              visibility: 'public',
+              readingTimeMinutes: cd.readingTimeMinutes || 5,
+              publishedAt: cd.publishedAt instanceof Timestamp 
+                ? cd.publishedAt.toDate().toISOString().split('T')[0] 
+                : (cd.publishedAt || ''),
+            };
+          });
+
+        if (chapters.length > 0) {
+          return chapters.sort((a, b) => (a.episodeNumber || 0) - (b.episodeNumber || 0));
+        }
+      } catch (err) {
+        console.warn('Note querying novel chapters subcollection:', err);
+      }
+
+      // 4. Fallback to mock novel's chapters if matched
+      const mock = MOCK_NOVELS.find(n => n.id === novelId);
+      if (mock && mock.chapters) {
+        return mock.chapters.map(c => ({
+          id: c.id,
+          novelId,
+          episodeNumber: c.chapterNumber,
+          title: c.title,
+          teluguTitle: c.teluguTitle,
+          content: c.content,
+          authorId: mock.authorId,
+          status: 'published' as ContentStatus,
+          visibility: 'public' as ContentVisibility,
+          readingTimeMinutes: c.readingTimeMinutes,
+          publishedAt: c.publishedAt,
+        })).sort((a, b) => a.episodeNumber - b.episodeNumber);
+      }
+
+      return [];
+    } catch (e) {
+      console.warn('Error fetching episodes for novel:', e);
+      return [];
+    }
   }
 }
 

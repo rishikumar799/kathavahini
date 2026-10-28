@@ -1,6 +1,8 @@
 import React from 'react';
 import { Bookmark, Heart, Eye, Clock, Star } from 'lucide-react';
 import { Story } from '../../types';
+import { resolveAvatarUrl } from '../../utils/avatarUtils';
+import { resolveContentAuthor, getAuthorDisplayName } from '../../utils/authorResolver';
 
 interface StoryCardProps {
   story: Story;
@@ -17,9 +19,13 @@ export const StoryCard: React.FC<StoryCardProps> = ({
   onLikeToggle,
   compact = false,
 }) => {
+  const resolvedAuthor = resolveContentAuthor(story);
+  const authorName = getAuthorDisplayName(resolvedAuthor);
+  const authorAvatar = resolveAvatarUrl(resolvedAuthor.avatar, authorName);
+
   return (
     <div
-      onClick={() => onSelect(story)}
+      onClick={() => onSelect({ ...story, author: resolvedAuthor })}
       className={`group relative flex flex-col bg-[#FFFFFF] dark:bg-[#18181D] rounded-2xl border border-[#E8E1DA] dark:border-[#2E2D36] overflow-hidden transition-all duration-300 hover:shadow-xl hover:-translate-y-1 cursor-pointer ${
         compact ? 'w-64 sm:w-72 shrink-0' : 'w-full'
       }`}
@@ -84,24 +90,28 @@ export const StoryCard: React.FC<StoryCardProps> = ({
         <div className="flex items-center justify-between pt-3 border-t border-[#E8E1DA]/60 dark:border-[#2E2D36]/60">
           <div className="flex items-center gap-2">
             <img
-              src={story.author.avatar}
-              alt={story.author.teluguName}
-              className="w-6 h-6 rounded-full object-cover"
+              src={authorAvatar}
+              alt={authorName}
+              className="w-6 h-6 rounded-full object-cover ring-1 ring-black/5 dark:ring-white/10"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = resolveAvatarUrl(null, authorName);
+              }}
             />
             <span className="text-xs font-medium text-[#17151A] dark:text-[#F7F3EE] truncate max-w-[110px]">
-              {story.author.teluguName}
+              {authorName}
             </span>
           </div>
 
           <div className="flex items-center gap-3 text-xs text-[#6F6970] dark:text-[#AAA4AC]">
-            <span className="flex items-center gap-1">
+            <span className="flex items-center gap-1" title={`${story.viewCount} వీక్షణలు`}>
               <Eye className="w-3.5 h-3.5" />
-              {(story.viewCount / 1000).toFixed(1)}k
+              {story.viewCount >= 1000 ? `${(story.viewCount / 1000).toFixed(1)}k` : story.viewCount}
             </span>
 
             <button
               onClick={(e) => onLikeToggle && onLikeToggle(story.id, e)}
               className="flex items-center gap-1 hover:text-[#7A284B] dark:hover:text-[#D87591] transition-colors cursor-pointer"
+              title="లైక్ చేయండి"
             >
               <Heart
                 className={`w-3.5 h-3.5 ${

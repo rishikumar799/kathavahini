@@ -920,20 +920,83 @@ class AuthService {
       throw new Error('వినియోగదారు లాగిన్ కాలేదు.');
     }
 
+    const currentUid = this.currentUser.id;
     // Never allow client-side role or status override
     const { role, status, id, uid, ...safeData } = data as any;
 
-    const userDocRef = doc(db, 'users', this.currentUser.id);
-    await updateDoc(userDocRef, sanitizeFirestoreData({
+    // 1. Update users/{uid} document
+    const userDocRef = doc(db, 'users', currentUid);
+    await setDoc(userDocRef, sanitizeFirestoreData({
       ...safeData,
       updatedAt: serverTimestamp(),
-    }));
+    }), { merge: true });
 
+    // 2. Synchronize writers/{uid} if user is a writer
+    if (this.currentUser.role === 'writer') {
+      try {
+        const writerDocRef = doc(db, 'writers', currentUid);
+        await setDoc(writerDocRef, sanitizeFirestoreData({
+          displayName: safeData.displayName || safeData.name || this.currentUser.displayName,
+          penName: safeData.penName || safeData.teluguName || safeData.displayName || (this.currentUser as any).penName || this.currentUser.teluguName,
+          teluguName: safeData.teluguName || safeData.penName || this.currentUser.teluguName,
+          photoURL: safeData.photoURL || safeData.avatar || this.currentUser.photoURL,
+          avatar: safeData.avatar || safeData.photoURL || this.currentUser.avatar,
+          bio: safeData.bio ?? this.currentUser.bio,
+          teluguBio: safeData.teluguBio ?? this.currentUser.teluguBio,
+          updatedAt: serverTimestamp(),
+        }), { merge: true });
+      } catch (err) {
+        console.warn('Non-critical writer doc sync note:', err);
+      }
+    }
+
+    // 3. Synchronize readers/{uid} if user is a reader
+    if (this.currentUser.role === 'reader') {
+      try {
+        const readerDocRef = doc(db, 'readers', currentUid);
+        await setDoc(readerDocRef, sanitizeFirestoreData({
+          displayName: safeData.displayName || safeData.name || this.currentUser.displayName,
+          photoURL: safeData.photoURL || safeData.avatar || this.currentUser.photoURL,
+          avatar: safeData.avatar || safeData.photoURL || this.currentUser.avatar,
+          updatedAt: serverTimestamp(),
+        }), { merge: true });
+      } catch (err) {
+        console.warn('Non-critical reader doc sync note:', err);
+      }
+    }
+
+    // 4. Update Firebase Auth profile if current user is active
+    if (auth.currentUser) {
+      try {
+        const authUpdates: { displayName?: string; photoURL?: string } = {};
+        if (safeData.displayName || safeData.name) {
+          authUpdates.displayName = safeData.displayName || safeData.name;
+        }
+        if (safeData.photoURL || safeData.avatar) {
+          authUpdates.photoURL = safeData.photoURL || safeData.avatar;
+        }
+        if (Object.keys(authUpdates).length > 0) {
+          await updateFirebaseProfile(auth.currentUser, authUpdates);
+        }
+      } catch (authErr) {
+        console.warn('Non-critical Auth profile update note:', authErr);
+      }
+    }
+
+    // 5. Update local state & notify listeners
     this.currentUser = {
       ...this.currentUser,
       ...safeData,
     };
     this.notify();
+
+    // 6. Broadcast global event so story cards, author views, etc. refresh in real time
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('kathavahini:profile-updated', {
+        detail: { user: this.currentUser }
+      }));
+    }
+
     return this.currentUser;
   }
 

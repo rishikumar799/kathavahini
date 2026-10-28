@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Users, BookOpen, Feather, UserCheck, UserPlus, MapPin, Calendar } from 'lucide-react';
+import { ArrowLeft, Users, BookOpen, Feather, UserCheck, UserPlus, MapPin, Calendar, Share2 } from 'lucide-react';
 import { Author, Story, Novel } from '../types';
 import { StoryCard } from '../components/cards/StoryCard';
 import { NovelCard } from '../components/cards/NovelCard';
+import { shareContent } from '../utils/shareUtils';
+import { resolveAvatarUrl } from '../utils/avatarUtils';
+import { getAuthorDisplayName } from '../utils/authorResolver';
 
 interface AuthorDetailViewProps {
   author: Author;
@@ -24,6 +27,29 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
   onFollowToggle,
 }) => {
   const [activeTab, setActiveTab] = useState<'stories' | 'novels'>('stories');
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+
+  const resolvedName = getAuthorDisplayName(author);
+  const resolvedAvatar = resolveAvatarUrl(author.avatar, resolvedName);
+
+  const handleShareProfile = async () => {
+    try {
+      const result = await shareContent({
+        contentType: 'author',
+        id: author.id,
+        title: `${resolvedName} - రచయిత ప్రొఫైల్ (Kathavahini)`,
+        text: author.teluguBio || `${resolvedName} గారి తెలుగు రచనలు కథావాహినిలో చదవండి`,
+        coverImage: author.avatar,
+      });
+
+      if (result.success) {
+        setShareFeedback(result.method === 'clipboard' ? 'ప్రొఫైల్ లింక్ కాపీ చేయబడింది!' : 'ప్రొఫైల్ షేర్ చేయబడింది!');
+        setTimeout(() => setShareFeedback(null), 3000);
+      }
+    } catch (e) {
+      console.warn('Share error:', e);
+    }
+  };
 
   return (
     <div className="space-y-8 pb-16">
@@ -48,14 +74,14 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
         <div className="p-6 sm:p-8 relative -mt-16 sm:-mt-20 flex flex-col sm:flex-row items-center sm:items-end justify-between gap-6">
           <div className="flex flex-col sm:flex-row items-center sm:items-end gap-5 text-center sm:text-left">
             <img
-              src={author.avatar}
-              alt={author.teluguName}
+              src={resolvedAvatar}
+              alt={resolvedName}
               className="w-28 h-28 sm:w-32 sm:h-32 rounded-full object-cover ring-4 ring-white dark:ring-[#18181D] shadow-2xl shrink-0"
             />
             <div>
               <div className="flex items-center justify-center sm:justify-start gap-2">
                 <h1 className="text-2xl sm:text-3xl font-bold font-serif-telugu text-[#17151A] dark:text-[#F7F3EE]">
-                  {author.teluguName}
+                  {resolvedName}
                 </h1>
                 {author.isVerified && (
                   <span className="px-2 py-0.5 rounded-full bg-[#7A284B] text-white text-[10px] font-bold">
@@ -69,17 +95,33 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={() => onFollowToggle(author.id)}
-            className={`px-6 py-2.5 rounded-full text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-2 shrink-0 ${
-              author.isFollowing
-                ? 'bg-[#E8E1DA] dark:bg-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE]'
-                : 'bg-[#7A284B] hover:bg-[#631F3C] dark:bg-[#D87591] text-white shadow-md'
-            }`}
-          >
-            {author.isFollowing ? <UserCheck className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
-            <span>{author.isFollowing ? 'అనుసరిస్తున్నారు' : 'అనుసరించండి'}</span>
-          </button>
+          <div className="flex items-center gap-3 relative">
+            <button
+              onClick={() => onFollowToggle(author.id)}
+              className={`px-6 py-2.5 rounded-full text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-2 shrink-0 ${
+                author.isFollowing
+                  ? 'bg-[#E8E1DA] dark:bg-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE]'
+                  : 'bg-[#7A284B] hover:bg-[#631F3C] dark:bg-[#D87591] text-white shadow-md'
+              }`}
+            >
+              {author.isFollowing ? <UserCheck className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+              <span>{author.isFollowing ? 'అనుసరిస్తున్నారు' : 'అనుసరించండి'}</span>
+            </button>
+
+            <button
+              onClick={handleShareProfile}
+              className="p-2.5 rounded-full border border-[#E8E1DA] dark:border-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE] hover:bg-[#FAF7F2] dark:hover:bg-[#222229] transition-colors cursor-pointer shrink-0"
+              title="రచయిత ప్రొఫైల్‌ను షేర్ చేయండి"
+            >
+              <Share2 className="w-4 h-4" />
+            </button>
+
+            {shareFeedback && (
+              <div className="absolute -top-10 right-0 px-3.5 py-1 rounded-full bg-emerald-600 text-white text-xs font-bold shadow-lg animate-fade-in whitespace-nowrap">
+                ✓ {shareFeedback}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Bio & Stats */}

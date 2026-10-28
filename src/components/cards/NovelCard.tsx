@@ -1,6 +1,8 @@
 import React from 'react';
 import { BookOpen, Star, Bookmark } from 'lucide-react';
 import { Novel } from '../../types';
+import { resolveAvatarUrl } from '../../utils/avatarUtils';
+import { resolveContentAuthor, getAuthorDisplayName } from '../../utils/authorResolver';
 
 interface NovelCardProps {
   novel: Novel;
@@ -13,9 +15,13 @@ export const NovelCard: React.FC<NovelCardProps> = ({
   onSelect,
   onBookmarkToggle,
 }) => {
+  const resolvedAuthor = resolveContentAuthor(novel);
+  const authorName = getAuthorDisplayName(resolvedAuthor);
+  const authorAvatar = resolveAvatarUrl(resolvedAuthor.avatar, authorName);
+
   return (
     <div
-      onClick={() => onSelect(novel)}
+      onClick={() => onSelect({ ...novel, author: resolvedAuthor })}
       className="group relative flex bg-[#FFFFFF] dark:bg-[#18181D] rounded-2xl border border-[#E8E1DA] dark:border-[#2E2D36] p-3.5 gap-4 hover:shadow-xl transition-all duration-300 hover:-translate-y-1 cursor-pointer"
     >
       {/* Book Cover Style Aspect Ratio */}
@@ -67,12 +73,15 @@ export const NovelCard: React.FC<NovelCardProps> = ({
         <div>
           <div className="flex items-center gap-2 mb-2">
             <img
-              src={novel.author.avatar}
-              alt={novel.author.teluguName}
-              className="w-5 h-5 rounded-full object-cover"
+              src={authorAvatar}
+              alt={authorName}
+              className="w-5 h-5 rounded-full object-cover ring-1 ring-black/5 dark:ring-white/10"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = resolveAvatarUrl(null, authorName);
+              }}
             />
             <span className="text-xs text-[#17151A] dark:text-[#F7F3EE] font-medium truncate">
-              {novel.author.teluguName}
+              {authorName}
             </span>
           </div>
 

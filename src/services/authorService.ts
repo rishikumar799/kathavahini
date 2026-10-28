@@ -14,6 +14,7 @@ import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 import { Author } from '../types';
 import { MOCK_AUTHORS } from './mockData';
 import { followingService } from './followingService';
+import { resolveAvatarUrl } from '../utils/avatarUtils';
 
 class AuthorService {
   /**
@@ -27,25 +28,44 @@ class AuthorService {
         const currentUid = auth.currentUser?.uid;
         const followedIds = currentUid ? await followingService.getUserFollowing(currentUid) : [];
 
+        // Check companion users collection in case writer uploaded a custom profile image
+        const usersMap = new Map<string, any>();
+        try {
+          const userDocs = await Promise.all(
+            writersSnap.docs.map(d => getDoc(doc(db, 'users', d.id)))
+          );
+          userDocs.forEach(ud => {
+            if (ud.exists()) {
+              usersMap.set(ud.id, ud.data());
+            }
+          });
+        } catch (e) {
+          console.warn('Could not fetch companion user docs for writers:', e);
+        }
+
         return writersSnap.docs.map(d => {
           const data = d.data();
           const authorId = d.id;
+          const uData = usersMap.get(authorId) || {};
+          const candidateAvatar = uData.photoURL || uData.avatar || uData.profileImageURL || data.photoURL || data.avatar;
+          const name = data.displayName || data.penName || data.name || uData.displayName || 'రచయిత';
+          const teluguName = data.teluguName || uData.teluguName || data.penName || data.displayName || data.name || 'రచయిత';
           return {
             id: authorId,
-            name: data.displayName || data.penName || data.name || 'రచయిత',
-            teluguName: data.penName || data.teluguName || data.displayName || data.name || 'రచయిత',
-            avatar: data.photoURL || data.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(authorId)}`,
+            name,
+            teluguName,
+            avatar: resolveAvatarUrl(candidateAvatar, teluguName || name),
             coverImage: data.coverImage || data.coverImageUrl,
-            bio: data.bio || 'కథావాహిని అధికారిక రచయిత',
-            teluguBio: data.teluguBio || data.bio || 'కథావాహిని అధికారిక రచయిత',
-            followersCount: data.followersCount || 0,
+            bio: data.bio || uData.bio || 'కథావాహిని అధికారిక రచయిత',
+            teluguBio: data.teluguBio || data.bio || uData.teluguBio || uData.bio || 'కథావాహిని అధికారిక రచయిత',
+            followersCount: data.followersCount || uData.followersCount || 0,
             storiesCount: data.publishedStoriesCount || data.storiesCount || 0,
             novelsCount: data.publishedNovelsCount || data.novelsCount || 0,
             jokesCount: data.jokesCount || 0,
             isVerified: data.verified !== false,
             isFollowing: followedIds.includes(authorId),
             joinedDate: data.createdAt instanceof Timestamp ? data.createdAt.toDate().getFullYear().toString() : '2026',
-            location: data.location || 'ఆంధ్రప్రదేశ్ / తెలంగాణ',
+            location: data.location || uData.location || 'ఆంధ్రప్రదేశ్ / తెలంగాణ',
           };
         });
       }
@@ -59,11 +79,13 @@ class AuthorService {
         return snap.docs.map(d => {
           const data = d.data();
           const authorId = d.id;
+          const name = data.name || data.displayName || '';
+          const teluguName = data.teluguName || data.penName || data.displayName || data.name || '';
           return {
             id: authorId,
-            name: data.name || data.displayName || '',
-            teluguName: data.teluguName || data.penName || data.displayName || data.name || '',
-            avatar: data.photoURL || data.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(authorId)}`,
+            name,
+            teluguName,
+            avatar: resolveAvatarUrl(data.photoURL || data.avatar, teluguName || name),
             coverImage: data.coverImage || data.coverImageUrl,
             bio: data.bio || '',
             teluguBio: data.teluguBio || data.bio || '',
@@ -94,21 +116,61 @@ class AuthorService {
   }
 
   /**
-   * Get single author by ID
+   * Get single author or user public profile by ID
+   * Checks writers/{id}, authors/{id}, then users/{id} safely without exposing private data
    */
   public async getAuthorById(id: string): Promise<Author | undefined> {
-    try {
-      const snap = await getDoc(doc(db, 'authors', id));
-      if (snap.exists()) {
-        const data = snap.data();
-        const currentUid = auth.currentUser?.uid;
-        const isFollowed = currentUid ? await followingService.isFollowing(id, currentUid) : false;
+    if (!id) return undefined;
+    const currentUid = auth.currentUser?.uid;
 
+    try {
+      // 1. Check writers collection
+      const writerSnap = await getDoc(doc(db, 'writers', id));
+      if (writerSnap.exists()) {
+        const data = writerSnap.data();
+        let uData: any = {};
+        try {
+          const userSnap = await getDoc(doc(db, 'users', id));
+          if (userSnap.exists()) {
+            uData = userSnap.data();
+          }
+        } catch (e) {}
+
+        const isFollowed = currentUid ? await followingService.isFollowing(id, currentUid) : false;
+        const name = data.displayName || data.penName || data.name || uData.displayName || 'రచయిత';
+        const teluguName = data.teluguName || uData.teluguName || data.penName || data.displayName || data.name || 'రచయిత';
+        const candidateAvatar = uData.photoURL || uData.avatar || uData.profileImageURL || data.photoURL || data.avatar;
         return {
-          id: snap.id,
-          name: data.name || data.displayName || '',
-          teluguName: data.teluguName || data.penName || data.displayName || data.name || '',
-          avatar: data.photoURL || data.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(id)}`,
+          id: writerSnap.id,
+          name,
+          teluguName,
+          avatar: resolveAvatarUrl(candidateAvatar, teluguName || name),
+          coverImage: data.coverImage || data.coverImageUrl,
+          bio: data.bio || uData.bio || 'కథావాహిని రచయిత',
+          teluguBio: data.teluguBio || data.bio || uData.teluguBio || uData.bio || 'కథావాహిని రచయిత',
+          followersCount: data.followersCount || uData.followersCount || 0,
+          storiesCount: data.publishedStoriesCount || data.storiesCount || 0,
+          novelsCount: data.publishedNovelsCount || data.novelsCount || 0,
+          jokesCount: data.jokesCount || 0,
+          isVerified: data.verified !== false,
+          isFollowing: isFollowed,
+          joinedDate: data.createdAt instanceof Timestamp ? data.createdAt.toDate().getFullYear().toString() : '2026',
+          location: data.location || uData.location || 'ఆంధ్రప్రదేశ్ / తెలంగాణ',
+        };
+      }
+
+      // 2. Check authors collection
+      const authorSnap = await getDoc(doc(db, 'authors', id));
+      if (authorSnap.exists()) {
+        const data = authorSnap.data();
+        const isFollowed = currentUid ? await followingService.isFollowing(id, currentUid) : false;
+        const name = data.name || data.displayName || 'రచయిత';
+        const teluguName = data.teluguName || data.penName || data.displayName || data.name || 'రచయిత';
+        return {
+          id: authorSnap.id,
+          name,
+          teluguName,
+          avatar: resolveAvatarUrl(data.photoURL || data.avatar, teluguName || name),
           coverImage: data.coverImage || data.coverImageUrl,
           bio: data.bio || '',
           teluguBio: data.teluguBio || data.bio || '',
@@ -122,8 +184,34 @@ class AuthorService {
           location: data.location,
         };
       }
+
+      // 3. Check users collection (for any registered user/reader/writer profile)
+      const userSnap = await getDoc(doc(db, 'users', id));
+      if (userSnap.exists()) {
+        const data = userSnap.data();
+        const isFollowed = currentUid ? await followingService.isFollowing(id, currentUid) : false;
+        const name = data.displayName || data.penName || data.name || 'పాఠకుడు';
+        const teluguName = data.teluguName || data.penName || data.displayName || data.name || 'పాఠకుడు';
+        return {
+          id: userSnap.id,
+          name,
+          teluguName,
+          avatar: resolveAvatarUrl(data.photoURL || data.avatar, teluguName || name),
+          coverImage: data.coverImage || data.coverImageUrl,
+          bio: data.bio || '',
+          teluguBio: data.teluguBio || data.bio || '',
+          followersCount: data.followersCount || 0,
+          storiesCount: data.publishedStoriesCount || data.publishedCount || data.storiesCount || 0,
+          novelsCount: data.publishedNovelsCount || data.novelsCount || 0,
+          jokesCount: data.jokesCount || 0,
+          isVerified: data.role === 'writer' && data.status === 'active',
+          isFollowing: isFollowed,
+          joinedDate: data.createdAt instanceof Timestamp ? data.createdAt.toDate().getFullYear().toString() : '2026',
+          location: data.location,
+        };
+      }
     } catch (err) {
-      console.warn(`Error fetching author ${id} from Firestore:`, err);
+      console.warn(`Error fetching author/user ${id} from Firestore:`, err);
     }
 
     const fallback = MOCK_AUTHORS.find(a => a.id === id);

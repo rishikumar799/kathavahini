@@ -8,6 +8,9 @@ import { SectionHeader } from '../components/common/SectionHeader';
 import { StoryCard } from '../components/cards/StoryCard';
 import { StarRating } from '../components/common/StarRating';
 import { storyService } from '../services/storyService';
+import { shareContent, getCanonicalShareUrl } from '../utils/shareUtils';
+import { resolveAvatarUrl } from '../utils/avatarUtils';
+import { resolveContentAuthor, getAuthorDisplayName } from '../utils/authorResolver';
 
 interface StoryDetailViewProps {
   story: Story;
@@ -40,6 +43,12 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
 }) => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+
+  // Author details resolution
+  const resolvedAuthor = resolveContentAuthor(story);
+  const authorAvatar = resolveAvatarUrl(resolvedAuthor.avatar, resolvedAuthor.teluguName || resolvedAuthor.name);
+  const authorName = getAuthorDisplayName(resolvedAuthor);
 
   // Determine if viewer can manage/edit this story (Admin or Story Author/Writer)
   const isAdmin = currentUser?.role === 'admin' || currentUser?.email?.toLowerCase() === 'thekathavahini@gmail.com';
@@ -57,12 +66,22 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
     }
   }, [story?.id]);
 
-  const handleShare = () => {
-    if (navigator.share) {
-      navigator.share({
+  const handleShare = async () => {
+    try {
+      const result = await shareContent({
+        contentType: 'story',
+        id: story.id,
         title: story.teluguTitle,
         text: story.teluguExcerpt,
-      }).catch(() => {});
+        coverImage: story.coverImage,
+      });
+
+      if (result.success) {
+        setShareFeedback(result.method === 'clipboard' ? 'కథ లింక్ కాపీ చేయబడింది!' : 'కథ విజయవంతంగా షేర్ చేయబడింది!');
+        setTimeout(() => setShareFeedback(null), 3000);
+      }
+    } catch (e) {
+      console.warn('Share error:', e);
     }
   };
 
@@ -159,20 +178,23 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
 
           {/* Author info pill */}
           <div
-            onClick={() => onSelectAuthor(story.author)}
+            onClick={() => onSelectAuthor(resolvedAuthor)}
             className="inline-flex items-center gap-3 p-2 pr-4 rounded-full bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] cursor-pointer hover:border-[#7A284B] transition-colors"
           >
             <img
-              src={story.author.avatar}
-              alt={story.author.teluguName}
+              src={authorAvatar}
+              alt={authorName}
               className="w-9 h-9 rounded-full object-cover"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = resolveAvatarUrl(null, authorName);
+              }}
             />
             <div>
               <p className="text-xs font-bold text-[#17151A] dark:text-[#F7F3EE]">
-                {story.author.teluguName}
+                {authorName}
               </p>
               <p className="text-[10px] text-[#6F6970] dark:text-[#AAA4AC]">
-                {story.author.followersCount} అనుచరులు
+                {resolvedAuthor.followersCount || 0} అనుచరులు
               </p>
             </div>
           </div>
@@ -219,7 +241,7 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
           </div>
 
           {/* CTAs */}
-          <div className="flex flex-wrap items-center gap-4 pt-2">
+          <div className="flex flex-wrap items-center gap-4 pt-2 relative">
             <button
               onClick={() => onStartReading(story)}
               className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-full bg-[#7A284B] hover:bg-[#631F3C] dark:bg-[#D87591] dark:hover:bg-[#EA8DA7] text-white text-base font-bold shadow-lg transition-all cursor-pointer transform hover:-translate-y-0.5"
@@ -260,30 +282,44 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
             >
               <Share2 className="w-5 h-5" />
             </button>
+
+            {/* Share Feedback Toast */}
+            {shareFeedback && (
+              <div className="absolute -top-10 right-0 px-4 py-1.5 rounded-full bg-emerald-600 text-white text-xs font-bold shadow-lg animate-fade-in flex items-center gap-1.5">
+                <span>✓</span>
+                <span>{shareFeedback}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Author Mini Profile Section */}
-      <div className="bg-white dark:bg-[#18181D] rounded-3xl border border-[#E8E1DA] dark:border-[#2E2D36] p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-sm">
+      <div 
+        onClick={() => onSelectAuthor(story.author)}
+        className="bg-white dark:bg-[#18181D] rounded-3xl border border-[#E8E1DA] dark:border-[#2E2D36] p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-sm cursor-pointer hover:border-[#7A284B] transition-colors"
+      >
         <div className="flex items-center gap-4 text-center sm:text-left">
           <img
-            src={story.author.avatar}
-            alt={story.author.teluguName}
+            src={authorAvatar}
+            alt={authorName}
             className="w-16 h-16 rounded-full object-cover ring-2 ring-[#7A284B]"
           />
           <div>
             <h3 className="text-lg font-bold font-serif-telugu text-[#17151A] dark:text-[#F7F3EE]">
-              {story.author.teluguName}
+              {authorName}
             </h3>
             <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] max-w-md font-sans-telugu mt-0.5">
-              {story.author.teluguBio}
+              {story.author.teluguBio || `${authorName} గారి తెలుగు రచనలు`}
             </p>
           </div>
         </div>
 
         <button
-          onClick={() => onFollowAuthorToggle(story.author.id)}
+          onClick={(e) => {
+            e.stopPropagation();
+            onFollowAuthorToggle(story.author.id);
+          }}
           className={`px-5 py-2.5 rounded-full text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-2 ${
             story.author.isFollowing
               ? 'bg-[#E8E1DA] dark:bg-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE]'

@@ -145,11 +145,17 @@ export const NovelDetailView: React.FC<NovelDetailViewProps> = ({
             <span className="text-sm font-bold text-[#17151A] dark:text-[#F7F3EE]">{authorName}</span>
           </div>
 
-          <div className="flex flex-wrap items-center justify-center md:justify-start gap-6 text-xs text-[#6F6970] dark:text-[#AAA4AC] pt-2 border-t border-[#E8E1DA] dark:border-[#2E2D36]">
-            <span className="flex items-center gap-1 font-bold text-[#17151A] dark:text-[#F7F3EE]">
-              <Star className="w-4 h-4 text-[#D99A3D] fill-[#D99A3D]" />
-              {novel.rating.toFixed(1)}
-            </span>
+          <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 text-xs text-[#6F6970] dark:text-[#A29CA6]">
+            {novel.rating && novel.rating > 0 ? (
+              <span className="flex items-center gap-1 font-bold text-[#17151A] dark:text-[#F7F3EE]">
+                <Star className="w-4 h-4 text-[#D99A3D] fill-[#D99A3D]" />
+                {novel.rating.toFixed(1)}
+              </span>
+            ) : (
+              <span className="px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 dark:text-amber-400 font-bold text-[11px]">
+                కొత్త నవల (రేటింగ్ లేదు)
+              </span>
+            )}
             <span className="flex items-center gap-1 font-bold text-[#7A284B] dark:text-[#D87591]">
               <Layers className="w-4 h-4" />
               {episodes.length} భాగాలు (Episodes)

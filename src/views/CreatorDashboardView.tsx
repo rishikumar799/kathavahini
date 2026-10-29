@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Eye, Heart, Users, Feather, TrendingUp, Plus, Clock, CheckCircle2, XCircle, AlertCircle, Sparkles, ShieldCheck,
-  Edit3, Trash2, AlertTriangle, Loader2
+  Edit3, Trash2, AlertTriangle, Loader2, Calendar
 } from 'lucide-react';
 import { CreatorStats, Story, User } from '../types';
 import { writerService } from '../services/writerService';
-import { formatSafeDate } from '../utils/dateUtils';
+import { formatSafeDate, formatSafeDateTime } from '../utils/dateUtils';
 
 interface CreatorDashboardViewProps {
   stats: CreatorStats;
@@ -28,7 +28,7 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
   onEditStory,
   onDeleteStory,
 }) => {
-  const [filterTab, setFilterTab] = useState<'all' | 'pending' | 'published' | 'rejected'>('all');
+  const [filterTab, setFilterTab] = useState<'all' | 'pending' | 'published' | 'scheduled' | 'rejected'>('all');
   const [writerStories, setWriterStories] = useState<Story[]>(myStories);
   const [dailyLimit, setDailyLimit] = useState<{ canSubmit: boolean; countToday: number; reason?: string }>({
     canSubmit: true,
@@ -86,6 +86,7 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
 
   const pendingCount = writerStories.filter(s => s.status === 'pending').length;
   const publishedCount = writerStories.filter(s => s.status === 'published').length;
+  const scheduledCount = writerStories.filter(s => s.status === 'scheduled').length;
   const rejectedCount = writerStories.filter(s => s.status === 'rejected').length;
 
   return (
@@ -269,6 +270,17 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
           </button>
 
           <button
+            onClick={() => setFilterTab('scheduled')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold font-serif-telugu transition-all cursor-pointer ${
+              filterTab === 'scheduled'
+                ? 'bg-purple-600 text-white shadow-sm'
+                : 'bg-[#FAF7F2] dark:bg-[#222229] text-[#6F6970] hover:bg-black/5'
+            }`}
+          >
+            షెడ్యూల్డ్ ({scheduledCount})
+          </button>
+
+          <button
             onClick={() => setFilterTab('rejected')}
             className={`px-4 py-2 rounded-xl text-xs font-bold font-serif-telugu transition-all cursor-pointer ${
               filterTab === 'rejected'
@@ -311,6 +323,11 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
                         <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-[#D99A3D]/15 text-[#D99A3D]">
                           <Clock className="w-3 h-3" />
                           <span>పరిశీలనలో ఉంది (Pending Review)</span>
+                        </span>
+                      ) : story.status === 'scheduled' ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-purple-500/10 text-purple-600">
+                          <Calendar className="w-3 h-3" />
+                          <span>షెడ్యూల్డ్ ({story.scheduledAt ? formatSafeDateTime(story.scheduledAt) : ''})</span>
                         </span>
                       ) : story.status === 'rejected' ? (
                         <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded bg-red-500/10 text-red-600">

@@ -15,6 +15,39 @@ interface StoriesViewProps {
   onSelectCategory?: (cat: StoryCategory | null) => void;
 }
 
+// Canonical Category Matching Helper across variants (e.g. 'కుటుంబం' vs 'కుటుంబ కథలు')
+export function matchCategory(storyCategory?: string, targetCategory?: string): boolean {
+  if (!storyCategory || !targetCategory) return false;
+  const s = storyCategory.trim().toLowerCase();
+  const t = targetCategory.trim().toLowerCase();
+  if (s === t) return true;
+  
+  const pairs = [
+    ['ప్రేమ', 'ప్రేమ కథలు'],
+    ['కుటుంబం', 'కుటుంబ కథలు'],
+    ['స్నేహం', 'స్నేహం & బంధాలు', 'స్నేహ బంధం'],
+    ['జీవితం', 'జీవితం & అనుభవాలు'],
+    ['ప్రేరణ', 'ప్రేరణ & వ్యక్తిత్వ వికాసం'],
+    ['హాస్యం', 'హాస్య కథలు'],
+    ['రహస్యం', 'రహస్య కథలు'],
+    ['థ్రిల్లర్', 'సస్పెన్స్ & థ్రిల్లర్'],
+    ['భయం', 'హారర్ & భయానక కథలు'],
+    ['పిల్లల కథలు', 'బాల సాహిత్యం', 'బాల వినోదిని'],
+    ['ఆధ్యాత్మికం', 'ఆధ్యాత్మిక కథలు'],
+    ['సామాజికం', 'సామాజిక కథలు'],
+    ['గ్రామీణ కథలు', 'గ్రామీణ నేపథ్యం'],
+    ['సాహిత్యం', 'క్లాసిక్ సాహిత్యం']
+  ];
+
+  for (const pair of pairs) {
+    const sMatch = pair.some(p => s.includes(p) || p.includes(s));
+    const tMatch = pair.some(p => t.includes(p) || p.includes(t));
+    if (sMatch && tMatch) return true;
+  }
+
+  return s.includes(t) || t.includes(s);
+}
+
 export const StoriesView: React.FC<StoriesViewProps> = ({
   stories,
   categories,
@@ -33,8 +66,13 @@ export const StoriesView: React.FC<StoriesViewProps> = ({
     if (externalSelectCategory) externalSelectCategory(catName);
   };
 
+  const getCategoryCount = (catName: string, fallbackCount?: number) => {
+    const directCount = stories.filter(s => matchCategory(s.category, catName)).length;
+    return directCount > 0 ? directCount : (fallbackCount || 0);
+  };
+
   const filteredStories = stories.filter(story => {
-    const matchesCat = !selectedCategory || story.category === selectedCategory;
+    const matchesCat = !selectedCategory || matchCategory(story.category, selectedCategory);
     const q = searchQuery.toLowerCase().trim();
     const matchesQ = !q || 
       story.teluguTitle.includes(q) || 
@@ -113,7 +151,7 @@ export const StoriesView: React.FC<StoriesViewProps> = ({
                   : 'bg-white dark:bg-[#18181D] text-[#17151A] dark:text-[#F7F3EE] border border-[#E8E1DA] dark:border-[#2E2D36] hover:bg-[#FAF7F2]'
               }`}
             >
-              {cat.name} ({cat.count})
+              {cat.name} ({getCategoryCount(cat.name, cat.count)})
             </button>
           ))}
         </div>

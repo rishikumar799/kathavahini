@@ -4,6 +4,8 @@ import {
   getDocs,
   getDoc,
   setDoc,
+  updateDoc,
+  increment,
   query,
   where,
   limit,
@@ -198,15 +200,27 @@ class NovelService {
     return false;
   }
 
-  public async createNovel(newNovel: Partial<Novel>): Promise<Novel> {
+  public async createNovel(
+    newNovel: Partial<Novel> & { firstChapterTitle?: string; firstChapterContent?: string[] },
+    firstChapterContentParam?: string[],
+    authorUser?: any
+  ): Promise<Novel> {
     const novelId = `novel-${Date.now()}`;
+    const authorId = authorUser?.id || newNovel.authorId || '';
+    const authorDisplayName = authorUser?.penName || authorUser?.displayName || authorUser?.name || authorUser?.teluguName || (newNovel as any).authorName || 'కథావాహిని రచయిత';
+
+    const rawContent = firstChapterContentParam || newNovel.firstChapterContent;
+    const initialParagraphs = (rawContent && rawContent.length > 0)
+      ? rawContent
+      : ['మొదటి అధ్యాయం ఇక్కడ ప్రారంభమవుతుంది...'];
+
     const initialChapter: Chapter = {
       id: `chap-${Date.now()}`,
       chapterNumber: 1,
       title: 'Chapter 1',
-      teluguTitle: '1వ అధ్యాయం',
-      content: ['మొదటి అధ్యాయం ఇక్కడ ప్రారంభమవుతుంది...'],
-      readingTimeMinutes: 5,
+      teluguTitle: newNovel.firstChapterTitle?.trim() || '1వ అధ్యాయం',
+      content: initialParagraphs,
+      readingTimeMinutes: Math.max(1, Math.ceil(initialParagraphs.join(' ').length / 300)),
       publishedAt: new Date().toISOString().split('T')[0],
     };
 
@@ -218,14 +232,14 @@ class NovelService {
       coverImage: newNovel.coverImage || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=80&w=800',
       description: newNovel.description || 'New Telugu Novel',
       teluguDescription: newNovel.teluguDescription || newNovel.description || 'కొత్త తెలుగు నవల',
-      authorId: newNovel.authorId || '',
-      author: resolveContentAuthor(newNovel),
+      authorId,
+      author: resolveContentAuthor({ id: novelId, authorId, authorName: authorDisplayName, ...newNovel }),
       category: newNovel.category || 'కుటుంబం',
       tags: newNovel.tags || ['నవల'],
       status: newNovel.status || 'ongoing',
-      chaptersCount: (newNovel.chapters?.length) || 1,
-      chapters: newNovel.chapters || [initialChapter],
-      rating: 5.0,
+      chaptersCount: 1,
+      chapters: [initialChapter],
+      rating: 0,
       viewCount: 1,
       likeCount: 0,
       bookmarkCount: 0,
@@ -236,12 +250,99 @@ class NovelService {
     try {
       await setDoc(doc(db, 'novels', novelId), sanitizeFirestoreData({
         ...created,
+        authorName: authorDisplayName,
         createdAt: serverTimestamp(),
       }));
-      await setDoc(doc(db, 'novels', novelId, 'chapters', initialChapter.id), sanitizeFirestoreData(initialChapter));
-    } catch (e) {}
+      await setDoc(doc(db, 'novels', novelId, 'chapters', initialChapter.id), sanitizeFirestoreData({
+        ...initialChapter,
+        novelId,
+        authorId,
+        createdAt: serverTimestamp(),
+      }));
+    } catch (e) {
+      console.warn('Silent note saving novel to Firestore:', e);
+    }
 
     return created;
+  }
+
+  /**
+   * Add a new sequential episode to an existing novel
+   */
+  public async addEpisodeToNovel(params: {
+    novelId: string;
+    episodeNumber: number;
+    title: string;
+    teluguTitle?: string;
+    content: string[];
+    authorUser?: any;
+    readingTimeMinutes?: number;
+  }): Promise<Episode> {
+    const novel = await this.getNovelById(params.novelId);
+    const novelTitle = novel?.teluguTitle || novel?.title || '';
+    const authorId = params.authorUser?.id || novel?.authorId || '';
+    const authorName = params.authorUser?.penName || params.authorUser?.displayName || params.authorUser?.name || (novel as any)?.authorName || 'కథావాహిని రచయిత';
+    
+    const epId = `ep-${Date.now()}`;
+    const charCount = params.content.join(' ').length;
+    const readingTime = params.readingTimeMinutes || Math.max(1, Math.ceil(charCount / 300));
+    const publishedAt = new Date().toISOString().split('T')[0];
+
+    const newEpisode: Episode = {
+      id: epId,
+      novelId: params.novelId,
+      novelTitle,
+      episodeNumber: params.episodeNumber,
+      title: params.title || `Episode ${params.episodeNumber}`,
+      teluguTitle: params.teluguTitle?.trim() || `${params.episodeNumber}వ భాగం`,
+      content: params.content,
+      authorId,
+      authorName,
+      status: 'published',
+      visibility: 'public',
+      readingTimeMinutes: readingTime,
+      publishedAt,
+    };
+
+    // 1. Save to top-level episodes collection
+    try {
+      await setDoc(doc(db, 'episodes', epId), sanitizeFirestoreData({
+        ...newEpisode,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      }));
+    } catch (err) {
+      console.warn('Note writing to episodes collection:', err);
+    }
+
+    // 2. Also save to subcollection chapters
+    try {
+      await setDoc(doc(db, 'novels', params.novelId, 'chapters', epId), sanitizeFirestoreData({
+        id: epId,
+        chapterNumber: params.episodeNumber,
+        title: newEpisode.title,
+        teluguTitle: newEpisode.teluguTitle,
+        content: params.content,
+        authorId,
+        readingTimeMinutes: readingTime,
+        publishedAt,
+        createdAt: serverTimestamp(),
+      }));
+
+      // Increment chaptersCount on novel
+      await updateDoc(doc(db, 'novels', params.novelId), sanitizeFirestoreData({
+        chaptersCount: increment(1),
+        updatedAt: serverTimestamp(),
+      }));
+    } catch (err) {
+      console.warn('Note updating novel chapters subcollection:', err);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('kathavahini:refresh-content'));
+    }
+
+    return newEpisode;
   }
 
   /**

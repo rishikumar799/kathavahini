@@ -72,8 +72,12 @@ class RatingService {
       const storyDoc = await getDoc(doc(db, 'stories', storyId));
       if (storyDoc.exists()) {
         const data = storyDoc.data();
-        const averageRating = typeof data.rating === 'number' ? Number(data.rating.toFixed(1)) : 5.0;
-        const ratingsCount = typeof data.ratingsCount === 'number' ? data.ratingsCount : (data.rating ? 14 : 0);
+        const ratingsCount = typeof data.ratingsCount === 'number' 
+          ? data.ratingsCount 
+          : (typeof data.ratingCount === 'number' ? data.ratingCount : 0);
+        const averageRating = ratingsCount > 0 && typeof data.rating === 'number' && data.rating > 0
+          ? Number(data.rating.toFixed(1)) 
+          : 0;
         return {
           averageRating,
           ratingsCount,
@@ -85,11 +89,11 @@ class RatingService {
       console.warn('Error fetching story rating from Firestore:', err);
     }
 
-    // Fallback to baseline mock story
+    // Fallback to baseline story if present
     const baseline = MOCK_STORIES.find(s => s.id === storyId);
     return {
-      averageRating: baseline?.rating || 5.0,
-      ratingsCount: 18,
+      averageRating: baseline?.rating && baseline.rating > 0 ? baseline.rating : 0,
+      ratingsCount: baseline?.rating && baseline.rating > 0 ? 1 : 0,
       userRating,
       hasRated: userRating > 0
     };

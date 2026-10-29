@@ -125,6 +125,10 @@ export interface Story {
   authorName?: string;
   writerId?: string;
   ownerId?: string;
+  novelId?: string;
+  parentNovelId?: string;
+  novelTitle?: string;
+  episodeNumber?: number;
   author: Author;
   category: StoryCategory;
   tags: string[];
@@ -198,6 +202,9 @@ export interface Novel {
   description: string;
   teluguDescription: string;
   authorId: string;
+  authorName?: string;
+  writerId?: string;
+  ownerId?: string;
   author: Author;
   category: StoryCategory;
   tags: string[];

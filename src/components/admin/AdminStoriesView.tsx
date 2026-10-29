@@ -22,7 +22,7 @@ import {
   Globe
 } from 'lucide-react';
 import { Story, StoryCategory, ContentStatus, ContentVisibility } from '../../types';
-import { formatSafeDate } from '../../utils/dateUtils';
+import { formatSafeDate, formatSafeDateTime } from '../../utils/dateUtils';
 
 interface AdminStoriesViewProps {
   stories: Story[];
@@ -296,7 +296,7 @@ export const AdminStoriesView: React.FC<AdminStoriesViewProps> = ({
                       {isScheduled && (
                         <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/10 text-purple-600 border border-purple-500/20 flex items-center gap-1 font-serif-telugu">
                           <Calendar className="w-3 h-3" />
-                          షెడ్యూల్డ్ ({story.scheduledAt ? formatSafeDate(story.scheduledAt) : ''})
+                          షెడ్యూల్డ్ ({story.scheduledAt ? formatSafeDateTime(story.scheduledAt) : ''})
                         </span>
                       )}
                       {isRejected && (

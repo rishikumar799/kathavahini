@@ -21,6 +21,7 @@ import {
   Loader2
 } from 'lucide-react';
 import { 
+  Novel,
   StoryCategory, 
   User, 
   ImageMetadata, 
@@ -116,12 +117,30 @@ export const WriteModal: React.FC<WriteModalProps> = ({
   // Dynamic Categories from real-time CategoryService
   const [dynamicCategories, setDynamicCategories] = useState<CategoryItem[]>([]);
 
+  // Novel & Episode state
+  const [novelSubMode, setNovelSubMode] = useState<'new_novel' | 'add_episode'>('new_novel');
+  const [availableNovels, setAvailableNovels] = useState<Novel[]>([]);
+  const [selectedParentNovelId, setSelectedParentNovelId] = useState<string>('');
+  const [episodeNumberInput, setEpisodeNumberInput] = useState<number>(2);
+  const [episodeTitleInput, setEpisodeTitleInput] = useState<string>('');
+  const [episodeContentInput, setEpisodeContentInput] = useState<string>('');
+  const [firstChapterTitle, setFirstChapterTitle] = useState<string>('1వ భాగం');
+  const [firstChapterContent, setFirstChapterContent] = useState<string>('');
+
   useEffect(() => {
     if (!isOpen) return;
     const unsubscribe = categoryService.subscribeCategories((cats) => {
       const activeCats = cats.filter(c => c.status === 'active' && c.isActive !== false);
       setDynamicCategories(activeCats);
     });
+
+    novelService.getFeaturedNovels().then((novs) => {
+      setAvailableNovels(novs);
+      if (novs && novs.length > 0 && !selectedParentNovelId) {
+        setSelectedParentNovelId(novs[0].id);
+      }
+    }).catch(() => {});
+
     return () => unsubscribe();
   }, [isOpen]);
 
@@ -347,16 +366,50 @@ export const WriteModal: React.FC<WriteModalProps> = ({
           : 'మీ కథ అడ్మిన్ సమీక్ష కోసం సమర్పించబడింది! ఆమోదం తర్వాత ఇది ప్రచురించబడుతుంది.'
         );
       } else if (mainType === 'novel') {
-        const paragraphs = textContent.split('\n\n').filter(p => p.trim());
-        await novelService.createNovel({
-          title: title || 'My Novel',
-          teluguTitle: teluguTitle || title || 'నా కొత్త నవల',
-          category,
-          coverImage: coverImage || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=80&w=800',
-          description: subtitle || paragraphs[0]?.slice(0, 150) || 'నవల వివరణ',
-          teluguDescription: subtitle || paragraphs[0]?.slice(0, 150) || 'నవల వివరణ',
-        });
-        setSuccessMsg('మీ నవల సమీక్ష కోసం సమర్పించబడింది!');
+        if (novelSubMode === 'new_novel') {
+          const effectiveNovelTitle = teluguTitle.trim() || title.trim() || 'నా కొత్త నవల';
+          const paragraphs = firstChapterContent.trim()
+            ? firstChapterContent.split('\n\n').filter(p => p.trim())
+            : (textContent.trim() ? textContent.split('\n\n').filter(p => p.trim()) : ['మొదటి అధ్యాయం ఇక్కడ ప్రారంభమవుతుంది...']);
+
+          await novelService.createNovel({
+            title: title.trim() || effectiveNovelTitle,
+            teluguTitle: effectiveNovelTitle,
+            category,
+            coverImage: coverImage || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=80&w=800',
+            description: subtitle || textContent || 'నవల వివరణ',
+            teluguDescription: subtitle || textContent || 'నవల వివరణ',
+            firstChapterTitle: firstChapterTitle.trim() || '1వ భాగం',
+            firstChapterContent: paragraphs,
+            authorId: currentUser?.id,
+            authorName: currentUser?.penName || currentUser?.displayName || currentUser?.name || currentUser?.teluguName || 'కథావాహిని రచయిత',
+          }, paragraphs, currentUser);
+
+          setSuccessMsg(isAdmin 
+            ? 'నవల మరియు 1వ భాగం విజయవంతంగా ప్రచురించబడ్డాయి!' 
+            : 'మీ నవల మరియు 1వ భాగం సమీక్ష కోసం సమర్పించబడ్డాయి!'
+          );
+        } else {
+          // Add Episode to existing novel
+          if (!selectedParentNovelId) {
+            throw new Error('దయచేసి నవలను ఎంచుకోండి.');
+          }
+          const epParagraphs = episodeContentInput.split('\n\n').filter(p => p.trim());
+          if (epParagraphs.length === 0) {
+            throw new Error('దయచేసి ఎపిసోడ్ కథాంశాన్ని నమోదు చేయండి.');
+          }
+
+          await novelService.addEpisodeToNovel({
+            novelId: selectedParentNovelId,
+            episodeNumber: Number(episodeNumberInput) || 2,
+            title: episodeTitleInput.trim() || `${episodeNumberInput}వ భాగం`,
+            teluguTitle: episodeTitleInput.trim() || `${episodeNumberInput}వ భాగం`,
+            content: epParagraphs,
+            authorUser: currentUser,
+          });
+
+          setSuccessMsg('కొత్త ఎపిసోడ్ విజయవంతంగా ప్రచురించబడింది!');
+        }
       } else if (mainType === 'joke') {
         await jokeService.publishJoke(jokeText, jokeCategory);
         setSuccessMsg('జోక్ విజయవంతంగా జోడించబడింది!');
@@ -894,56 +947,241 @@ export const WriteModal: React.FC<WriteModalProps> = ({
                 </div>
               </form>
             ) : mainType === 'novel' ? (
-              /* Novel Submission Sub-Form */
-              <form onSubmit={handlePublish} className="space-y-4">
-                <div className="p-4 rounded-2xl bg-[#7A284B]/5 border border-[#7A284B]/20 text-xs text-[#6F6970] dark:text-[#AAA4AC]">
-                  ధారావాహిక నవల శీర్షిక మరియు వివరణ నమోదు చేయండి. ఆమోదం పొందిన తర్వాత మీరు కొత్త ఎపిసోడ్‌లను జోడించవచ్చు.
+              /* Novel and Episode Creation Studio */
+              <form onSubmit={handlePublish} className="space-y-6">
+                {/* Novel Mode Switcher */}
+                <div className="flex items-center gap-2 p-1 bg-[#FAF7F2] dark:bg-[#202027] rounded-2xl border border-[#E8E1DA] dark:border-[#2E2D36]">
+                  <button
+                    type="button"
+                    onClick={() => setNovelSubMode('new_novel')}
+                    className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      novelSubMode === 'new_novel'
+                        ? 'bg-[#7A284B] text-white shadow-sm'
+                        : 'text-[#6F6970] dark:text-[#AAA4AC] hover:text-[#17151A]'
+                    }`}
+                  >
+                    కొత్త నవల ప్రారంభించండి (+ 1వ భాగం)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNovelSubMode('add_episode')}
+                    className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      novelSubMode === 'add_episode'
+                        ? 'bg-[#7A284B] text-white shadow-sm'
+                        : 'text-[#6F6970] dark:text-[#AAA4AC] hover:text-[#17151A]'
+                    }`}
+                  >
+                    ఉన్న నవలకు ఎపిసోడ్ జోడించండి
+                  </button>
                 </div>
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold">నవల శీర్షిక (Telugu Title) *</label>
-                  <input
-                    type="text"
-                    required
-                    value={teluguTitle}
-                    onChange={(e) => setTeluguTitle(e.target.value)}
-                    placeholder="ఉదా: వేయి పడగలు"
-                    className="w-full px-4 py-2.5 rounded-2xl bg-[#FAF7F2] dark:bg-[#202027] border border-[#E8E1DA] text-sm"
-                  />
+
+                {novelSubMode === 'new_novel' ? (
+                  /* New Novel with 1st Chapter Form */
+                  <div className="space-y-4">
+                    <div className="p-3.5 rounded-2xl bg-[#7A284B]/5 border border-[#7A284B]/15 text-xs text-[#6F6970] dark:text-[#AAA4AC]">
+                      కొత్త ధారావాహిక నవల వివరాలు మరియు దాని 1వ భాగం కథాంశాన్ని ఇక్కడ సమర్పించండి.
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE]">నవల శీర్షిక (Telugu Title) *</label>
+                        <input
+                          type="text"
+                          required
+                          value={teluguTitle}
+                          onChange={(e) => setTeluguTitle(e.target.value)}
+                          placeholder="ఉదా: మూడు ముళ్ళు... ఒక పాప"
+                          className="w-full px-4 py-2.5 rounded-2xl bg-[#FAF7F2] dark:bg-[#202027] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm text-[#17151A] dark:text-[#F7F3EE]"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE]">విభాగం (Category)</label>
+                        <select
+                          value={category}
+                          onChange={(e) => setCategory(e.target.value as StoryCategory)}
+                          className="w-full px-4 py-2.5 rounded-2xl bg-[#FAF7F2] dark:bg-[#202027] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm text-[#17151A] dark:text-[#F7F3EE]"
+                        >
+                          {(dynamicCategories.length > 0 ? dynamicCategories : [
+                            { name: 'కుటుంబం', teluguName: 'కుటుంబం' },
+                            { name: 'ప్రేమ', teluguName: 'ప్రేమ' },
+                            { name: 'జీవితం', teluguName: 'జీవితం' },
+                            { name: 'థ్రిల్లర్', teluguName: 'థ్రిల్లర్' },
+                            { name: 'సస్పెన్స్', teluguName: 'సస్పెన్స్' },
+                          ]).map(c => (
+                            <option key={c.name} value={c.name}>{c.teluguName || c.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE]">నవల సంక్షిప్త పరిచయం (Synopsis / Description) *</label>
+                      <textarea
+                        rows={3}
+                        required
+                        value={textContent}
+                        onChange={(e) => setTextContent(e.target.value)}
+                        placeholder="నవల కథా నేపథ్యం, సంక్షిప్త పరిచయం రాయండి..."
+                        className="w-full p-3.5 rounded-2xl bg-[#FAF7F2] dark:bg-[#202027] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm text-[#17151A] dark:text-[#F7F3EE] font-serif-telugu"
+                      />
+                    </div>
+
+                    <CoverImageUploader
+                      value={coverImage}
+                      storagePath={coverImagePath}
+                      metadata={coverImageMetadata}
+                      targetType="novel"
+                      targetId={sessionStoryId}
+                      onChange={(url, path, metadata) => {
+                        setCoverImage(url);
+                        setCoverImagePath(path);
+                        setCoverImageMetadata(metadata);
+                      }}
+                      entityId={sessionStoryId}
+                      folder="novels"
+                      initialImageUrl={coverImage}
+                      onImageUploaded={(url) => setCoverImage(url)}
+                    />
+
+                    {/* Section: Chapter 1 Content */}
+                    <div className="p-4 rounded-3xl bg-[#FAF7F2] dark:bg-[#1E1E26] border border-[#E8E1DA] dark:border-[#2E2D36] space-y-4">
+                      <div className="flex items-center gap-2 text-xs font-bold text-[#7A284B] dark:text-[#D87591]">
+                        <BookOpen className="w-4 h-4" />
+                        <span>1వ అధ్యాయం / భాగం వివరాలు (Episode 1 Content):</span>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE]">1వ భాగం శీర్షిక (Chapter 1 Title)</label>
+                        <input
+                          type="text"
+                          value={firstChapterTitle}
+                          onChange={(e) => setFirstChapterTitle(e.target.value)}
+                          placeholder="ఉదా: 1వ అధ్యాయం: నవోదయం"
+                          className="w-full px-4 py-2.5 rounded-2xl bg-white dark:bg-[#18181D] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE]">1వ భాగం పూర్తి కథాంశం (Chapter Story Content) *</label>
+                        <textarea
+                          rows={8}
+                          required
+                          value={firstChapterContent}
+                          onChange={(e) => setFirstChapterContent(e.target.value)}
+                          placeholder="1వ భాగం యొక్క పూర్తి కథాంశాన్ని పేరాల రూపంలో ఇక్కడ నమోదు చేయండి. పేరాకు పేరాకు మధ్య ఖాళీ లైన్ వదలండి..."
+                          className="w-full p-4 rounded-2xl bg-white dark:bg-[#18181D] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm font-serif-telugu leading-relaxed"
+                        />
+                        <p className="text-[11px] text-[#6F6970] dark:text-[#AAA4AC]">
+                          అక్షరాల సంఖ్య: {firstChapterContent.length} • చదివే సమయం: ~{Math.max(1, Math.ceil(firstChapterContent.length / 300))} నిమిషాలు
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  /* Add Episode to Existing Novel Form */
+                  <div className="space-y-4">
+                    <div className="p-3.5 rounded-2xl bg-purple-500/10 border border-purple-500/20 text-xs text-purple-900 dark:text-purple-200">
+                      మీరు ఇప్పటికే ప్రారంభించిన నవలకు తదుపరి ఎపిసోడ్‌ను జోడించండి.
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE]">నవలను ఎంచుకోండి (Select Parent Novel) *</label>
+                      <select
+                        required
+                        value={selectedParentNovelId}
+                        onChange={(e) => setSelectedParentNovelId(e.target.value)}
+                        className="w-full px-4 py-2.5 rounded-2xl bg-[#FAF7F2] dark:bg-[#202027] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm text-[#17151A] dark:text-[#F7F3EE]"
+                      >
+                        {availableNovels.length === 0 ? (
+                          <option value="">నవలలు అందుబాటులో లేవు</option>
+                        ) : (
+                          availableNovels.map((n) => (
+                            <option key={n.id} value={n.id}>
+                              {n.teluguTitle || n.title} ({n.chaptersCount || 1} భాగాలు)
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE]">ఎపిసోడ్ సంఖ్య (Episode #) *</label>
+                        <input
+                          type="number"
+                          min={1}
+                          required
+                          value={episodeNumberInput}
+                          onChange={(e) => setEpisodeNumberInput(parseInt(e.target.value) || 1)}
+                          className="w-full px-4 py-2.5 rounded-2xl bg-[#FAF7F2] dark:bg-[#202027] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm"
+                        />
+                      </div>
+
+                      <div className="sm:col-span-2 space-y-1.5">
+                        <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE]">ఎపిసోడ్ శీర్షిక (Episode Title) *</label>
+                        <input
+                          type="text"
+                          required
+                          value={episodeTitleInput}
+                          onChange={(e) => setEpisodeTitleInput(e.target.value)}
+                          placeholder="ఉదా: 2వ అధ్యాయం: ఊహించని మలుపు"
+                          className="w-full px-4 py-2.5 rounded-2xl bg-[#FAF7F2] dark:bg-[#202027] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-[#17151A] dark:text-[#F7F3EE]">ఎపిసోడ్ పూర్తి కథాంశం (Episode Story Content) *</label>
+                      <textarea
+                        rows={10}
+                        required
+                        value={episodeContentInput}
+                        onChange={(e) => setEpisodeContentInput(e.target.value)}
+                        placeholder="ఈ ఎపిసోడ్ యొక్క పూర్తి పాఠాన్ని ఇక్కడ నమోదు చేయండి. పేరాకు పేరాకు మధ్య ఖాళీ లైన్ వదలండి..."
+                        className="w-full p-4 rounded-2xl bg-[#FAF7F2] dark:bg-[#202027] border border-[#E8E1DA] dark:border-[#2E2D36] text-sm font-serif-telugu leading-relaxed"
+                      />
+                      <p className="text-[11px] text-[#6F6970] dark:text-[#AAA4AC]">
+                        అక్షరాల సంఖ్య: {episodeContentInput.length} • చదివే సమయం: ~{Math.max(1, Math.ceil(episodeContentInput.length / 300))} నిమిషాలు
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Submission Feedback Messages */}
+                {errorMsg && (
+                  <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-xs flex items-center gap-2.5">
+                    <AlertCircle className="w-5 h-5 shrink-0" />
+                    <span>{errorMsg}</span>
+                  </div>
+                )}
+
+                {successMsg && (
+                  <div className="p-4 rounded-2xl bg-[#3E8065]/10 border border-[#3E8065]/20 text-[#3E8065] text-xs flex items-center gap-2.5">
+                    <CheckCircle2 className="w-5 h-5 shrink-0" />
+                    <span>{successMsg}</span>
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="px-7 py-3 rounded-full bg-[#7A284B] hover:bg-[#631F3C] text-white text-xs font-bold shadow-md cursor-pointer transition-all disabled:opacity-50 inline-flex items-center gap-2"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>సమర్పిస్తోంది...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-4 h-4" />
+                        <span>{novelSubMode === 'new_novel' ? 'నవలను సమర్పించండి' : 'ఎపిసోడ్‌ను ప్రచురించండి'}</span>
+                      </>
+                    )}
+                  </button>
                 </div>
-                <div className="space-y-1.5">
-                  <label className="block text-xs font-bold">నవల పరిచయం (Description) *</label>
-                  <textarea
-                    rows={4}
-                    required
-                    value={textContent}
-                    onChange={(e) => setTextContent(e.target.value)}
-                    placeholder="నవల యొక్క సంక్షిప్త పరిచయం..."
-                    className="w-full p-4 rounded-2xl bg-[#FAF7F2] dark:bg-[#202027] border border-[#E8E1DA] text-sm"
-                  />
-                </div>
-                <CoverImageUploader
-                  value={coverImage}
-                  storagePath={coverImagePath}
-                  metadata={coverImageMetadata}
-                  targetType="novel"
-                  targetId={sessionStoryId}
-                  onChange={(url, path, metadata) => {
-                    setCoverImage(url);
-                    setCoverImagePath(path);
-                    setCoverImageMetadata(metadata);
-                  }}
-                  entityId={sessionStoryId}
-                  folder="novels"
-                  initialImageUrl={coverImage}
-                  onImageUploaded={(url) => setCoverImage(url)}
-                />
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="px-6 py-2.5 rounded-full bg-[#7A284B] text-white text-xs font-bold shadow-md cursor-pointer"
-                >
-                  {loading ? 'సమర్పిస్తోంది...' : 'నవలను సమర్పించండి'}
-                </button>
               </form>
             ) : (
               /* Joke Submission Sub-Form */

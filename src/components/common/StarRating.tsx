@@ -24,8 +24,8 @@ const RATING_LABELS: Record<number, string> = {
 
 export const StarRating: React.FC<StarRatingProps> = ({
   storyId,
-  initialRating = 5.0,
-  initialCount = 18,
+  initialRating = 0,
+  initialCount = 0,
   currentUserId,
   currentUserName,
   size = 'md',
@@ -139,12 +139,21 @@ export const StarRating: React.FC<StarRatingProps> = ({
       {/* Aggregate Rating Summary */}
       {showSummary && (
         <div className="flex items-center gap-3 text-xs text-[#6F6970] dark:text-[#AAA4AC]">
-          <div className="flex items-center gap-1 font-bold text-[#17151A] dark:text-[#F7F3EE]">
-            <Sparkles className="w-3.5 h-3.5 text-[#D99A3D]" />
-            <span>సగటు: {ratingData.averageRating.toFixed(1)} / 5.0</span>
-          </div>
-          <span>•</span>
-          <span>{ratingData.ratingsCount.toLocaleString()} మంది పాఠకుల సమీక్షలు</span>
+          {ratingData.ratingsCount > 0 && ratingData.averageRating > 0 ? (
+            <>
+              <div className="flex items-center gap-1 font-bold text-[#17151A] dark:text-[#F7F3EE]">
+                <Sparkles className="w-3.5 h-3.5 text-[#D99A3D]" />
+                <span>సగటు: {ratingData.averageRating.toFixed(1)} / 5.0</span>
+              </div>
+              <span>•</span>
+              <span>{ratingData.ratingsCount.toLocaleString()} మంది పాఠకుల సమీక్షలు</span>
+            </>
+          ) : (
+            <div className="flex items-center gap-1.5 text-xs text-[#6F6970] dark:text-[#A29CA6]">
+              <Sparkles className="w-3.5 h-3.5 text-amber-500/70" />
+              <span>ఇంకా రేటింగ్ ఇవ్వలేదు • మొదటి సమీక్ష మీరే అందించండి!</span>
+            </div>
+          )}
         </div>
       )}
     </div>

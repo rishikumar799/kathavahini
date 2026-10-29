@@ -16,10 +16,13 @@ import {
   ArrowUpRight,
   Trash2
 } from 'lucide-react';
-import { User, UserRole, AccountStatus } from '../../types';
+import { User, UserRole, AccountStatus, Story, Novel, Episode } from '../../types';
 
 interface AdminUsersViewProps {
   users: User[];
+  stories?: Story[];
+  novels?: Novel[];
+  episodes?: Episode[];
   onToggleStatus: (user: User, newStatus: AccountStatus) => void;
   onPromoteToWriter?: (user: User) => void;
   onOpenAddUser?: () => void;
@@ -30,6 +33,9 @@ interface AdminUsersViewProps {
 
 export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   users,
+  stories = [],
+  novels = [],
+  episodes = [],
   onToggleStatus,
   onPromoteToWriter,
   onOpenAddUser,
@@ -43,6 +49,32 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
   const [promoteModalUser, setPromoteModalUser] = useState<User | null>(null);
   const [penName, setPenName] = useState('');
   const [bio, setBio] = useState('');
+
+  const getUserContentCount = (u: User) => {
+    const userStories = (stories || []).filter(s => {
+      const matchId = s.authorId === u.id || s.writerId === u.id || s.ownerId === u.id || (s.author && s.author.id === u.id);
+      const sAuthorName = (s.authorName || (s.author && (s.author.name || s.author.teluguName)) || '').trim().toLowerCase();
+      const matchName = Boolean(sAuthorName && (
+        (u.displayName && sAuthorName === u.displayName.trim().toLowerCase()) ||
+        (u.name && sAuthorName === u.name.trim().toLowerCase()) ||
+        (u.teluguName && sAuthorName === u.teluguName.trim().toLowerCase())
+      ));
+      return matchId || matchName;
+    });
+
+    const userNovels = (novels || []).filter(n => {
+      const matchId = n.authorId === u.id || (n.author && n.author.id === u.id);
+      const nAuthorName = ((n as any).authorName || (n.author && (n.author.name || n.author.teluguName)) || '').trim().toLowerCase();
+      const matchName = Boolean(nAuthorName && (
+        (u.displayName && nAuthorName === u.displayName.trim().toLowerCase()) ||
+        (u.name && nAuthorName === u.name.trim().toLowerCase()) ||
+        (u.teluguName && nAuthorName === u.teluguName.trim().toLowerCase())
+      ));
+      return matchId || matchName;
+    });
+
+    return Math.max(userStories.length + userNovels.length, u.publishedCount || 0);
+  };
 
   const filteredUsers = users.filter(u => {
     const nameMatch = (u.displayName || u.name || '').toLowerCase().includes(searchQuery.toLowerCase());
@@ -240,8 +272,8 @@ export const AdminUsersView: React.FC<AdminUsersViewProps> = ({
                       </td>
 
                       {/* Content stats */}
-                      <td className="py-3.5 px-4 text-[#6F6970] dark:text-[#A29CA6]">
-                        {user.publishedCount || user.savedStoriesCount || 0}
+                      <td className="py-3.5 px-4 font-bold text-[#17151A] dark:text-[#F7F3EE]">
+                        {getUserContentCount(user)}
                       </td>
 
                       {/* Actions */}

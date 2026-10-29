@@ -91,10 +91,16 @@ export const NovelCard: React.FC<NovelCardProps> = ({
               {novel.chaptersCount} అధ్యాయాలు
             </span>
 
-            <span className="flex items-center gap-1 font-medium">
-              <Star className="w-3.5 h-3.5 text-[#D99A3D] fill-[#D99A3D]" />
-              {novel.rating.toFixed(1)}
-            </span>
+            {novel.rating && novel.rating > 0 ? (
+              <span className="flex items-center gap-1 font-medium">
+                <Star className="w-3.5 h-3.5 text-[#D99A3D] fill-[#D99A3D]" />
+                {novel.rating.toFixed(1)}
+              </span>
+            ) : (
+              <span className="text-[11px] text-[#6F6970] dark:text-[#AAA4AC]">
+                కొత్త నవల
+              </span>
+            )}
           </div>
         </div>
       </div>

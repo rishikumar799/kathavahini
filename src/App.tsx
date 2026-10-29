@@ -98,6 +98,9 @@ export default function App() {
       readingTimeMinutes: item.readingTimeMinutes || 5,
       publishedAt: item.publishedAt || novel.publishedAt,
       status: 'published',
+      novelId: novel.id,
+      parentNovelId: novel.id,
+      novelTitle: novel.teluguTitle,
     };
   };
 
@@ -134,7 +137,11 @@ export default function App() {
   const categoriesWithStoryCounts = React.useMemo(() => {
     return categories.map(cat => {
       const realCount = allStories.filter(
-        s => s.status === 'published' && (s.category === cat.name || s.category === cat.teluguName)
+        s => (s.status === 'published' || !s.status) && (
+          s.category === cat.name || 
+          s.category === cat.teluguName ||
+          (s.category && (cat.name.includes(s.category) || s.category.includes(cat.name)))
+        )
       ).length;
       return {
         ...cat,
@@ -180,7 +187,18 @@ export default function App() {
       );
 
       // Rule: After successful admin authentication, ADMIN -> ADMIN DASHBOARD
-      if (isUserAdmin && !hasAdminRedirectedRef.current) {
+      // (Unless the admin opened a specific shared story/novel/author deep link)
+      const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+      const urlPath = typeof window !== 'undefined' ? window.location.pathname : '';
+      const hasDeepLink = (urlParams && (
+        urlParams.has('story') || 
+        urlParams.has('novel') || 
+        urlParams.has('author') || 
+        urlParams.has('writer') || 
+        urlParams.has('profile')
+      )) || urlPath.startsWith('/story/') || urlPath.startsWith('/novel/') || urlPath.startsWith('/author/');
+
+      if (isUserAdmin && !hasAdminRedirectedRef.current && !hasDeepLink) {
         hasAdminRedirectedRef.current = true;
         setCurrentTab('admin');
         return;
@@ -682,7 +700,7 @@ export default function App() {
             featuredNovels={novels}
             featuredAuthors={authors}
             jokes={jokes}
-            categories={categories}
+            categories={categoriesWithStoryCounts}
             readingHistory={readingHistory}
             isAdmin={user?.role === 'admin' || user?.email?.toLowerCase() === 'thekathavahini@gmail.com'}
             onOpenAdminHeroEditor={() => setCurrentTab('admin')}
@@ -702,7 +720,7 @@ export default function App() {
         return (
           <StoriesView
             stories={allStories.length > 0 ? allStories : trendingStories}
-            categories={categories}
+            categories={categoriesWithStoryCounts}
             onSelectStory={handleSelectStory}
             onBookmarkToggle={handleBookmarkToggle}
             onLikeToggle={handleLikeToggle}
@@ -760,6 +778,16 @@ export default function App() {
                 setSelectedNovel(activeNovelContext.novel);
                 setCurrentTab('novel-detail');
                 setActiveNovelContext(null);
+              } else if ((selectedStory as any)?.novelId || (selectedStory as any)?.parentNovelId) {
+                const targetNovelId = (selectedStory as any).novelId || (selectedStory as any).parentNovelId;
+                novelService.getNovelById(targetNovelId).then(n => {
+                  if (n) {
+                    setSelectedNovel(n);
+                    setCurrentTab('novel-detail');
+                  } else {
+                    setCurrentTab('novels');
+                  }
+                }).catch(() => setCurrentTab('novels'));
               } else {
                 setCurrentTab('story-detail');
               }

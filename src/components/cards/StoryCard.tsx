@@ -62,11 +62,17 @@ export const StoryCard: React.FC<StoryCardProps> = ({
         )}
 
         {/* Rating & Reading Time */}
-        <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white text-xs font-medium">
-          <div className="flex items-center gap-1 bg-black/40 backdrop-blur-sm px-2 py-0.5 rounded-full">
-            <Star className="w-3.5 h-3.5 text-[#D99A3D] fill-[#D99A3D]" />
-            <span>{story.rating.toFixed(1)}</span>
-          </div>
+        <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-xs text-white">
+          {story.rating && story.rating > 0 ? (
+            <div className="flex items-center gap-1 bg-black/40 backdrop-blur-sm px-2 py-0.5 rounded-full">
+              <Star className="w-3.5 h-3.5 text-[#D99A3D] fill-[#D99A3D]" />
+              <span>{story.rating.toFixed(1)}</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1 bg-black/40 backdrop-blur-sm px-2 py-0.5 rounded-full text-[11px] text-white/90">
+              <span>కొత్త రచన</span>
+            </div>
+          )}
           <div className="flex items-center gap-1 bg-black/40 backdrop-blur-sm px-2 py-0.5 rounded-full">
             <Clock className="w-3.5 h-3.5" />
             <span>{story.readingTimeMinutes} నిమి</span>

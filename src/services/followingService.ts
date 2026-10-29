@@ -59,15 +59,25 @@ export class FollowingService {
         console.warn('Silent user following decrement:', err);
       }
 
-      // Decrement author's followersCount
+      // Decrement author's / writer's followersCount
       try {
         await updateDoc(doc(db, 'authors', authorId), sanitizeFirestoreData({
           followersCount: increment(-1),
           updatedAt: serverTimestamp(),
         }));
-      } catch (err) {
-        console.warn('Silent author followers decrement:', err);
-      }
+      } catch (err) {}
+      try {
+        await updateDoc(doc(db, 'writers', authorId), sanitizeFirestoreData({
+          followersCount: increment(-1),
+          updatedAt: serverTimestamp(),
+        }));
+      } catch (err) {}
+      try {
+        await updateDoc(doc(db, 'users', authorId), sanitizeFirestoreData({
+          followersCount: increment(-1),
+          updatedAt: serverTimestamp(),
+        }));
+      } catch (err) {}
 
       return false;
     } else {
@@ -89,18 +99,51 @@ export class FollowingService {
         console.warn('Silent user following increment:', err);
       }
 
-      // Increment author's followersCount
+      // Increment author's / writer's followersCount
       try {
         await updateDoc(doc(db, 'authors', authorId), sanitizeFirestoreData({
           followersCount: increment(1),
           updatedAt: serverTimestamp(),
         }));
-      } catch (err) {
-        console.warn('Silent author followers increment:', err);
-      }
+      } catch (err) {}
+      try {
+        await updateDoc(doc(db, 'writers', authorId), sanitizeFirestoreData({
+          followersCount: increment(1),
+          updatedAt: serverTimestamp(),
+        }));
+      } catch (err) {}
+      try {
+        await updateDoc(doc(db, 'users', authorId), sanitizeFirestoreData({
+          followersCount: increment(1),
+          updatedAt: serverTimestamp(),
+        }));
+      } catch (err) {}
 
       return true;
     }
+  }
+
+  /**
+   * Get accurate followers count for an author from persistent Firestore document
+   */
+  public async getAuthorFollowersCount(authorId: string): Promise<number> {
+    try {
+      const authorSnap = await getDoc(doc(db, 'authors', authorId));
+      if (authorSnap.exists() && typeof authorSnap.data().followersCount === 'number') {
+        return Math.max(0, authorSnap.data().followersCount);
+      }
+      const writerSnap = await getDoc(doc(db, 'writers', authorId));
+      if (writerSnap.exists() && typeof writerSnap.data().followersCount === 'number') {
+        return Math.max(0, writerSnap.data().followersCount);
+      }
+      const userSnap = await getDoc(doc(db, 'users', authorId));
+      if (userSnap.exists() && typeof userSnap.data().followersCount === 'number') {
+        return Math.max(0, userSnap.data().followersCount);
+      }
+    } catch (err) {
+      console.warn('Error reading author followers count:', err);
+    }
+    return 0;
   }
 
   /**

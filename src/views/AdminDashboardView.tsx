@@ -892,6 +892,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           {activeTab === 'users' && (
             <AdminUsersView
               users={users}
+              stories={stories}
+              novels={novels}
+              episodes={episodes}
               onToggleStatus={handleToggleUserStatus}
               onPromoteToWriter={handlePromoteUserToWriter}
               onOpenAddUser={() => setAddUserModalOpen(true)}
@@ -904,6 +907,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           {activeTab === 'readers' && (
             <AdminUsersView
               users={users}
+              stories={stories}
+              novels={novels}
+              episodes={episodes}
               onToggleStatus={handleToggleUserStatus}
               onPromoteToWriter={handlePromoteUserToWriter}
               onOpenAddUser={() => setAddUserModalOpen(true)}
@@ -916,6 +922,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           {activeTab === 'writers' && (
             <AdminUsersView
               users={users}
+              stories={stories}
+              novels={novels}
+              episodes={episodes}
               onToggleStatus={handleToggleUserStatus}
               onPromoteToWriter={handlePromoteUserToWriter}
               onOpenAddUser={() => setAddUserModalOpen(true)}
@@ -928,6 +937,9 @@ export const AdminDashboardView: React.FC<AdminDashboardViewProps> = ({
           {activeTab === 'add-user' && (
             <AdminUsersView
               users={users}
+              stories={stories}
+              novels={novels}
+              episodes={episodes}
               onToggleStatus={handleToggleUserStatus}
               onPromoteToWriter={handlePromoteUserToWriter}
               onOpenAddUser={() => setAddUserModalOpen(true)}

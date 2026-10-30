@@ -313,3 +313,116 @@ export const publishScheduledContentHttp = onRequest(
     }
   }
 );
+
+/**
+ * Dynamic OpenGraph share preview endpoint for WhatsApp, Facebook, Twitter/X, Telegram crawlers
+ */
+export const sharePreview = onRequest(
+  {
+    cors: true,
+    region: 'us-central1',
+  },
+  async (req: any, res: any) => {
+    try {
+      const url = req.url || '';
+      const query = req.query || {};
+      const storyId = query.story || query.episode || (url.includes('/story/') ? url.split('/story/')[1]?.split('?')[0] : null);
+      const novelId = query.novel || (url.includes('/novel/') ? url.split('/novel/')[1]?.split('?')[0] : null);
+      const authorId = query.author || query.writer || query.profile || (url.includes('/author/') ? url.split('/author/')[1]?.split('?')[0] : null);
+
+      let title = 'కథావాహిని — తెలుగు కథా వేదిక';
+      let description = 'తెలుగు కథలు, నవలలు, బాలవినోదిని మరియు సాహిత్య రచనల వేదిక.';
+      let image = 'https://thekathavahini.web.app/logo.png';
+      let canonicalUrl = 'https://thekathavahini.web.app';
+
+      if (storyId) {
+        canonicalUrl = `https://thekathavahini.web.app/?story=${storyId}`;
+        const sDoc = await db.collection('stories').doc(storyId).get();
+        if (sDoc.exists) {
+          const s = sDoc.data() || {};
+          title = `${s.teluguTitle || s.title || 'తెలుగు కథ'} | కథావాహిని`;
+          description = s.teluguExcerpt || s.excerpt || `${s.teluguTitle || 'కథ'} కథావాహినిలో చదవండి.`;
+          if (s.coverImage) image = s.coverImage;
+        } else {
+          // Check episodes collection
+          const epDoc = await db.collection('episodes').doc(storyId).get();
+          if (epDoc.exists) {
+            const ep = epDoc.data() || {};
+            title = `${ep.teluguTitle || ep.title || 'నవల అధ్యాయం'} | కథావాహిని`;
+            description = ep.teluguExcerpt || `${ep.novelTitle || 'నవల'} భాగం కథావాహినిలో చదవండి.`;
+            if (ep.coverImage) image = ep.coverImage;
+            canonicalUrl = `https://thekathavahini.web.app/?story=${storyId}&reader=true`;
+          }
+        }
+      } else if (novelId) {
+        canonicalUrl = `https://thekathavahini.web.app/?novel=${novelId}`;
+        const nDoc = await db.collection('novels').doc(novelId).get();
+        if (nDoc.exists) {
+          const n = nDoc.data() || {};
+          title = `${n.teluguTitle || n.title || 'తెలుగు నవల'} | కథావాహిని`;
+          description = n.teluguDescription || n.description || `${n.teluguTitle || 'నవల'} కథావాహినిలో చదవండి.`;
+          if (n.coverImage) image = n.coverImage;
+        }
+      } else if (authorId) {
+        canonicalUrl = `https://thekathavahini.web.app/?author=${authorId}`;
+        let aDoc = await db.collection('writers').doc(authorId).get();
+        if (!aDoc.exists) aDoc = await db.collection('authors').doc(authorId).get();
+        if (!aDoc.exists) aDoc = await db.collection('users').doc(authorId).get();
+
+        if (aDoc.exists) {
+          const a = aDoc.data() || {};
+          const aName = a.teluguName || a.displayName || a.penName || a.name || 'రచయిత';
+          title = `${aName} - రచయిత ప్రొఫైల్ | కథావాహిని`;
+          description = a.teluguBio || a.bio || `${aName} గారి రచనలు కథావాహినిలో చదవండి.`;
+          if (a.photoURL || a.avatar) image = a.photoURL || a.avatar;
+        }
+      }
+
+      // Escape HTML entities
+      const escapeHtml = (str: string) =>
+        (str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+      const safeTitle = escapeHtml(title);
+      const safeDesc = escapeHtml(description);
+      const safeImg = escapeHtml(image);
+      const safeUrl = escapeHtml(canonicalUrl);
+
+      const html = `<!DOCTYPE html>
+<html lang="te">
+<head>
+  <meta charset="utf-8">
+  <title>${safeTitle}</title>
+  <meta name="description" content="${safeDesc}">
+  <meta property="og:site_name" content="కథావాహిని (Kathavahini)">
+  <meta property="og:title" content="${safeTitle}">
+  <meta property="og:description" content="${safeDesc}">
+  <meta property="og:image" content="${safeImg}">
+  <meta property="og:image:secure_url" content="${safeImg}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:url" content="${safeUrl}">
+  <meta property="og:type" content="article">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:site" content="@kathavahini">
+  <meta name="twitter:title" content="${safeTitle}">
+  <meta name="twitter:description" content="${safeDesc}">
+  <meta name="twitter:image" content="${safeImg}">
+  <link rel="canonical" href="${safeUrl}">
+  <meta http-equiv="refresh" content="0;url=${safeUrl}">
+  <script>window.location.replace('${safeUrl}');</script>
+</head>
+<body style="font-family: sans-serif; text-align: center; padding: 40px; background: #FAF7F2; color: #17151A;">
+  <p>దయచేసి వేచి ఉండండి, కథావాహిని లోకి వెళ్తున్నారు...</p>
+  <a href="${safeUrl}" style="color: #7A284B; font-weight: bold;">ఇక్కడ క్లిక్ చేయండి</a>
+</body>
+</html>`;
+
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=600');
+      res.status(200).send(html);
+    } catch (err: any) {
+      console.error('Error generating share preview:', err);
+      res.redirect('https://thekathavahini.web.app');
+    }
+  }
+);

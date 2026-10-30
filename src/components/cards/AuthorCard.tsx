@@ -1,8 +1,9 @@
 import React from 'react';
-import { UserCheck, UserPlus, BookOpen, Users } from 'lucide-react';
+import { UserCheck, UserPlus, BookOpen, Users, Share2 } from 'lucide-react';
 import { Author } from '../../types';
 import { resolveAvatarUrl } from '../../utils/avatarUtils';
 import { getAuthorDisplayName } from '../../utils/authorResolver';
+import { shareContent } from '../../utils/shareUtils';
 
 interface AuthorCardProps {
   author: Author;
@@ -76,28 +77,47 @@ export const AuthorCard: React.FC<AuthorCardProps> = ({
           </span>
         </div>
 
-        {onFollowToggle && (
+        <div className="flex items-center gap-2">
           <button
-            onClick={(e) => onFollowToggle(author.id, e)}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
-              author.isFollowing
-                ? 'bg-[#E8E1DA] dark:bg-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE] hover:bg-red-100 hover:text-red-600'
-                : 'bg-[#7A284B] hover:bg-[#631F3C] dark:bg-[#D87591] dark:hover:bg-[#EA8DA7] text-white shadow-sm'
-            }`}
+            onClick={async (e) => {
+              e.stopPropagation();
+              await shareContent({
+                contentType: 'author',
+                id: author.id,
+                title: `${displayName} - రచయిత ప్రొఫైల్ (Kathavahini)`,
+                text: author.teluguBio || `${displayName} గారి రచనలు కథావాహినిలో చదవండి`,
+                coverImage: author.avatar,
+              });
+            }}
+            className="p-1.5 rounded-full border border-[#E8E1DA] dark:border-[#2E2D36] text-[#6F6970] dark:text-[#AAA4AC] hover:text-[#7A284B] dark:hover:text-[#D87591] hover:bg-[#FAF7F2] dark:hover:bg-[#222229] transition-colors cursor-pointer"
+            title="రచయిత ప్రొఫైల్‌ను షేర్ చేయండి"
           >
-            {author.isFollowing ? (
-              <>
-                <UserCheck className="w-3.5 h-3.5" />
-                <span>అనుసరిస్తున్నారు</span>
-              </>
-            ) : (
-              <>
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>అనుసరించండి</span>
-              </>
-            )}
+            <Share2 className="w-3.5 h-3.5" />
           </button>
-        )}
+
+          {onFollowToggle && (
+            <button
+              onClick={(e) => onFollowToggle(author.id, e)}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${
+                author.isFollowing
+                  ? 'bg-[#E8E1DA] dark:bg-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE] hover:bg-red-100 hover:text-red-600'
+                  : 'bg-[#7A284B] hover:bg-[#631F3C] dark:bg-[#D87591] dark:hover:bg-[#EA8DA7] text-white shadow-sm'
+              }`}
+            >
+              {author.isFollowing ? (
+                <>
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span>అనుసరిస్తున్నారు</span>
+                </>
+              ) : (
+                <>
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>అనుసరించండి</span>
+                </>
+              )}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

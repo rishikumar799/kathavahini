@@ -381,12 +381,66 @@ class StoryService {
           readingTimeMinutes: data.readingTimeMinutes || 3,
           publishedAt: data.publishedAt instanceof Timestamp ? data.publishedAt.toDate().toISOString().split('T')[0] : (data.publishedAt || ''),
           status: data.status || 'published',
+          novelId: data.novelId || data.parentNovelId,
+          parentNovelId: data.parentNovelId || data.novelId,
+          novelTitle: data.novelTitle,
+          episodeNumber: data.episodeNumber ? Number(data.episodeNumber) : undefined,
           isLiked,
           isBookmarked,
         };
       }
     } catch (err) {
       console.warn(`Error fetching story ${id} from Firestore:`, err);
+    }
+
+    // Fallback: Check if the ID belongs to `episodes` collection
+    try {
+      const epSnap = await getDoc(doc(db, 'episodes', id));
+      if (epSnap.exists()) {
+        const epData = epSnap.data();
+        if (epData.deleted !== true && epData.status !== 'deleted') {
+          const parentNovelId = epData.novelId;
+          let novel: any = null;
+          if (parentNovelId) {
+            const nSnap = await getDoc(doc(db, 'novels', parentNovelId));
+            if (nSnap.exists()) novel = nSnap.data();
+          }
+          const content = Array.isArray(epData.content) ? epData.content : [epData.content || ''];
+          const epNum = Number(epData.episodeNumber) || 1;
+          const novelTeluguTitle = epData.novelTitle || novel?.teluguTitle || 'నవల';
+          const epTeluguTitle = epData.teluguTitle || `${epNum}వ భాగం`;
+          return {
+            id: epSnap.id,
+            title: epData.title || `${novel?.title || 'Novel'} - Episode ${epNum}`,
+            teluguTitle: `${novelTeluguTitle} - ${epTeluguTitle}`,
+            slug: novel?.slug || 'novel',
+            coverImage: epData.coverImage || novel?.coverImage || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=80&w=800',
+            excerpt: novel?.teluguDescription || epTeluguTitle,
+            teluguExcerpt: novel?.teluguDescription || epTeluguTitle,
+            content,
+            authorId: epData.authorId || novel?.authorId || '',
+            authorName: epData.authorName || novel?.authorName,
+            author: resolveContentAuthor({ id: epSnap.id, ...epData, ...(novel || {}) }),
+            category: novel?.category || 'కుటుంబం',
+            tags: novel?.tags || ['నవల', 'ఎపిసోడ్'],
+            rating: novel?.rating || 0,
+            viewCount: epData.viewsCount || epData.viewCount || 0,
+            likeCount: epData.likesCount || epData.likeCount || 0,
+            bookmarkCount: epData.bookmarksCount || epData.bookmarkCount || 0,
+            readingTimeMinutes: epData.readingTimeMinutes || Math.max(1, Math.ceil(content.join(' ').length / 300)),
+            publishedAt: epData.publishedAt instanceof Timestamp ? epData.publishedAt.toDate().toISOString().split('T')[0] : (epData.publishedAt || ''),
+            status: 'published',
+            novelId: parentNovelId,
+            parentNovelId,
+            novelTitle: novelTeluguTitle,
+            episodeNumber: epNum,
+            isLiked: guestLikes.includes(epSnap.id),
+            isBookmarked: false,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('Note checking episodes collection in getStoryById:', err);
     }
 
     const baseline = MOCK_STORIES.find(s => s.id === id && !deletionTracker.isDeleted(s.id));

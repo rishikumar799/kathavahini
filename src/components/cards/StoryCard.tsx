@@ -1,8 +1,9 @@
 import React from 'react';
-import { Bookmark, Heart, Eye, Clock, Star } from 'lucide-react';
+import { Bookmark, Heart, Eye, Clock, Star, Share2 } from 'lucide-react';
 import { Story } from '../../types';
 import { resolveAvatarUrl } from '../../utils/avatarUtils';
 import { resolveContentAuthor, getAuthorDisplayName } from '../../utils/authorResolver';
+import { shareContent } from '../../utils/shareUtils';
 
 interface StoryCardProps {
   story: Story;
@@ -125,6 +126,23 @@ export const StoryCard: React.FC<StoryCardProps> = ({
                 }`}
               />
               <span>{story.likeCount}</span>
+            </button>
+
+            <button
+              onClick={async (e) => {
+                e.stopPropagation();
+                await shareContent({
+                  contentType: 'story',
+                  id: story.id,
+                  title: story.teluguTitle,
+                  text: story.teluguExcerpt,
+                  coverImage: story.coverImage,
+                });
+              }}
+              className="p-1 text-[#6F6970] dark:text-[#AAA4AC] hover:text-[#7A284B] dark:hover:text-[#D87591] transition-colors cursor-pointer"
+              title="కథను షేర్ చేయండి"
+            >
+              <Share2 className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>

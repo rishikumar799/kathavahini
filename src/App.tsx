@@ -54,9 +54,58 @@ import { AdminDashboardView } from './views/AdminDashboardView';
 import { ResetPasswordView } from './views/ResetPasswordView';
 import { AdminTopBanner } from './components/admin/AdminTopBanner';
 import { PublicAnnouncementBanner } from './components/common/PublicAnnouncementBanner';
+import { updatePageMeta } from './utils/metaTags';
+
+/**
+ * Synchronous initial route resolver to prevent flash of homepage on shared links
+ */
+function getInitialRouteInfo(): {
+  tab: string;
+  isDirectLink: boolean;
+  storyId?: string | null;
+  novelId?: string | null;
+  authorId?: string | null;
+  isReader?: boolean;
+} {
+  if (typeof window === 'undefined') return { tab: 'home', isDirectLink: false };
+  const path = window.location.pathname;
+  const search = window.location.search;
+  const hash = window.location.hash;
+  
+  const params = new URLSearchParams(search);
+  const hashParams = hash.includes('?') ? new URLSearchParams(hash.substring(hash.indexOf('?'))) : null;
+  
+  const isResetPath = path === '/reset-password' || path.endsWith('/reset-password') || hash === '#/reset-password' || hash.startsWith('#/reset-password');
+  const hasResetMode = params.get('mode') === 'resetPassword' || hashParams?.get('mode') === 'resetPassword';
+  const hasOobCode = params.has('oobCode') || hashParams?.has('oobCode');
+
+  if (isResetPath || hasResetMode || hasOobCode) {
+    return { tab: 'reset-password', isDirectLink: false };
+  }
+
+  const storyId = params.get('story') || params.get('episode') || (path.startsWith('/story/') ? path.split('/')[2] : null);
+  const isReader = params.get('reader') === 'true' || Boolean(params.get('episode'));
+  const novelId = params.get('novel') || (path.startsWith('/novel/') ? path.split('/')[2] : null);
+  const authorId = params.get('author') || params.get('writer') || (path.startsWith('/author/') ? path.split('/')[2] : null);
+  const profileId = params.get('profile') || params.get('user') || (path.startsWith('/profile/') ? path.split('/')[2] : null);
+
+  if (storyId) {
+    return { tab: isReader ? 'story-reader' : 'story-detail', isDirectLink: true, storyId, isReader };
+  }
+  if (novelId) {
+    return { tab: 'novel-detail', isDirectLink: true, novelId };
+  }
+  if (authorId || profileId) {
+    return { tab: 'author-detail', isDirectLink: true, authorId: authorId || profileId };
+  }
+
+  return { tab: 'home', isDirectLink: false };
+}
 
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<string>('home');
+  const [initialRoute] = useState(getInitialRouteInfo);
+  const [currentTab, setCurrentTab] = useState<string>(initialRoute.tab);
+  const [directRouteLoading, setDirectRouteLoading] = useState<boolean>(initialRoute.isDirectLink);
   const [darkMode, setDarkMode] = useState<boolean>(false);
 
   // Selected state for detailed routing
@@ -172,6 +221,51 @@ export default function App() {
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [currentTab]);
+
+  // Dynamic OpenGraph / Page title updates for SEO and WhatsApp sharing
+  useEffect(() => {
+    if (currentTab === 'story-detail' && selectedStory) {
+      updatePageMeta({
+        title: selectedStory.teluguTitle || selectedStory.title,
+        description: selectedStory.teluguExcerpt || selectedStory.excerpt || `${selectedStory.title} - కథావాహిని లో చదవండి`,
+        image: selectedStory.coverImage,
+        url: `/?story=${selectedStory.id}`,
+        type: 'article',
+      });
+    } else if (currentTab === 'story-reader' && selectedStory) {
+      updatePageMeta({
+        title: selectedStory.teluguTitle || selectedStory.title,
+        description: selectedStory.teluguExcerpt || selectedStory.excerpt || `${selectedStory.title} - కథావాహిని లో చదవండి`,
+        image: selectedStory.coverImage,
+        url: `/?story=${selectedStory.id}&reader=true`,
+        type: 'article',
+      });
+    } else if (currentTab === 'novel-detail' && selectedNovel) {
+      updatePageMeta({
+        title: selectedNovel.teluguTitle || selectedNovel.title,
+        description: selectedNovel.teluguDescription || selectedNovel.description || `${selectedNovel.title} - తెలుగు ధారావాహిక నవల`,
+        image: selectedNovel.coverImage,
+        url: `/?novel=${selectedNovel.id}`,
+        type: 'article',
+      });
+    } else if (currentTab === 'author-detail' && selectedAuthor) {
+      updatePageMeta({
+        title: `${selectedAuthor.teluguName || selectedAuthor.name} - రచయిత ప్రొఫైల్`,
+        description: selectedAuthor.teluguBio || selectedAuthor.bio || `${selectedAuthor.name} కథావాహిని రచయిత ప్రొఫైల్ మరియు రచనలు`,
+        image: selectedAuthor.avatar,
+        url: `/?author=${selectedAuthor.id}`,
+        type: 'profile',
+      });
+    } else if (currentTab === 'home') {
+      updatePageMeta({
+        title: 'కథావాహిని — తెలుగు కథా వేదిక',
+        description: 'తెలుగు కథలు, నవలలు, బాలవినోదిని మరియు సాహిత్య రచనల వేదిక. మీ కథలను ప్రపంచంతో పంచుకోండి.',
+        image: '/logo.png',
+        url: '/',
+        type: 'website',
+      });
+    }
+  }, [currentTab, selectedStory?.id, selectedStory?.teluguTitle, selectedNovel?.id, selectedNovel?.teluguTitle, selectedAuthor?.id, selectedAuthor?.name]);
 
   const currentTabRef = React.useRef(currentTab);
   currentTabRef.current = currentTab;
@@ -409,7 +503,53 @@ export default function App() {
     window.addEventListener('kathavahini:story-rated', handleStoryRated);
     window.addEventListener('kathavahini:story-viewed', handleStoryViewed);
 
-    // Check if initial URL contains deep-links (story, novel, author, profile) or password reset
+    // Event listeners for novel and episode navigation across views
+    const handleNavigateEpisode = (e: any) => {
+      const { novel, episode, episodeIndex, episodes } = e.detail || {};
+      if (!novel || !episode) return;
+      const targetStory = convertEpisodeToStory(novel, episode, episodeIndex);
+      setSelectedStory(targetStory);
+      setActiveNovelContext({
+        novel,
+        episodes: episodes || [],
+        currentEpisodeIndex: episodeIndex,
+        onSelectEpisodeIndex: (newIndex: number) => {
+          const epList = episodes || [];
+          const targetEp = epList[newIndex];
+          if (!targetEp) return;
+          const ts = convertEpisodeToStory(novel, targetEp, newIndex);
+          setSelectedStory(ts);
+          setActiveNovelContext(prev => prev ? { ...prev, currentEpisodeIndex: newIndex } : null);
+          updateUrl('story-reader', 'story', ts.id);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        },
+        onReturnToNovel: () => {
+          setSelectedNovel(novel);
+          setCurrentTab('novel-detail');
+          setActiveNovelContext(null);
+          updateUrl('novel-detail', 'novel', novel.id);
+        }
+      });
+      setCurrentTab('story-reader');
+      updateUrl('story-reader', 'story', targetStory.id);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    const handleOpenNovelDetail = (e: any) => {
+      const { novel } = e.detail || {};
+      if (novel) {
+        setSelectedNovel(novel);
+        setCurrentTab('novel-detail');
+        setActiveNovelContext(null);
+        updateUrl('novel-detail', 'novel', novel.id);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    };
+
+    window.addEventListener('kathavahini:navigate-episode', handleNavigateEpisode);
+    window.addEventListener('kathavahini:open-novel-detail', handleOpenNovelDetail);
+
+    // Immediate deep-link resolution for Stories, Novels, Authors, and Profiles
     if (typeof window !== 'undefined') {
       const path = window.location.pathname;
       const search = window.location.search;
@@ -424,9 +564,10 @@ export default function App() {
 
       if (isResetPath || hasResetMode || hasOobCode) {
         setCurrentTab('reset-password');
+        setDirectRouteLoading(false);
       } else {
-        // Deep link resolution for Stories, Novels, Authors, and Profiles
-        const storyId = params.get('story') || (path.startsWith('/story/') ? path.split('/')[2] : null);
+        const storyId = params.get('story') || params.get('episode') || (path.startsWith('/story/') ? path.split('/')[2] : null);
+        const isReader = params.get('reader') === 'true' || Boolean(params.get('episode'));
         const novelId = params.get('novel') || (path.startsWith('/novel/') ? path.split('/')[2] : null);
         const authorId = params.get('author') || params.get('writer') || (path.startsWith('/author/') ? path.split('/')[2] : null);
         const profileId = params.get('profile') || params.get('user') || (path.startsWith('/profile/') ? path.split('/')[2] : null);
@@ -435,58 +576,120 @@ export default function App() {
           storyService.getStoryById(storyId).then(story => {
             if (story) {
               setSelectedStory(story);
-              setCurrentTab(params.get('reader') === 'true' ? 'story-reader' : 'story-detail');
+              setCurrentTab(isReader ? 'story-reader' : 'story-detail');
+
+              // If this story is part of a novel, auto-populate novel context
+              const targetNovelId = story.novelId || (story as any).parentNovelId;
+              if (targetNovelId) {
+                Promise.all([
+                  novelService.getNovelById(targetNovelId),
+                  novelService.getEpisodesForNovel(targetNovelId)
+                ]).then(([n, eps]) => {
+                  if (n && eps && eps.length > 0) {
+                    const idx = eps.findIndex(e => e.id === story.id || e.episodeNumber === (story as any).episodeNumber);
+                    const safeIdx = idx >= 0 ? idx : 0;
+                    setActiveNovelContext({
+                      novel: n,
+                      episodes: eps,
+                      currentEpisodeIndex: safeIdx,
+                      onSelectEpisodeIndex: (newIndex) => {
+                        const targetEp = eps[newIndex];
+                        if (!targetEp) return;
+                        const ts = convertEpisodeToStory(n, targetEp, newIndex);
+                        setSelectedStory(ts);
+                        setActiveNovelContext(prev => prev ? { ...prev, currentEpisodeIndex: newIndex } : null);
+                        updateUrl('story-reader', 'story', ts.id);
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      },
+                      onReturnToNovel: () => {
+                        setSelectedNovel(n);
+                        setCurrentTab('novel-detail');
+                        setActiveNovelContext(null);
+                        updateUrl('novel-detail', 'novel', n.id);
+                      }
+                    });
+                  }
+                }).catch(() => {});
+              }
+            } else {
+              setCurrentTab('home');
             }
-          }).catch(() => {});
+            setDirectRouteLoading(false);
+          }).catch(() => {
+            setDirectRouteLoading(false);
+            setCurrentTab('home');
+          });
         } else if (novelId) {
           novelService.getNovelById(novelId).then(novel => {
             if (novel) {
               setSelectedNovel(novel);
               setCurrentTab('novel-detail');
+            } else {
+              setCurrentTab('home');
             }
-          }).catch(() => {});
+            setDirectRouteLoading(false);
+          }).catch(() => {
+            setDirectRouteLoading(false);
+            setCurrentTab('home');
+          });
         } else if (authorId || profileId) {
           const targetId = authorId || profileId;
           authorService.getAuthorById(targetId!).then(author => {
             if (author) {
               setSelectedAuthor(author);
               setCurrentTab('author-detail');
+            } else {
+              setCurrentTab('home');
             }
-          }).catch(() => {});
+            setDirectRouteLoading(false);
+          }).catch(() => {
+            setDirectRouteLoading(false);
+            setCurrentTab('home');
+          });
+        } else {
+          setDirectRouteLoading(false);
         }
       }
     }
 
     const handlePopState = (e: PopStateEvent) => {
       const params = new URLSearchParams(window.location.search);
-      const sId = params.get('story');
+      const sId = params.get('story') || params.get('episode');
       const nId = params.get('novel');
-      const aId = params.get('author') || params.get('profile');
+      const aId = params.get('author') || params.get('writer') || params.get('profile') || params.get('user');
 
       if (sId) {
+        setDirectRouteLoading(true);
         storyService.getStoryById(sId).then(s => {
           if (s) {
             setSelectedStory(s);
             setCurrentTab(params.get('reader') === 'true' ? 'story-reader' : 'story-detail');
           }
-        }).catch(() => {});
+          setDirectRouteLoading(false);
+        }).catch(() => setDirectRouteLoading(false));
       } else if (nId) {
+        setDirectRouteLoading(true);
         novelService.getNovelById(nId).then(n => {
           if (n) {
             setSelectedNovel(n);
             setCurrentTab('novel-detail');
           }
-        }).catch(() => {});
+          setDirectRouteLoading(false);
+        }).catch(() => setDirectRouteLoading(false));
       } else if (aId) {
+        setDirectRouteLoading(true);
         authorService.getAuthorById(aId).then(a => {
           if (a) {
             setSelectedAuthor(a);
             setCurrentTab('author-detail');
           }
-        }).catch(() => {});
+          setDirectRouteLoading(false);
+        }).catch(() => setDirectRouteLoading(false));
       } else if (e.state?.tab) {
+        setDirectRouteLoading(false);
         setCurrentTab(e.state.tab);
       } else {
+        setDirectRouteLoading(false);
         setCurrentTab('home');
       }
     };
@@ -504,8 +707,11 @@ export default function App() {
       window.removeEventListener('kathavahini:story-liked', handleStoryLiked);
       window.removeEventListener('kathavahini:story-rated', handleStoryRated);
       window.removeEventListener('kathavahini:story-viewed', handleStoryViewed);
+      window.removeEventListener('kathavahini:navigate-episode', handleNavigateEpisode);
+      window.removeEventListener('kathavahini:open-novel-detail', handleOpenNovelDetail);
     };
   }, []);
+
 
   // Auth prompt helper
   const handleRequireAuth = (prompt?: string, mode: 'login' | 'register' | 'forgot-password' = 'login') => {
@@ -690,6 +896,23 @@ export default function App() {
 
   // Render view router
   const renderCurrentView = () => {
+    if (directRouteLoading) {
+      return (
+        <div className="min-h-[70vh] flex flex-col items-center justify-center px-4 py-16 text-center">
+          <div className="w-16 h-16 mb-4 rounded-full bg-[#7A284B]/10 dark:bg-[#D87591]/10 flex items-center justify-center animate-pulse">
+            <img src="/logo.png" alt="Kathavahini" className="w-10 h-10 object-contain rounded-full" onError={(e) => { (e.target as HTMLElement).style.display = 'none'; }} />
+          </div>
+          <div className="w-8 h-8 border-3 border-[#7A284B] dark:border-[#D87591] border-t-transparent rounded-full animate-spin mb-4" />
+          <h3 className="font-serif text-lg font-bold text-[#17151A] dark:text-[#E8E2D9]">
+            కథావాహిని లోడ్ అవుతోంది...
+          </h3>
+          <p className="text-xs text-[#7A7265] dark:text-[#A8A196] mt-1">
+            దయచేసి వేచి ఉండండి, వివరాలను సిద్ధం చేస్తున్నాము.
+          </p>
+        </div>
+      );
+    }
+
     switch (currentTab) {
       case 'home':
         return (
@@ -746,25 +969,15 @@ export default function App() {
             onDeleteStory={handleDeleteStory}
           />
         ) : (
-          <HomeView
-            trendingStories={trendingStories}
-            popularStories={popularStories}
-            newReleases={newReleases}
-            featuredNovels={novels}
-            featuredAuthors={authors}
-            jokes={jokes}
-            categories={categoriesWithStoryCounts}
-            readingHistory={readingHistory}
-            onSelectStory={handleSelectStory}
-            onSelectNovel={handleSelectNovel}
-            onSelectAuthor={handleSelectAuthor}
-            onSelectCategory={handleSelectCategory}
-            onSelectTab={setCurrentTab}
-            onOpenWrite={() => setIsWriteOpen(true)}
-            onBookmarkToggle={handleBookmarkToggle}
-            onLikeToggle={handleLikeToggle}
-            onFollowToggle={handleFollowAuthorToggle}
-          />
+          <div className="min-h-[50vh] flex flex-col items-center justify-center text-center p-8">
+            <p className="text-sm text-[#7A7265] mb-4">కథ వివరాలు అందుబాటులో లేవు.</p>
+            <button
+              onClick={() => setCurrentTab('stories')}
+              className="px-5 py-2.5 rounded-full bg-[#7A284B] text-white text-xs font-bold hover:bg-[#68223F] cursor-pointer"
+            >
+              అన్ని కథలు చూడండి
+            </button>
+          </div>
         );
 
       case 'story-reader':
@@ -799,7 +1012,17 @@ export default function App() {
             onEditStory={handleEditStory}
             onDeleteStory={handleDeleteStory}
           />
-        ) : null;
+        ) : (
+          <div className="min-h-[50vh] flex flex-col items-center justify-center text-center p-8">
+            <p className="text-sm text-[#7A7265] mb-4">రచన వివరాలు అందుబాటులో లేవు.</p>
+            <button
+              onClick={() => setCurrentTab('stories')}
+              className="px-5 py-2.5 rounded-full bg-[#7A284B] text-white text-xs font-bold hover:bg-[#68223F] cursor-pointer"
+            >
+              కథల విభాగానికి వెళ్ళండి
+            </button>
+          </div>
+        );
 
       case 'novels':
         return (
@@ -830,12 +1053,14 @@ export default function App() {
                   const targetStory = convertEpisodeToStory(n, targetEp, newIndex);
                   setSelectedStory(targetStory);
                   setActiveNovelContext(prev => prev ? { ...prev, currentEpisodeIndex: newIndex } : null);
+                  updateUrl('story-reader', 'story', targetStory.id);
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 },
                 onReturnToNovel: () => {
                   setSelectedNovel(n);
                   setCurrentTab('novel-detail');
                   setActiveNovelContext(null);
+                  updateUrl('novel-detail', 'novel', n.id);
                 }
               });
               handleStartReading(chapterAsStory);
@@ -843,7 +1068,17 @@ export default function App() {
             onBookmarkToggle={handleBookmarkToggle}
             onSelectAuthor={handleSelectAuthor}
           />
-        ) : null;
+        ) : (
+          <div className="min-h-[50vh] flex flex-col items-center justify-center text-center p-8">
+            <p className="text-sm text-[#7A7265] mb-4">నవల వివరాలు అందుబాటులో లేవు.</p>
+            <button
+              onClick={() => setCurrentTab('novels')}
+              className="px-5 py-2.5 rounded-full bg-[#7A284B] text-white text-xs font-bold hover:bg-[#68223F] cursor-pointer"
+            >
+              అన్ని నవలలు చూడండి
+            </button>
+          </div>
+        );
 
       case 'jokes':
         return (
@@ -875,7 +1110,7 @@ export default function App() {
         return selectedAuthor ? (
           <AuthorDetailView
             author={selectedAuthor}
-            authorStories={trendingStories.filter(s => {
+            authorStories={(allStories.length > 0 ? allStories : trendingStories).filter(s => {
               const res = resolveContentAuthor(s);
               return res.id === selectedAuthor.id || s.authorId === selectedAuthor.id || s.writerId === selectedAuthor.id || s.author?.id === selectedAuthor.id;
             })}
@@ -888,7 +1123,17 @@ export default function App() {
             onSelectNovel={handleSelectNovel}
             onFollowToggle={handleFollowAuthorToggle}
           />
-        ) : null;
+        ) : (
+          <div className="min-h-[50vh] flex flex-col items-center justify-center text-center p-8">
+            <p className="text-sm text-[#7A7265] mb-4">రచయిత ప్రొఫైల్ అందుబాటులో లేదు.</p>
+            <button
+              onClick={() => setCurrentTab('authors')}
+              className="px-5 py-2.5 rounded-full bg-[#7A284B] text-white text-xs font-bold hover:bg-[#68223F] cursor-pointer"
+            >
+              రచయితల జాబితాకు వెళ్లండి
+            </button>
+          </div>
+        );
 
       case 'library':
         return (

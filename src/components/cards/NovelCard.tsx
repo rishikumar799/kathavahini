@@ -1,8 +1,9 @@
 import React from 'react';
-import { BookOpen, Star, Bookmark } from 'lucide-react';
+import { BookOpen, Star, Bookmark, Share2 } from 'lucide-react';
 import { Novel } from '../../types';
 import { resolveAvatarUrl } from '../../utils/avatarUtils';
 import { resolveContentAuthor, getAuthorDisplayName } from '../../utils/authorResolver';
+import { shareContent } from '../../utils/shareUtils';
 
 interface NovelCardProps {
   novel: Novel;
@@ -51,14 +52,33 @@ export const NovelCard: React.FC<NovelCardProps> = ({
             <span className="text-xs font-semibold text-[#7A284B] dark:text-[#D87591]">
               {novel.category}
             </span>
-            {onBookmarkToggle && (
+            <div className="flex items-center gap-1">
               <button
-                onClick={(e) => onBookmarkToggle(novel.id, e)}
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  await shareContent({
+                    contentType: 'novel',
+                    id: novel.id,
+                    title: novel.teluguTitle,
+                    text: novel.teluguDescription,
+                    coverImage: novel.coverImage,
+                  });
+                }}
                 className="p-1 text-[#6F6970] hover:text-[#7A284B] dark:hover:text-[#D87591] transition-colors cursor-pointer"
+                title="నవలను షేర్ చేయండి"
               >
-                <Bookmark className={`w-4 h-4 ${novel.isBookmarked ? 'fill-[#D99A3D] text-[#D99A3D]' : ''}`} />
+                <Share2 className="w-3.5 h-3.5" />
               </button>
-            )}
+              {onBookmarkToggle && (
+                <button
+                  onClick={(e) => onBookmarkToggle(novel.id, e)}
+                  className="p-1 text-[#6F6970] hover:text-[#7A284B] dark:hover:text-[#D87591] transition-colors cursor-pointer"
+                  title="దాచుకోండి"
+                >
+                  <Bookmark className={`w-4 h-4 ${novel.isBookmarked ? 'fill-[#D99A3D] text-[#D99A3D]' : ''}`} />
+                </button>
+              )}
+            </div>
           </div>
 
           <h3 className="text-base sm:text-lg font-bold font-serif-telugu text-[#17151A] dark:text-[#F7F3EE] group-hover:text-[#7A284B] dark:group-hover:text-[#D87591] transition-colors line-clamp-1 mb-1">

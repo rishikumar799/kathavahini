@@ -139,19 +139,16 @@ class NovelService {
       const snap = await getDoc(doc(db, 'novels', id));
       if (snap.exists()) {
         const data = snap.data();
-        const chapSnap = await getDocs(collection(db, 'novels', id, 'chapters'));
-        const chapters: Chapter[] = chapSnap.docs.map(c => {
-          const cd = c.data();
-          return {
-            id: c.id,
-            chapterNumber: cd.chapterNumber || 1,
-            title: cd.title || '',
-            teluguTitle: cd.teluguTitle || cd.title || '',
-            content: Array.isArray(cd.content) ? cd.content : [cd.content || ''],
-            readingTimeMinutes: cd.readingTimeMinutes || 5,
-            publishedAt: cd.publishedAt instanceof Timestamp ? cd.publishedAt.toDate().toISOString().split('T')[0] : (cd.publishedAt || ''),
-          };
-        });
+        const fetchedEpisodes = await this.getEpisodesForNovel(id);
+        const chapters: Chapter[] = fetchedEpisodes.map(ep => ({
+          id: ep.id,
+          chapterNumber: ep.episodeNumber,
+          title: ep.title,
+          teluguTitle: ep.teluguTitle,
+          content: ep.content,
+          readingTimeMinutes: ep.readingTimeMinutes || 5,
+          publishedAt: ep.publishedAt || '',
+        }));
 
         return {
           id: snap.id,
@@ -347,12 +344,38 @@ class NovelService {
 
   /**
    * Fetch published episodes for a specific novel in ascending sequence
-   * Checks both top-level `episodes` collection and novel subcollection `chapters`
+   * Robustly merges:
+   * 1. Top-level `episodes` collection where novelId matches
+   * 2. Subcollection `novels/{novelId}/chapters`
+   * 3. Subcollection `stories/{novelId}/episodes`
+   * 4. Any linked episodes from stories collection
+   * 5. Fallback mock chapters if applicable
+   * Filters out unpublished/scheduled/hidden episodes and sorts strictly by episodeNumber.
    */
   public async getEpisodesForNovel(novelId: string): Promise<Episode[]> {
     try {
       await deletionTracker.init();
-      const episodesList: Episode[] = [];
+      const episodeMap = new Map<number | string, Episode>();
+      const nowMs = Date.now();
+
+      const isEligible = (data: any): boolean => {
+        if (!data) return false;
+        if (data.deleted === true || data.status === 'deleted') return false;
+        if (data.visibility === 'hidden' || data.visibility === 'private') return false;
+        if (data.status && data.status !== 'published') return false;
+
+        // Check scheduled publication
+        const sched = data.scheduledPublishAt || data.scheduledAt;
+        if (sched) {
+          let schedMs = 0;
+          if (sched instanceof Timestamp) schedMs = sched.toMillis();
+          else if (typeof sched.toMillis === 'function') schedMs = sched.toMillis();
+          else if (sched.seconds) schedMs = sched.seconds * 1000;
+          else if (typeof sched === 'string') schedMs = new Date(sched).getTime();
+          if (schedMs > nowMs) return false; // Not yet published
+        }
+        return true;
+      };
 
       // 1. Query top-level `episodes` collection where novelId matches
       try {
@@ -364,23 +387,24 @@ class NovelService {
         for (const epDoc of epSnap.docs) {
           if (deletionTracker.isDeleted(epDoc.id)) continue;
           const data = epDoc.data();
-          if (data.deleted === true || data.status === 'deleted') continue;
-          if (data.visibility === 'hidden' || data.visibility === 'private') continue;
-          if (data.status && data.status !== 'published') continue;
+          if (!isEligible(data)) continue;
 
-          episodesList.push({
+          const epNum = Number(data.episodeNumber || data.chapterNumber) || 1;
+          const content = Array.isArray(data.content) ? data.content : [data.content || ''];
+
+          episodeMap.set(epNum, {
             id: epDoc.id,
             novelId,
             novelTitle: data.novelTitle || '',
-            episodeNumber: Number(data.episodeNumber) || 1,
-            title: data.title || '',
-            teluguTitle: data.teluguTitle || data.title || `${data.episodeNumber || 1}వ భాగం`,
-            content: Array.isArray(data.content) ? data.content : [data.content || ''],
+            episodeNumber: epNum,
+            title: data.title || `Episode ${epNum}`,
+            teluguTitle: data.teluguTitle || data.title || `${epNum}వ భాగం`,
+            content,
             authorId: data.authorId || '',
             authorName: data.authorName,
             status: 'published',
             visibility: 'public',
-            readingTimeMinutes: data.readingTimeMinutes || 5,
+            readingTimeMinutes: data.readingTimeMinutes || Math.max(1, Math.ceil(content.join(' ').length / 300)),
             publishedAt: data.publishedAt instanceof Timestamp 
               ? data.publishedAt.toDate().toISOString().split('T')[0] 
               : (data.publishedAt || ''),
@@ -390,61 +414,145 @@ class NovelService {
         console.warn('Note querying top-level episodes collection:', err);
       }
 
-      // 2. If episodes collection had results, sort them strictly ascending by episodeNumber
-      if (episodesList.length > 0) {
-        return episodesList.sort((a, b) => (a.episodeNumber || 0) - (b.episodeNumber || 0));
-      }
-
-      // 3. Fallback: query subcollection `novels/{novelId}/chapters`
+      // 2. Query subcollection `novels/{novelId}/chapters`
       try {
         const chapSnap = await getDocs(collection(db, 'novels', novelId, 'chapters'));
-        const chapters: Episode[] = chapSnap.docs
-          .filter(c => !deletionTracker.isDeleted(c.id) && !c.data()?.deleted && c.data()?.status !== 'deleted')
-          .map(c => {
-            const cd = c.data();
-            return {
+        for (const c of chapSnap.docs) {
+          if (deletionTracker.isDeleted(c.id)) continue;
+          const cd = c.data();
+          if (!isEligible(cd)) continue;
+
+          const epNum = Number(cd.chapterNumber || cd.episodeNumber) || 1;
+          const content = Array.isArray(cd.content) ? cd.content : [cd.content || ''];
+
+          // If this episode number already exists in map, prefer the one with richer content
+          const existing = episodeMap.get(epNum);
+          const hasBetterContent = !existing || 
+            (existing.content.length <= 1 && existing.content[0]?.includes('ఇక్కడ ప్రారంభమవుతుంది') && content.length > 0 && !content[0]?.includes('ఇక్కడ ప్రారంభమవుతుంది')) ||
+            content.join(' ').length > existing.content.join(' ').length;
+
+          if (hasBetterContent) {
+            episodeMap.set(epNum, {
               id: c.id,
               novelId,
-              episodeNumber: Number(cd.chapterNumber || cd.episodeNumber) || 1,
-              title: cd.title || '',
-              teluguTitle: cd.teluguTitle || cd.title || `${cd.chapterNumber || 1}వ అధ్యాయం`,
-              content: Array.isArray(cd.content) ? cd.content : [cd.content || ''],
+              episodeNumber: epNum,
+              title: cd.title || `Chapter ${epNum}`,
+              teluguTitle: cd.teluguTitle || cd.title || `${epNum}వ అధ్యాయం`,
+              content,
               authorId: cd.authorId || '',
               status: 'published',
               visibility: 'public',
-              readingTimeMinutes: cd.readingTimeMinutes || 5,
+              readingTimeMinutes: cd.readingTimeMinutes || Math.max(1, Math.ceil(content.join(' ').length / 300)),
               publishedAt: cd.publishedAt instanceof Timestamp 
                 ? cd.publishedAt.toDate().toISOString().split('T')[0] 
                 : (cd.publishedAt || ''),
-            };
-          });
-
-        if (chapters.length > 0) {
-          return chapters.sort((a, b) => (a.episodeNumber || 0) - (b.episodeNumber || 0));
+            });
+          }
         }
       } catch (err) {
         console.warn('Note querying novel chapters subcollection:', err);
       }
 
-      // 4. Fallback to mock novel's chapters if matched
-      const mock = MOCK_NOVELS.find(n => n.id === novelId);
-      if (mock && mock.chapters) {
-        return mock.chapters.map(c => ({
-          id: c.id,
-          novelId,
-          episodeNumber: c.chapterNumber,
-          title: c.title,
-          teluguTitle: c.teluguTitle,
-          content: c.content,
-          authorId: mock.authorId,
-          status: 'published' as ContentStatus,
-          visibility: 'public' as ContentVisibility,
-          readingTimeMinutes: c.readingTimeMinutes,
-          publishedAt: c.publishedAt,
-        })).sort((a, b) => a.episodeNumber - b.episodeNumber);
+      // 3. Query subcollection `stories/{novelId}/episodes` if applicable
+      try {
+        const storyEpsSnap = await getDocs(collection(db, 'stories', novelId, 'episodes'));
+        for (const se of storyEpsSnap.docs) {
+          if (deletionTracker.isDeleted(se.id)) continue;
+          const sed = se.data();
+          if (!isEligible(sed)) continue;
+
+          const epNum = Number(sed.episodeNumber || sed.order) || 1;
+          const content = Array.isArray(sed.content) ? sed.content : [sed.content || ''];
+
+          if (!episodeMap.has(epNum)) {
+            episodeMap.set(epNum, {
+              id: se.id,
+              novelId,
+              episodeNumber: epNum,
+              title: sed.title || `Episode ${epNum}`,
+              teluguTitle: sed.teluguTitle || sed.title || `${epNum}వ భాగం`,
+              content,
+              authorId: sed.authorId || '',
+              authorName: sed.authorName,
+              status: 'published',
+              visibility: 'public',
+              readingTimeMinutes: sed.readingTimeMinutes || Math.max(1, Math.ceil(content.join(' ').length / 300)),
+              publishedAt: sed.publishedAt || '',
+            });
+          }
+        }
+      } catch (err) {
+        // Silently continue if story subcollection not present
       }
 
-      return [];
+      // 4. Query `stories` collection for any stories with novelId or parentNovelId matching this novel
+      try {
+        const storyQuery = query(
+          collection(db, 'stories'),
+          where('novelId', '==', novelId)
+        );
+        const storySnap = await getDocs(storyQuery);
+        for (const sd of storySnap.docs) {
+          if (deletionTracker.isDeleted(sd.id)) continue;
+          const sdata = sd.data();
+          if (!isEligible(sdata)) continue;
+
+          const epNum = Number(sdata.episodeNumber || sdata.chapterNumber) || 1;
+          const content = Array.isArray(sdata.content) ? sdata.content : [sdata.content || ''];
+
+          const existing = episodeMap.get(epNum);
+          if (!existing || (content.join(' ').length > existing.content.join(' ').length)) {
+            episodeMap.set(epNum, {
+              id: sd.id,
+              novelId,
+              novelTitle: sdata.novelTitle || '',
+              episodeNumber: epNum,
+              title: sdata.title || `Episode ${epNum}`,
+              teluguTitle: sdata.teluguTitle || sdata.title || `${epNum}వ భాగం`,
+              content,
+              authorId: sdata.authorId || '',
+              authorName: sdata.authorName,
+              status: 'published',
+              visibility: 'public',
+              readingTimeMinutes: sdata.readingTimeMinutes || Math.max(1, Math.ceil(content.join(' ').length / 300)),
+              publishedAt: sdata.publishedAt instanceof Timestamp 
+                ? sdata.publishedAt.toDate().toISOString().split('T')[0] 
+                : (sdata.publishedAt || ''),
+            });
+          }
+        }
+      } catch (err) {
+        // Silently continue
+      }
+
+      // 5. Fallback to mock novel chapters if map is still empty
+      if (episodeMap.size === 0) {
+        const mock = MOCK_NOVELS.find(n => n.id === novelId);
+        if (mock && mock.chapters) {
+          mock.chapters.forEach(c => {
+            episodeMap.set(c.chapterNumber, {
+              id: c.id,
+              novelId,
+              episodeNumber: c.chapterNumber,
+              title: c.title,
+              teluguTitle: c.teluguTitle,
+              content: c.content,
+              authorId: mock.authorId,
+              status: 'published' as ContentStatus,
+              visibility: 'public' as ContentVisibility,
+              readingTimeMinutes: c.readingTimeMinutes,
+              publishedAt: c.publishedAt,
+            });
+          });
+        }
+      }
+
+      // Convert to array and sort strictly ascending by episodeNumber
+      const result = Array.from(episodeMap.values()).sort(
+        (a, b) => (a.episodeNumber || 0) - (b.episodeNumber || 0)
+      );
+
+      return result;
     } catch (e) {
       console.warn('Error fetching episodes for novel:', e);
       return [];

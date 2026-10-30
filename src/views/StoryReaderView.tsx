@@ -31,6 +31,7 @@ import { ReaderToolbar } from '../components/reader/ReaderToolbar';
 import { ReadingProgress } from '../components/reader/ReadingProgress';
 import { StarRating } from '../components/common/StarRating';
 import { storyService } from '../services/storyService';
+import { novelService } from '../services/novelService';
 import { storageService } from '../services/storageService';
 import { storySubcollectionService } from '../services/storySubcollectionService';
 import { shareContent } from '../utils/shareUtils';
@@ -109,6 +110,64 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
     currentUser.id === story.author?.id
   ));
   const canManageStoryImages = Boolean(isAdmin || isOwnerOrAuthor);
+
+  const [internalNovelContext, setInternalNovelContext] = useState<NovelReadingContext | null>(null);
+
+  // Sync content whenever story changes so next/previous episode content updates immediately
+  useEffect(() => {
+    if (Array.isArray(story.content) && story.content.length > 0) {
+      setResolvedContent(story.content);
+    }
+  }, [story.id, story.content]);
+
+  // Auto-resolve novelContext if not provided directly (e.g. page refresh, direct link)
+  useEffect(() => {
+    if (novelContext) {
+      setInternalNovelContext(novelContext);
+      return;
+    }
+
+    const novelId = (story as any).novelId || (story as any).parentNovelId;
+    if (!novelId) {
+      setInternalNovelContext(null);
+      return;
+    }
+
+    let isMounted = true;
+    Promise.all([
+      novelService.getNovelById(novelId),
+      novelService.getEpisodesForNovel(novelId)
+    ]).then(([novel, episodes]) => {
+      if (!isMounted || !novel || !episodes || episodes.length === 0) return;
+
+      const currentIdx = episodes.findIndex(
+        ep => ep.id === story.id || ep.episodeNumber === (story as any).episodeNumber
+      );
+      const safeIndex = currentIdx >= 0 ? currentIdx : 0;
+
+      setInternalNovelContext({
+        novel,
+        episodes,
+        currentEpisodeIndex: safeIndex,
+        onSelectEpisodeIndex: (newIndex) => {
+          const targetEp = episodes[newIndex];
+          if (!targetEp) return;
+          window.dispatchEvent(new CustomEvent('kathavahini:navigate-episode', {
+            detail: { novel, episode: targetEp, episodeIndex: newIndex, episodes }
+          }));
+        },
+        onReturnToNovel: () => {
+          window.dispatchEvent(new CustomEvent('kathavahini:open-novel-detail', {
+            detail: { novel }
+          }));
+        }
+      });
+    }).catch(err => console.warn('Could not auto-resolve novel context for reader:', err));
+
+    return () => { isMounted = false; };
+  }, [novelContext, story.id, (story as any).novelId, (story as any).parentNovelId]);
+
+  const activeCtx = novelContext || internalNovelContext;
 
   // Sync image pages from story or subcollection
   useEffect(() => {
@@ -282,11 +341,12 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
 
   const handleShare = async () => {
     try {
+      const isNovelEpisode = Boolean((story as any).novelId || (story as any).parentNovelId || activeCtx);
       const result = await shareContent({
-        contentType: 'story',
+        contentType: isNovelEpisode ? 'episode' : 'story',
         id: story.id,
         title: story.teluguTitle,
-        text: story.teluguExcerpt,
+        text: story.teluguExcerpt || story.excerpt,
         coverImage: story.coverImage,
       });
       if (result.success) {
@@ -761,60 +821,67 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
         )}
 
         {/* Novel Episodes Navigation Banner */}
-        {novelContext && (
-          <div className="p-6 rounded-3xl bg-[#FAF7F2] dark:bg-[#18181F] border border-[#E8E1DA] dark:border-[#26242E] shadow-sm my-8 space-y-5 text-center">
+        {activeCtx && (
+          <div className="p-5 sm:p-7 rounded-3xl bg-[#FAF7F2] dark:bg-[#18181F] border border-[#E8E1DA] dark:border-[#26242E] shadow-sm my-8 space-y-4 text-center">
             <div className="flex items-center justify-between gap-3 text-xs text-[#6F6970] dark:text-[#A29CA6] border-b border-[#E8E1DA] dark:border-[#26242E] pb-3">
-              <span className="font-bold text-[#7A284B] dark:text-[#D87591] truncate">
-                నవల: {novelContext.novel.teluguTitle}
+              <span className="font-bold text-[#7A284B] dark:text-[#D87591] truncate text-left">
+                నవల: {activeCtx.novel.teluguTitle}
               </span>
-              <span className="shrink-0 font-bold">
-                భాగం {novelContext.currentEpisodeIndex + 1} / {novelContext.episodes.length}
+              <span className="shrink-0 font-bold bg-[#7A284B]/10 dark:bg-[#D87591]/10 text-[#7A284B] dark:text-[#D87591] px-3 py-1 rounded-full text-xs">
+                భాగం {activeCtx.currentEpisodeIndex + 1} / {activeCtx.episodes.length}
               </span>
             </div>
 
             {/* Sequence Navigation Buttons */}
-            <div className="flex flex-wrap items-center justify-center gap-3">
+            {/* Desktop layout: 3 distinct spaced buttons; Mobile layout: 2-column top + full-width bottom for zero clipping/wrapping issues */}
+            <div className="grid grid-cols-2 sm:flex sm:flex-row sm:items-center sm:justify-between gap-3 pt-1">
               <button
                 type="button"
-                disabled={novelContext.currentEpisodeIndex <= 0}
-                onClick={() => novelContext.onSelectEpisodeIndex(novelContext.currentEpisodeIndex - 1)}
-                className={`px-5 py-2.5 rounded-full text-xs font-bold inline-flex items-center gap-2 transition-all cursor-pointer ${
-                  novelContext.currentEpisodeIndex <= 0
-                    ? 'opacity-40 bg-black/5 dark:bg-white/5 cursor-not-allowed'
-                    : 'bg-white dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#26242E] text-[#17151A] dark:text-[#F7F3EE] hover:border-[#7A284B]'
+                disabled={activeCtx.currentEpisodeIndex <= 0}
+                onClick={() => activeCtx.onSelectEpisodeIndex(activeCtx.currentEpisodeIndex - 1)}
+                className={`col-span-1 min-h-[46px] px-4 sm:px-6 py-2.5 rounded-2xl sm:rounded-full text-xs font-bold inline-flex items-center justify-center gap-2 transition-all select-none ${
+                  activeCtx.currentEpisodeIndex <= 0
+                    ? 'opacity-40 bg-black/5 dark:bg-white/5 border border-dashed border-[#E8E1DA] dark:border-[#26242E] text-[#6F6970] dark:text-[#A29CA6] cursor-not-allowed'
+                    : 'bg-white dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#26242E] text-[#17151A] dark:text-[#F7F3EE] hover:border-[#7A284B] active:scale-95 cursor-pointer shadow-sm'
                 }`}
+                title="మునుపటి భాగం"
+                aria-label="మునుపటి భాగం"
               >
-                <ChevronLeft className="w-4 h-4" />
-                <span>మునుపటి భాగం</span>
+                <ChevronLeft className="w-4 h-4 shrink-0" />
+                <span className="truncate">మునుపటి భాగం</span>
               </button>
 
               <button
                 type="button"
-                onClick={novelContext.onReturnToNovel}
-                className="px-5 py-2.5 rounded-full bg-white dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#26242E] text-xs font-bold text-[#7A284B] dark:text-[#D87591] hover:underline cursor-pointer inline-flex items-center gap-1.5"
+                onClick={activeCtx.onReturnToNovel}
+                className="col-span-2 order-last sm:order-none min-h-[46px] px-5 sm:px-6 py-2.5 rounded-2xl sm:rounded-full bg-white dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#26242E] text-xs font-bold text-[#7A284B] dark:text-[#D87591] hover:bg-[#FAF7F2] dark:hover:bg-[#1C1B22] active:scale-95 cursor-pointer inline-flex items-center justify-center gap-2 shadow-sm transition-all"
+                title="నవల వివరాలకు వెళ్ళండి"
+                aria-label="నవల వివరాలకు వెళ్ళండి"
               >
-                <BookOpen className="w-3.5 h-3.5" />
-                <span>నవల వివరాలకు వెళ్లండి</span>
+                <BookOpen className="w-4 h-4 shrink-0 text-[#7A284B] dark:text-[#D87591]" />
+                <span className="truncate">నవల వివరాలకు వెళ్లండి</span>
               </button>
 
               <button
                 type="button"
-                disabled={novelContext.currentEpisodeIndex >= novelContext.episodes.length - 1}
-                onClick={() => novelContext.onSelectEpisodeIndex(novelContext.currentEpisodeIndex + 1)}
-                className={`px-5 py-2.5 rounded-full text-xs font-bold inline-flex items-center gap-2 transition-all cursor-pointer ${
-                  novelContext.currentEpisodeIndex >= novelContext.episodes.length - 1
-                    ? 'opacity-40 bg-black/5 dark:bg-white/5 cursor-not-allowed'
-                    : 'bg-[#7A284B] text-white hover:bg-[#68223F] shadow-sm'
+                disabled={activeCtx.currentEpisodeIndex >= activeCtx.episodes.length - 1}
+                onClick={() => activeCtx.onSelectEpisodeIndex(activeCtx.currentEpisodeIndex + 1)}
+                className={`col-span-1 min-h-[46px] px-4 sm:px-6 py-2.5 rounded-2xl sm:rounded-full text-xs font-bold inline-flex items-center justify-center gap-2 transition-all select-none ${
+                  activeCtx.currentEpisodeIndex >= activeCtx.episodes.length - 1
+                    ? 'opacity-40 bg-black/5 dark:bg-white/5 border border-dashed border-[#E8E1DA] dark:border-[#26242E] text-[#6F6970] dark:text-[#A29CA6] cursor-not-allowed'
+                    : 'bg-[#7A284B] hover:bg-[#68223F] dark:bg-[#D87591] dark:hover:bg-[#C2627E] text-white active:scale-95 cursor-pointer shadow-md'
                 }`}
+                title="తదుపరి భాగం"
+                aria-label="తదుపరి భాగం"
               >
-                <span>తదుపరి భాగం</span>
-                <ChevronRight className="w-4 h-4" />
+                <span className="truncate">తదుపరి భాగం</span>
+                <ChevronRight className="w-4 h-4 shrink-0" />
               </button>
             </div>
 
             {/* End of available episodes banner */}
-            {novelContext.currentEpisodeIndex >= novelContext.episodes.length - 1 && (
-              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs font-serif-telugu space-y-1">
+            {activeCtx.currentEpisodeIndex >= activeCtx.episodes.length - 1 && (
+              <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs font-serif-telugu space-y-1 text-left sm:text-center animate-fade-in">
                 <p className="font-bold text-sm">
                   🎉 మీరు తాజా ఎపిసోడ్ వరకు చదివారు!
                 </p>

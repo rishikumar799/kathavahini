@@ -124,7 +124,13 @@ export function getCanonicalShareUrl(
     : 'https://kathavahini.org';
 
   const params = new URLSearchParams();
-  params.set(type, id);
+
+  if (type === 'episode') {
+    params.set('story', id);
+    params.set('reader', 'true');
+  } else {
+    params.set(type, id);
+  }
 
   if (extraParams) {
     Object.entries(extraParams).forEach(([k, v]) => {

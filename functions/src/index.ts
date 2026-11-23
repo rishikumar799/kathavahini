@@ -418,15 +418,15 @@ export const sharePreview = onRequest(
       const isCrawler = isSocialCrawlerUA(userAgent);
 
       const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
-      const host = req.headers['x-forwarded-host'] || req.headers.host || 'thekathavahini.web.app';
+      const host = req.headers['x-forwarded-host'] || req.headers.host || 'kathavahini-9a9c1.web.app';
       const origin = `${proto}://${host}`.replace(/\/+$/, '');
       const defaultLogo = `${origin}/logo.png`;
 
-      // 1. Public binary cover image endpoint (/api/cover/:id)
+      // 1. Public binary cover image endpoint (/api/cover/:id or /api/cover/:id.jpg)
       if (reqPath.includes('/api/cover/') || reqPath.includes('/cover/')) {
         res.setHeader('Access-Control-Allow-Origin', '*');
         const rawCoverId = reqPath.split('/cover/')[1]?.split('?')[0] || '';
-        const coverId = decodeURIComponent(rawCoverId).trim();
+        const coverId = decodeURIComponent(rawCoverId).trim().replace(/\.(jpe?g|png|webp)$/i, '');
         if (coverId) {
           let snap = await db.collection('stories').doc(coverId).get();
           if (!snap.exists) snap = await db.collection('novels').doc(coverId).get();
@@ -464,11 +464,11 @@ export const sharePreview = onRequest(
         return res.redirect(302, defaultLogo);
       }
 
-      // 2. Public binary writer/user avatar endpoint (/api/avatar/:id)
+      // 2. Public binary writer/user avatar endpoint (/api/avatar/:id or /api/avatar/:id.jpg)
       if (reqPath.includes('/api/avatar/') || reqPath.includes('/avatar/')) {
         res.setHeader('Access-Control-Allow-Origin', '*');
         const rawAvatarId = reqPath.split('/avatar/')[1]?.split('?')[0] || '';
-        const avatarId = decodeURIComponent(rawAvatarId).trim();
+        const avatarId = decodeURIComponent(rawAvatarId).trim().replace(/\.(jpe?g|png|webp)$/i, '');
         if (avatarId) {
           // Parallel fetch across users, writers, authors so custom uploaded photos always take priority
           const [uSnap, wSnap, aSnap] = await Promise.all([
@@ -853,7 +853,7 @@ export const sharePreview = onRequest(
       return res.status(200).send(html);
     } catch (err: any) {
       console.error('Error generating share preview:', err);
-      return res.redirect(302, 'https://thekathavahini.web.app');
+      return res.redirect(302, 'https://kathavahini-9a9c1.web.app');
     }
   }
 );

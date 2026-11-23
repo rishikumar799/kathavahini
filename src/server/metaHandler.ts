@@ -1,7 +1,7 @@
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
-import { resolveContentAuthor } from '../utils/authorResolver';
-import { MOCK_STORIES, MOCK_NOVELS, MOCK_AUTHORS } from '../services/mockData';
+import { db } from '../lib/firebase.ts';
+import { resolveContentAuthor } from '../utils/authorResolver.ts';
+import { MOCK_STORIES, MOCK_NOVELS, MOCK_AUTHORS } from '../services/mockData.ts';
 
 export interface ContentMeta {
   title: string;
@@ -135,14 +135,21 @@ function resolveCoverImage(
     const trimmed = coverCandidate.trim();
     if (trimmed.startsWith('data:image/')) {
       return {
-        imageUrl: `${origin}/api/cover/${encodeURIComponent(entityId)}`,
-        imageType: detectImageMimeType(trimmed),
+        imageUrl: `${origin}/api/cover/${encodeURIComponent(entityId)}.jpg`,
+        imageType: 'image/jpeg',
       };
     }
     if ((trimmed.startsWith('https://') || trimmed.startsWith('http://')) && !trimmed.startsWith('blob:')) {
+      const mime = detectImageMimeType(trimmed);
+      if (mime === 'image/webp') {
+        return {
+          imageUrl: `${origin}/api/cover/${encodeURIComponent(entityId)}.jpg`,
+          imageType: 'image/jpeg',
+        };
+      }
       return {
         imageUrl: trimmed,
-        imageType: detectImageMimeType(trimmed),
+        imageType: mime,
       };
     }
   }
@@ -175,14 +182,22 @@ export function pickBestProfileImage(
     if (isCustomUploadedPhoto(c)) {
       if (c.startsWith('data:image/')) {
         return {
-          imageUrl: `${origin}/api/avatar/${encodeURIComponent(authorDocId)}`,
-          imageType: detectImageMimeType(c),
+          imageUrl: `${origin}/api/avatar/${encodeURIComponent(authorDocId)}.jpg`,
+          imageType: 'image/jpeg',
+          isCustom: true,
+        };
+      }
+      const mime = detectImageMimeType(c);
+      if (mime === 'image/webp') {
+        return {
+          imageUrl: `${origin}/api/avatar/${encodeURIComponent(authorDocId)}.jpg`,
+          imageType: 'image/jpeg',
           isCustom: true,
         };
       }
       return {
         imageUrl: c,
-        imageType: detectImageMimeType(c),
+        imageType: mime,
         isCustom: true,
       };
     }
@@ -216,7 +231,7 @@ export async function resolveContentMeta(
   },
   origin: string
 ): Promise<ContentMeta> {
-  const fallbackOrigin = (origin || 'https://thekathavahini.web.app').replace(/\/+$/, '');
+  const fallbackOrigin = (origin || 'https://kathavahini-9a9c1.web.app').replace(/\/+$/, '');
   const defaultLogo = `${fallbackOrigin}/logo.png`;
 
   const defaultMeta: ContentMeta = {

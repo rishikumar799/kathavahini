@@ -1,4 +1,4 @@
-import { Author, Story, Novel, Joke, User, ReadingHistoryItem, NotificationItem, CreatorStats, StoryCategory } from '../types';
+import type { Author, Story, Novel, Joke, User, ReadingHistoryItem, NotificationItem, CreatorStats, StoryCategory } from '../types';
 
 export const MOCK_CATEGORIES: { name: StoryCategory; description: string; icon: string; count: number }[] = [
   { name: 'ప్రేమ', description: 'హృదయాన్ని తాకే అనురాగాలు, మధుర జ్ఞాపకాలు', icon: 'Heart', count: 1240 },

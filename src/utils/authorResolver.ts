@@ -1,5 +1,5 @@
-import { Author } from '../types';
-import { resolveAvatarUrl, resolveAuthorName } from './avatarUtils';
+import type { Author } from '../types';
+import { resolveAvatarUrl, resolveAuthorName } from './avatarUtils.ts';
 
 export interface WriterProfileSeed {
   id: string;

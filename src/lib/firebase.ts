@@ -2,18 +2,19 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
+import type { Analytics } from 'firebase/analytics';
 
 const firebaseConfig = {
   apiKey: "AIzaSyDQ3LU73I-nv0Mghm6mZOpCxOhLkDS03RM",
   authDomain: "kathavahini-9a9c1.firebaseapp.com",
   projectId: "kathavahini-9a9c1",
-  storageBucket: (typeof import.meta !== 'undefined' && import.meta.env?.VITE_FIREBASE_STORAGE_BUCKET) || "kathavahini-9a9c1.firebasestorage.app",
+  storageBucket: (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_FIREBASE_STORAGE_BUCKET) || "kathavahini-9a9c1.firebasestorage.app",
   messagingSenderId: "63748712545",
   appId: "1:63748712545:web:df61a333ccc86acac2e220",
   measurementId: "G-BT55GMSKLQ"
 };
 
-// Initialize Firebase App instance safely
+// Initialize Firebase App instance safely (idempotent across HMR & SSR)
 export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
 // Initialize Firebase Authentication
@@ -30,3 +31,18 @@ export const storage = getStorage(app);
 storage.maxUploadRetryTime = 6000;
 storage.maxOperationRetryTime = 5000;
 
+// Initialize Firebase Analytics strictly in browser environments where supported
+// (Prevents white-screen crashes in Node.js server.ts, SSR, or ad-blocked/private browsers)
+export let analytics: Analytics | null = null;
+
+if (typeof window !== 'undefined') {
+  import('firebase/analytics')
+    .then(async ({ isSupported, getAnalytics }) => {
+      if (await isSupported()) {
+        analytics = getAnalytics(app);
+      }
+    })
+    .catch(() => {
+      // Analytics unavailable (e.g., blocked by privacy extension or unsupported browser)
+    });
+}

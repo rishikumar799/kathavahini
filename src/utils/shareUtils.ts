@@ -64,35 +64,38 @@ export async function copyToClipboard(text: string): Promise<boolean> {
  * to open the story, novel, episode, or author profile immediately without signing into Google / Gemini AI.
  */
 export function getPublicShareOrigin(): string {
-  // If explicitly configured in production environment
+  // 1. Explicit production domain configured via env
   const metaEnv = (import.meta as any)?.env;
   const configuredAppUrl = (metaEnv?.VITE_APP_URL || metaEnv?.VITE_PUBLIC_APP_URL || metaEnv?.APP_URL || '') as string;
-  if (configuredAppUrl && configuredAppUrl.startsWith('http') && !configuredAppUrl.includes('YOUR_REAL_KATHAVAHINI_DOMAIN')) {
+  if (
+    configuredAppUrl &&
+    configuredAppUrl.startsWith('http') &&
+    !configuredAppUrl.includes('YOUR_REAL_KATHAVAHINI_DOMAIN') &&
+    !configuredAppUrl.includes('MY_APP_URL')
+  ) {
     return configuredAppUrl.replace(/\/+$/, '');
   }
 
+  // 2. Use active browser origin; convert private ais-dev- preview host to public ais-pre- shared host
   if (typeof window !== 'undefined' && window.location && window.location.origin) {
-    const origin = window.location.origin;
-    // If not in internal dev sandbox and not localhost, use the current active origin (e.g. custom domain or Firebase domain)
-    if (!origin.includes('ais-dev-') && !origin.includes('ais-pre-') && !origin.includes('localhost') && !origin.includes('127.0.0.1')) {
-      return origin;
+    const origin = window.location.origin.replace(/\/+$/, '');
+    if (origin.includes('ais-dev-')) {
+      return origin.replace('ais-dev-', 'ais-pre-');
     }
-    // When running inside AI Studio dev container, ais-dev- is protected by Google Auth (applet-auth-bridge).
-    // Use the primary public Firebase domain so external WhatsApp crawlers and recipients never hit Google Account Login.
-    return 'https://thekathavahini.web.app';
+    return origin;
   }
 
-  return 'https://thekathavahini.web.app';
+  return 'https://kathavahini-9a9c1.web.app';
 }
 
 /**
- * Sanitizes any URL to ensure that if it was generated with an ais-dev- or ais-pre- domain,
- * it is safely translated to the public domain so external readers aren't prompted for Google sign-in.
+ * Sanitizes any URL to ensure that if it was generated with an internal ais-dev- domain,
+ * it is safely translated to the public ais-pre- shared domain so external readers aren't prompted for Google sign-in.
  */
 export function sanitizePublicUrl(url: string): string {
   if (!url) return '';
-  if (url.includes('ais-dev-') || url.includes('ais-pre-')) {
-    return url.replace(/https?:\/\/ais-(dev|pre)-[a-z0-9\-]+\.[a-z0-9\-]+\.run\.app/g, 'https://thekathavahini.web.app');
+  if (url.includes('ais-dev-')) {
+    return url.replace('ais-dev-', 'ais-pre-');
   }
   return url;
 }

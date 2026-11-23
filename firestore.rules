@@ -67,6 +67,8 @@ service cloud.firestore {
         && request.resource.data.uid == userId) || isAdmin();
       allow update: if isAdmin() || (
         isOwner(userId) && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status', 'uid', 'createdAt']))
+      ) || (
+        isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followersCount', 'updatedAt'])
       );
       allow delete: if isAdmin();
 
@@ -76,7 +78,8 @@ service cloud.firestore {
       }
 
       match /following/{authorId} {
-        allow read, write: if isOwner(userId) || isAdmin();
+        allow read: if true;
+        allow write: if isOwner(userId) || isAdmin();
       }
 
       match /readingHistory/{storyId} {
@@ -102,7 +105,9 @@ service cloud.firestore {
     match /writers/{writerId} {
       allow read: if true;
       allow create: if isOwner(writerId) || isAdmin();
-      allow update: if isAdmin() || (isOwner(writerId) && isWriter() && request.resource.data.status == resource.data.status);
+      allow update: if isAdmin() || (isOwner(writerId) && isWriter() && request.resource.data.status == resource.data.status) || (
+        isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followersCount', 'updatedAt'])
+      );
       allow delete: if isAdmin();
 
       // Daily Submission Limit Tracker subcollection
@@ -120,7 +125,9 @@ service cloud.firestore {
     match /authors/{authorId} {
       allow read: if true;
       allow create: if isOwner(authorId) || isAdmin();
-      allow update: if isAdmin() || (isOwner(authorId) && isWriter());
+      allow update: if isAdmin() || (isOwner(authorId) && isWriter()) || (
+        isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followersCount', 'updatedAt'])
+      );
       allow delete: if isAdmin();
     }
 

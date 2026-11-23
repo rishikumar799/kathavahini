@@ -188,6 +188,34 @@ export default function App() {
     categoryService.formatForViews()
   );
 
+  // Helper to accurately match published stories/novels belonging to a writer UID
+  const doesContentBelongToAuthor = React.useCallback((item: any, targetAuthorId: string): boolean => {
+    if (!item || !targetAuthorId) return false;
+    const res = resolveContentAuthor(item);
+    return (
+      res.id === targetAuthorId ||
+      item.authorId === targetAuthorId ||
+      item.writerId === targetAuthorId ||
+      item.ownerId === targetAuthorId ||
+      item.submittedBy === targetAuthorId ||
+      item.author?.id === targetAuthorId
+    );
+  }, []);
+
+  // Enrich every author with real live published story & novel counts
+  const authorsWithStats = React.useMemo(() => {
+    const sourceStories = allStories.length > 0 ? allStories : trendingStories;
+    return authors.map(author => {
+      const liveStoriesCount = sourceStories.filter(s => doesContentBelongToAuthor(s, author.id)).length;
+      const liveNovelsCount = novels.filter(n => doesContentBelongToAuthor(n, author.id)).length;
+      return {
+        ...author,
+        storiesCount: sourceStories.length > 0 ? liveStoriesCount : (author.storiesCount || 0),
+        novelsCount: novels.length > 0 ? liveNovelsCount : (author.novelsCount || 0),
+      };
+    });
+  }, [authors, allStories, trendingStories, novels, doesContentBelongToAuthor]);
+
   // Compute accurate story counts for categories based on real published stories
   const categoriesWithStoryCounts = React.useMemo(() => {
     return categories.map(cat => {
@@ -805,10 +833,27 @@ export default function App() {
 
   const handleSelectAuthor = (author: Author) => {
     setActiveNovelContext(null);
-    setSelectedAuthor(author);
+    const matched = authorsWithStats.find(a => a.id === author.id);
+    const initialAuthor = matched ? { ...author, ...matched } : author;
+    setSelectedAuthor(initialAuthor);
     setCurrentTab('author-detail');
     updateUrl('author-detail', 'author', author.id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    // Hydrate freshest profile, custom photo, and live follower count from Firestore
+    authorService.getAuthorById(author.id).then(fresh => {
+      if (fresh) {
+        setSelectedAuthor(curr => {
+          if (!curr || curr.id !== author.id) return curr;
+          return {
+            ...curr,
+            ...fresh,
+            storiesCount: curr.storiesCount || fresh.storiesCount,
+            novelsCount: curr.novelsCount || fresh.novelsCount,
+          };
+        });
+      }
+    }).catch(() => {});
   };
 
   const handleSelectCategory = (catName: StoryCategory) => {
@@ -861,9 +906,63 @@ export default function App() {
       handleRequireAuth('రచయితలను అనుసరించడానికి (Follow) ముందుగా లాగిన్ చేయండి.', 'login');
       return;
     }
-    await authorService.toggleFollow(authorId);
-    const updatedAuthors = await authorService.getAuthors();
-    setAuthors(updatedAuthors);
+
+    // Optimistic update for instant UI feedback across author cards, AuthorDetailView, and StoryDetailView
+    const existing = authors.find(a => a.id === authorId) || (selectedAuthor?.id === authorId ? selectedAuthor : null);
+    const prevFollowing = Boolean(existing?.isFollowing);
+    const nextFollowing = !prevFollowing;
+    const delta = nextFollowing ? 1 : -1;
+
+    setAuthors(prev =>
+      prev.map(a =>
+        a.id === authorId
+          ? { ...a, isFollowing: nextFollowing, followersCount: Math.max(0, (a.followersCount || 0) + delta) }
+          : a
+      )
+    );
+    setSelectedAuthor(curr =>
+      curr && curr.id === authorId
+        ? { ...curr, isFollowing: nextFollowing, followersCount: Math.max(0, (curr.followersCount || 0) + delta) }
+        : curr
+    );
+    setSelectedStory(curr =>
+      curr && (curr.authorId === authorId || curr.author?.id === authorId) && curr.author
+        ? {
+            ...curr,
+            author: {
+              ...curr.author,
+              isFollowing: nextFollowing,
+              followersCount: Math.max(0, (curr.author.followersCount || 0) + delta),
+            },
+          }
+        : curr
+    );
+
+    try {
+      const nowFollowing = await authorService.toggleFollow(authorId);
+      const updatedAuthors = await authorService.getAuthors();
+      setAuthors(updatedAuthors);
+
+      const refreshedAuthor = updatedAuthors.find(a => a.id === authorId);
+      if (refreshedAuthor) {
+        setSelectedAuthor(curr => (curr && curr.id === authorId ? { ...curr, ...refreshedAuthor, isFollowing: nowFollowing } : curr));
+        setSelectedStory(curr =>
+          curr && (curr.authorId === authorId || curr.author?.id === authorId) && curr.author
+            ? { ...curr, author: { ...curr.author, ...refreshedAuthor, isFollowing: nowFollowing } }
+            : curr
+        );
+      } else {
+        const freshSingle = await authorService.getAuthorById(authorId);
+        if (freshSingle) {
+          setSelectedAuthor(curr => (curr && curr.id === authorId ? { ...curr, ...freshSingle, isFollowing: nowFollowing } : curr));
+        }
+      }
+    } catch (err) {
+      console.error('Error toggling follow:', err);
+      // Revert optimistic update on failure
+      const updatedAuthors = await authorService.getAuthors().catch(() => null);
+      if (updatedAuthors) setAuthors(updatedAuthors);
+    }
   };
 
   const handleUpdateProgress = async (storyId: string, percent: number) => {
@@ -964,7 +1063,7 @@ export default function App() {
             popularStories={popularStories}
             newReleases={newReleases}
             featuredNovels={novels}
-            featuredAuthors={authors}
+            featuredAuthors={authorsWithStats}
             jokes={jokes}
             categories={categoriesWithStoryCounts}
             readingHistory={readingHistory}
@@ -995,10 +1094,19 @@ export default function App() {
           />
         );
 
-      case 'story-detail':
-        return selectedStory ? (
+      case 'story-detail': {
+        const liveStoryAuthor = selectedStory
+          ? authorsWithStats.find(
+              a => a.id === selectedStory.authorId || a.id === selectedStory.writerId || a.id === selectedStory.author?.id
+            )
+          : undefined;
+        const enrichedSelectedStory =
+          selectedStory && liveStoryAuthor
+            ? { ...selectedStory, author: { ...selectedStory.author, ...liveStoryAuthor } }
+            : selectedStory;
+        return enrichedSelectedStory ? (
           <StoryDetailView
-            story={selectedStory}
+            story={enrichedSelectedStory}
             relatedStories={relatedStoriesForSelected}
             currentUser={user}
             onStartReading={handleStartReading}
@@ -1022,6 +1130,7 @@ export default function App() {
             </button>
           </div>
         );
+      }
 
       case 'story-reader':
         return selectedStory ? (
@@ -1143,28 +1252,45 @@ export default function App() {
       case 'authors':
         return (
           <AuthorsView
-            authors={authors}
+            authors={authorsWithStats}
             onSelectAuthor={handleSelectAuthor}
             onFollowToggle={handleFollowAuthorToggle}
           />
         );
 
-      case 'author-detail':
-        return selectedAuthor ? (
+      case 'author-detail': {
+        const liveMatchedAuthor = selectedAuthor
+          ? authorsWithStats.find(a => a.id === selectedAuthor.id)
+          : undefined;
+        const activeAuthor = selectedAuthor
+          ? liveMatchedAuthor
+            ? {
+                ...selectedAuthor,
+                ...liveMatchedAuthor,
+                followersCount: liveMatchedAuthor.followersCount ?? selectedAuthor.followersCount ?? 0,
+                isFollowing: liveMatchedAuthor.isFollowing ?? selectedAuthor.isFollowing,
+              }
+            : selectedAuthor
+          : null;
+        const sourceStories = allStories.length > 0 ? allStories : trendingStories;
+        const matchedAuthorStories = activeAuthor
+          ? sourceStories.filter(s => doesContentBelongToAuthor(s, activeAuthor.id))
+          : [];
+        const matchedAuthorNovels = activeAuthor
+          ? novels.filter(n => doesContentBelongToAuthor(n, activeAuthor.id))
+          : [];
+
+        return activeAuthor ? (
           <AuthorDetailView
-            author={selectedAuthor}
-            authorStories={(allStories.length > 0 ? allStories : trendingStories).filter(s => {
-              const res = resolveContentAuthor(s);
-              return res.id === selectedAuthor.id || s.authorId === selectedAuthor.id || s.writerId === selectedAuthor.id || s.author?.id === selectedAuthor.id;
-            })}
-            authorNovels={novels.filter(n => {
-              const res = resolveContentAuthor(n);
-              return res.id === selectedAuthor.id || n.authorId === selectedAuthor.id || n.author?.id === selectedAuthor.id;
-            })}
+            author={activeAuthor}
+            authorStories={matchedAuthorStories}
+            authorNovels={matchedAuthorNovels}
             onBack={() => setCurrentTab('authors')}
             onSelectStory={handleSelectStory}
             onSelectNovel={handleSelectNovel}
             onFollowToggle={handleFollowAuthorToggle}
+            onBookmarkToggle={handleBookmarkToggle}
+            onLikeToggle={handleLikeToggle}
           />
         ) : (
           <div className="min-h-[50vh] flex flex-col items-center justify-center text-center p-8">
@@ -1177,6 +1303,7 @@ export default function App() {
             </button>
           </div>
         );
+      }
 
       case 'library':
         return (
@@ -1197,7 +1324,7 @@ export default function App() {
             stories={trendingStories}
             novels={novels}
             jokes={jokes}
-            authors={authors}
+            authors={authorsWithStats}
             onSelectStory={handleSelectStory}
             onSelectNovel={handleSelectNovel}
             onSelectAuthor={handleSelectAuthor}
@@ -1224,7 +1351,7 @@ export default function App() {
               popularStories={popularStories}
               newReleases={newReleases}
               featuredNovels={novels}
-              featuredAuthors={authors}
+              featuredAuthors={authorsWithStats}
               jokes={jokes}
               categories={categoriesWithStoryCounts}
               readingHistory={readingHistory}
@@ -1362,7 +1489,7 @@ export default function App() {
             popularStories={popularStories}
             newReleases={newReleases}
             featuredNovels={novels}
-            featuredAuthors={authors}
+            featuredAuthors={authorsWithStats}
             jokes={jokes}
             categories={categoriesWithStoryCounts}
             readingHistory={readingHistory}

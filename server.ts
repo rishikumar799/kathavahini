@@ -1,5 +1,6 @@
-import express, { Request, Response, NextFunction } from 'express';
-import { createServer as createViteServer, ViteDevServer } from 'vite';
+import express from 'express';
+import type { Request, Response, NextFunction } from 'express';
+import type { ViteDevServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -10,15 +11,26 @@ import {
   generateCrawlerPreviewHtml,
   isCustomUploadedPhoto,
   normalizeSocialAvatarUrl
-} from './src/server/metaHandler';
+} from './src/server/metaHandler.ts';
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from './src/lib/firebase';
+import { db } from './src/lib/firebase.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT) || 3000;
+const distDir = path.resolve(__dirname, 'dist');
+const distIndexPath = path.resolve(distDir, 'index.html');
+const publicDir = path.resolve(__dirname, 'public');
+const hasDistBuild = fs.existsSync(distIndexPath);
 const isProd = process.env.NODE_ENV === 'production';
+
+// Static file extensions that MUST return 404 if missing (never index.html!)
+const STATIC_ASSET_EXT_RE = /\.(?:js|mjs|cjs|css|map|png|jpe?g|webp|gif|svg|ico|woff2?|ttf|eot|otf|json|xml|txt|pdf|mp3|mp4|webm)$/i;
+
+function stripImageExtension(rawId: string): string {
+  return decodeURIComponent(rawId || '').trim().replace(/\.(jpe?g|png|webp)$/i, '');
+}
 
 function parseBase64DataUrl(src: string): { mimeType: string; buf: Buffer } | null {
   const match = src.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/i);
@@ -28,8 +40,56 @@ function parseBase64DataUrl(src: string): { mimeType: string; buf: Buffer } | nu
   return { mimeType, buf: Buffer.from(match[2], 'base64') };
 }
 
+let cachedSharpModule: any | null | undefined = undefined;
+
+async function getSharp(): Promise<any | null> {
+  if (cachedSharpModule !== undefined) return cachedSharpModule;
+  try {
+    const mod = await import('sharp');
+    cachedSharpModule = mod.default || mod;
+  } catch (err) {
+    console.warn('Sharp image optimizer unavailable, serving original image buffer:', err);
+    cachedSharpModule = null;
+  }
+  return cachedSharpModule;
+}
+
+/**
+ * Convert WebP / large images to WhatsApp-universal JPEG (under 250 KB, standard dimensions)
+ * so WhatsApp iOS/Android, Facebook, Telegram, LinkedIn, and iMessage always render the thumbnail.
+ * Uses lazy sharp import so the server never crashes if native binaries are unavailable.
+ */
+async function toSocialJpeg(
+  buf: Buffer,
+  mimeType: string,
+  kind: 'cover' | 'avatar'
+): Promise<{ mimeType: string; buf: Buffer }> {
+  try {
+    const needsConvert = mimeType !== 'image/jpeg' || buf.length > 260_000;
+    if (!needsConvert) {
+      return { mimeType, buf };
+    }
+    const sharpFn = await getSharp();
+    if (!sharpFn) {
+      return { mimeType, buf };
+    }
+    const maxW = kind === 'cover' ? 1200 : 512;
+    const maxH = kind === 'cover' ? 630 : 512;
+    const converted = await sharpFn(buf)
+      .resize(maxW, maxH, { fit: 'inside', withoutEnlargement: true })
+      .jpeg({ quality: 84, mozjpeg: true })
+      .toBuffer();
+    return { mimeType: 'image/jpeg', buf: converted };
+  } catch (err) {
+    console.warn('Sharp JPEG conversion fallback:', err);
+    return { mimeType, buf };
+  }
+}
+
 function sendFallbackLogo(res: Response) {
-  const fallbackLogo = path.resolve(__dirname, 'public/logo.png');
+  const distLogo = path.resolve(distDir, 'logo.png');
+  const publicLogo = path.resolve(publicDir, 'logo.png');
+  const fallbackLogo = fs.existsSync(distLogo) ? distLogo : publicLogo;
   if (fs.existsSync(fallbackLogo)) {
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -39,13 +99,34 @@ function sendFallbackLogo(res: Response) {
   return res.status(404).send('Image not found');
 }
 
+function resolveRequestOrigin(req: Request): string {
+  const protoHeader = req.headers['x-forwarded-proto'];
+  const proto = Array.isArray(protoHeader) ? protoHeader[0] : (protoHeader || req.protocol || 'http');
+  const hostHeader = req.headers['x-forwarded-host'];
+  const host = Array.isArray(hostHeader) ? hostHeader[0] : (hostHeader || req.get('host') || `localhost:${PORT}`);
+  return `${String(proto).split(',')[0].trim()}://${String(host).split(',')[0].trim()}`;
+}
+
 async function startServer() {
   const app = express();
-  let vite: ViteDevServer | null = null;
+  app.set('trust proxy', true);
 
-  // 1. Public binary image endpoints for base64 & remote covers / avatars (accessible by WhatsApp/Facebook without auth)
+  let vite: ViteDevServer | null = null;
+  let servingProductionDist = isProd;
+
+  // 0. Health check endpoint for live backend verification
+  app.get('/api/health', (_req: Request, res: Response) => {
+    res.status(200).json({
+      ok: true,
+      mode: servingProductionDist ? 'production' : 'development',
+      projectId: 'kathavahini-9a9c1',
+      hasDistBuild: fs.existsSync(distIndexPath),
+    });
+  });
+
+  // 1. Public binary image endpoints for covers & avatars (WhatsApp-compatible JPEG, accessible without auth)
   app.get('/api/cover/:id', async (req: Request, res: Response) => {
-    const id = decodeURIComponent(req.params.id || '').trim();
+    const id = stripImageExtension(req.params.id || '');
     res.setHeader('Access-Control-Allow-Origin', '*');
 
     try {
@@ -72,12 +153,26 @@ async function startServer() {
             if (trimmed.startsWith('data:image/')) {
               const parsed = parseBase64DataUrl(trimmed);
               if (parsed) {
-                res.setHeader('Content-Type', parsed.mimeType);
-                res.setHeader('Content-Length', String(parsed.buf.length));
+                const finalImg = await toSocialJpeg(parsed.buf, parsed.mimeType, 'cover');
+                res.setHeader('Content-Type', finalImg.mimeType);
+                res.setHeader('Content-Length', String(finalImg.buf.length));
                 res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800');
-                return res.status(200).send(parsed.buf);
+                return res.status(200).send(finalImg.buf);
               }
             } else if ((trimmed.startsWith('https://') || trimmed.startsWith('http://')) && !trimmed.startsWith('blob:')) {
+              if (trimmed.toLowerCase().includes('.webp')) {
+                try {
+                  const upstream = await fetch(trimmed);
+                  if (upstream.ok) {
+                    const rawBuf = Buffer.from(await upstream.arrayBuffer());
+                    const finalImg = await toSocialJpeg(rawBuf, 'image/webp', 'cover');
+                    res.setHeader('Content-Type', finalImg.mimeType);
+                    res.setHeader('Content-Length', String(finalImg.buf.length));
+                    res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800');
+                    return res.status(200).send(finalImg.buf);
+                  }
+                } catch {}
+              }
               return res.redirect(302, trimmed);
             }
           }
@@ -91,7 +186,7 @@ async function startServer() {
   });
 
   app.get('/api/avatar/:id', async (req: Request, res: Response) => {
-    const id = decodeURIComponent(req.params.id || '').trim();
+    const id = stripImageExtension(req.params.id || '');
     res.setHeader('Access-Control-Allow-Origin', '*');
 
     try {
@@ -129,10 +224,11 @@ async function startServer() {
           if (chosen.startsWith('data:image/')) {
             const parsed = parseBase64DataUrl(chosen);
             if (parsed) {
-              res.setHeader('Content-Type', parsed.mimeType);
-              res.setHeader('Content-Length', String(parsed.buf.length));
+              const finalImg = await toSocialJpeg(parsed.buf, parsed.mimeType, 'avatar');
+              res.setHeader('Content-Type', finalImg.mimeType);
+              res.setHeader('Content-Length', String(finalImg.buf.length));
               res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800');
-              return res.status(200).send(parsed.buf);
+              return res.status(200).send(finalImg.buf);
             }
           } else if (chosen.startsWith('https://') || chosen.startsWith('http://')) {
             return res.redirect(302, normalizeSocialAvatarUrl(chosen));
@@ -148,9 +244,7 @@ async function startServer() {
 
   // 2. Dedicated preview endpoint (/share/*)
   app.get(['/share', '/share/*'], async (req: Request, res: Response) => {
-    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
-    const host = req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000';
-    const origin = `${proto}://${host}`;
+    const origin = resolveRequestOrigin(req);
     const isCrawler = isSocialCrawler(req.headers['user-agent']);
 
     const storyId = (req.query.story as string) || (req.path.startsWith('/share/story/') ? decodeURIComponent(req.path.split('/share/story/')[1] || '') : null);
@@ -169,38 +263,75 @@ async function startServer() {
     return res.status(200).send(html);
   });
 
-  // 3. Mount Vite Dev Server middleware in development, or immutable static assets in production
-  if (!isProd) {
-    vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'custom'
-    });
-    app.use(vite.middlewares);
-  } else {
-    app.use(
-      '/assets',
-      express.static(path.resolve(__dirname, 'dist/assets'), {
-        maxAge: '1y',
-        immutable: true,
-      })
-    );
-    app.use(express.static(path.resolve(__dirname, 'dist'), { index: false, maxAge: '1h' }));
+  // 3. Mount Vite Dev Server in development, or immutable static assets in production
+  if (!servingProductionDist) {
+    try {
+      const { createServer: createViteServer } = await import('vite');
+      vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'custom'
+      });
+      app.use(vite.middlewares);
+    } catch (err) {
+      if (fs.existsSync(distIndexPath)) {
+        console.warn('Vite dev server unavailable, falling back to production dist/ build.');
+        servingProductionDist = true;
+      } else {
+        throw err;
+      }
+    }
   }
 
-  // 4. Universal route handler for Crawlers & Browsers
+  if (servingProductionDist) {
+    app.use(
+      '/assets',
+      express.static(path.resolve(distDir, 'assets'), {
+        maxAge: '1y',
+        immutable: true,
+        fallthrough: false,
+      })
+    );
+    // Return clean 404 (not index.html!) if a hashed JS/CSS chunk under /assets is missing
+    app.use('/assets', (err: any, _req: Request, res: Response, _next: NextFunction) => {
+      if (err && (err.status === 404 || err.statusCode === 404 || err.code === 'ENOENT')) {
+        return res.status(404).type('text/plain').send('Asset not found');
+      }
+      return res.status(404).type('text/plain').send('Asset not found');
+    });
+
+    app.use(express.static(distDir, { index: false, maxAge: '1h' }));
+    if (fs.existsSync(publicDir)) {
+      app.use(express.static(publicDir, { index: false, maxAge: '1h' }));
+    }
+  }
+
+  // 4. Universal SPA + Social Crawler Route Handler
   app.use('*', async (req: Request, res: Response, next: NextFunction) => {
     const url = req.originalUrl;
+    const origin = resolveRequestOrigin(req);
+
+    // Parse URL safely
+    let urlObj: URL;
+    try {
+      urlObj = new URL(url, origin);
+    } catch {
+      urlObj = new URL('/', origin);
+    }
+    const pathname = urlObj.pathname;
+
+    // CRITICAL: Never serve HTML index.html for missing static files or unknown /api routes!
+    // Serving text/html for a missing .js/.css chunk causes browsers to fail with a blank white screen.
+    if (
+      pathname.startsWith('/api/') ||
+      pathname.startsWith('/assets/') ||
+      STATIC_ASSET_EXT_RE.test(pathname)
+    ) {
+      return res.status(404).type('text/plain').send('Not found');
+    }
+
     const userAgent = req.headers['user-agent'] || '';
     const isCrawler = isSocialCrawler(userAgent);
-
-    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
-    const host = req.headers['x-forwarded-host'] || req.get('host') || 'localhost:3000';
-    const origin = `${proto}://${host}`;
-
-    // Extract potential entity IDs from search params or clean paths
-    const urlObj = new URL(url, origin);
     const params = urlObj.searchParams;
-    const pathname = urlObj.pathname;
 
     const pathSegments = pathname.split('/').filter(Boolean);
     const segmentType = pathSegments[0] || '';
@@ -230,12 +361,12 @@ async function startServer() {
 
     // For Human Browsers or general requests: serve index.html with server-injected OG tags
     try {
-      const templatePath = isProd
-        ? path.resolve(__dirname, 'dist/index.html')
+      const templatePath = servingProductionDist
+        ? distIndexPath
         : path.resolve(__dirname, 'index.html');
 
       if (!fs.existsSync(templatePath)) {
-        return res.status(404).send('Application build not found. Please build or run dev.');
+        return res.status(503).type('text/plain').send('Application build not found. Run npm run build first.');
       }
 
       let template = fs.readFileSync(templatePath, 'utf-8');
@@ -245,12 +376,12 @@ async function startServer() {
         template = injectMetaIntoHtml(template, meta);
       }
 
-      if (vite && !isProd) {
+      if (vite && !servingProductionDist) {
         template = await vite.transformIndexHtml(url, template);
       }
 
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       return res.status(200).send(template);
     } catch (err) {
       if (vite) {
@@ -261,7 +392,9 @@ async function startServer() {
   });
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Kathavahini full-stack server running at http://0.0.0.0:${PORT}`);
+    console.log(
+      `Kathavahini full-stack server running at http://0.0.0.0:${PORT} (${servingProductionDist ? 'production' : 'development'})`
+    );
   });
 }
 

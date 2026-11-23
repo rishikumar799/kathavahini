@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Users, BookOpen, Feather, UserCheck, UserPlus, MapPin, Calendar, Share2 } from 'lucide-react';
+import { ArrowLeft, Users, BookOpen, Feather, UserCheck, UserPlus, Calendar, Share2, Check } from 'lucide-react';
 import { Author, Story, Novel } from '../types';
 import { StoryCard } from '../components/cards/StoryCard';
 import { NovelCard } from '../components/cards/NovelCard';
@@ -15,6 +15,8 @@ interface AuthorDetailViewProps {
   onSelectStory: (story: Story) => void;
   onSelectNovel: (novel: Novel) => void;
   onFollowToggle: (authorId: string) => void;
+  onBookmarkToggle?: (storyId: string, e: React.MouseEvent) => void;
+  onLikeToggle?: (storyId: string, e: React.MouseEvent) => void;
 }
 
 export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
@@ -25,12 +27,17 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
   onSelectStory,
   onSelectNovel,
   onFollowToggle,
+  onBookmarkToggle,
+  onLikeToggle,
 }) => {
   const [activeTab, setActiveTab] = useState<'stories' | 'novels'>('stories');
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
 
   const resolvedName = getAuthorDisplayName(author);
   const resolvedAvatar = resolveAvatarUrl(author.avatar, resolvedName);
+  const liveFollowersCount = Math.max(0, author.followersCount || 0);
+  const liveStoriesCount = authorStories.length;
+  const liveNovelsCount = authorNovels.length;
 
   const handleShareProfile = async () => {
     try {
@@ -77,6 +84,9 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
               src={resolvedAvatar}
               alt={resolvedName}
               className="w-28 h-28 sm:w-32 sm:h-32 rounded-full object-cover ring-4 ring-white dark:ring-[#18181D] shadow-2xl shrink-0"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = resolveAvatarUrl(null, resolvedName);
+              }}
             />
             <div>
               <div className="flex items-center justify-center sm:justify-start gap-2">
@@ -90,7 +100,7 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
                 )}
               </div>
               <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] mt-0.5">
-                {author.name} • {author.location || 'ఆంధ్రప్రదేశ్'}
+                {author.name} • {author.location || 'ఆంధ్రప్రదేశ్ / తెలంగాణ'}
               </p>
             </div>
           </div>
@@ -110,10 +120,14 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
 
             <button
               onClick={handleShareProfile}
-              className="p-2.5 rounded-full border border-[#E8E1DA] dark:border-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE] hover:bg-[#FAF7F2] dark:hover:bg-[#222229] transition-colors cursor-pointer shrink-0"
+              className={`p-2.5 rounded-full border transition-colors cursor-pointer shrink-0 ${
+                shareFeedback
+                  ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30'
+                  : 'border-[#E8E1DA] dark:border-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE] hover:bg-[#FAF7F2] dark:hover:bg-[#222229]'
+              }`}
               title="రచయిత ప్రొఫైల్‌ను షేర్ చేయండి"
             >
-              <Share2 className="w-4 h-4" />
+              {shareFeedback ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
             </button>
 
             {shareFeedback && (
@@ -127,23 +141,23 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
         {/* Bio & Stats */}
         <div className="p-6 sm:p-8 pt-0 border-t border-[#E8E1DA] dark:border-[#2E2D36] mt-4">
           <p className="text-sm font-serif-telugu text-[#17151A] dark:text-[#F7F3EE] max-w-3xl leading-relaxed mb-6">
-            {author.teluguBio}
+            {author.teluguBio || author.bio}
           </p>
 
           <div className="flex flex-wrap items-center gap-8 text-xs text-[#6F6970] dark:text-[#AAA4AC]">
             <div className="flex items-center gap-1.5 font-bold text-[#17151A] dark:text-[#F7F3EE]">
               <Users className="w-4 h-4 text-[#7A284B] dark:text-[#D87591]" />
-              <span>{author.followersCount.toLocaleString()} అనుచరులు</span>
+              <span>{liveFollowersCount.toLocaleString()} అనుచరులు</span>
             </div>
 
-            <div className="flex items-center gap-1.5">
-              <BookOpen className="w-4 h-4" />
-              <span>{author.storiesCount} కథలు</span>
+            <div className="flex items-center gap-1.5 font-semibold text-[#17151A] dark:text-[#F7F3EE]">
+              <BookOpen className="w-4 h-4 text-[#7A284B] dark:text-[#D87591]" />
+              <span>{liveStoriesCount} కథలు</span>
             </div>
 
             <div className="flex items-center gap-1.5">
               <Feather className="w-4 h-4 text-[#D99A3D]" />
-              <span>{author.novelsCount} నవలలు</span>
+              <span>{liveNovelsCount} నవలలు</span>
             </div>
 
             <div className="flex items-center gap-1.5">
@@ -165,7 +179,7 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
                 : 'border-transparent text-[#6F6970] hover:text-[#17151A]'
             }`}
           >
-            ప్రచురించిన కథలు ({authorStories.length})
+            ప్రచురించిన కథలు ({liveStoriesCount})
           </button>
 
           <button
@@ -176,21 +190,35 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
                 : 'border-transparent text-[#6F6970] hover:text-[#17151A]'
             }`}
           >
-            నవలలు ({authorNovels.length})
+            నవలలు ({liveNovelsCount})
           </button>
         </div>
 
         {activeTab === 'stories' ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {authorStories.map(story => (
-              <StoryCard
-                key={story.id}
-                story={story}
-                onSelect={onSelectStory}
-              />
-            ))}
-          </div>
-        ) : (
+          authorStories.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {authorStories.map(story => (
+                <StoryCard
+                  key={story.id}
+                  story={story}
+                  onSelect={onSelectStory}
+                  onBookmarkToggle={onBookmarkToggle}
+                  onLikeToggle={onLikeToggle}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="bg-white dark:bg-[#18181D] rounded-2xl border border-[#E8E1DA] dark:border-[#2E2D36] p-10 text-center">
+              <BookOpen className="w-10 h-10 mx-auto text-[#7A284B]/40 dark:text-[#D87591]/40 mb-3" />
+              <p className="text-sm font-serif-telugu font-semibold text-[#17151A] dark:text-[#F7F3EE]">
+                ఈ రచయిత ఇంకా కథలు ప్రచురించలేదు
+              </p>
+              <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] mt-1">
+                కొత్త రచనల కోసం ఈ రచయితను అనుసరించండి.
+              </p>
+            </div>
+          )
+        ) : authorNovels.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {authorNovels.map(novel => (
               <NovelCard
@@ -200,8 +228,19 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
               />
             ))}
           </div>
+        ) : (
+          <div className="bg-white dark:bg-[#18181D] rounded-2xl border border-[#E8E1DA] dark:border-[#2E2D36] p-10 text-center">
+            <Feather className="w-10 h-10 mx-auto text-[#D99A3D]/50 mb-3" />
+            <p className="text-sm font-serif-telugu font-semibold text-[#17151A] dark:text-[#F7F3EE]">
+              ఈ రచయిత ఇంకా నవలలు ప్రచురించలేదు
+            </p>
+            <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] mt-1">
+              కొత్త ధారావాహికల కోసం ఈ రచయితను అనుసరించండి.
+            </p>
+          </div>
         )}
       </div>
     </div>
   );
 };
+

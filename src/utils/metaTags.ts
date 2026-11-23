@@ -3,6 +3,8 @@
  * Injects canonical title, description, cover image, and URL for crawlers and browser sharing
  */
 
+import { getPublicShareOrigin, sanitizePublicUrl } from './shareUtils';
+
 export interface PageMetaOptions {
   title: string;
   description: string;
@@ -28,13 +30,20 @@ export function updatePageMeta(data: PageMetaOptions): void {
     el.setAttribute('content', content);
   };
 
-  const origin = typeof window !== 'undefined' ? window.location.origin : 'https://kathavahini.org';
-  const fullUrl = data.url 
+  const origin = getPublicShareOrigin();
+  const rawUrl = data.url 
     ? (data.url.startsWith('http') ? data.url : `${origin}${data.url.startsWith('/') ? data.url : `/${data.url}`}`)
     : (typeof window !== 'undefined' ? window.location.href : origin);
+  const fullUrl = sanitizePublicUrl(rawUrl);
 
   const fallbackImage = `${origin}/logo.png`;
-  const imageUrl = data.image || fallbackImage;
+  const existingOgImg = document.querySelector('meta[property="og:image"]')?.getAttribute('content') || '';
+  let imageUrl = fallbackImage;
+  if (data.image && !data.image.startsWith('data:') && !data.image.startsWith('blob:')) {
+    imageUrl = sanitizePublicUrl(data.image);
+  } else if (existingOgImg && (existingOgImg.includes('/api/cover/') || existingOgImg.includes('/api/avatar/'))) {
+    imageUrl = existingOgImg;
+  }
 
   // Standard SEO
   setMeta('name', 'description', data.description);

@@ -1,5 +1,5 @@
-import React from 'react';
-import { UserCheck, UserPlus, BookOpen, Users, Share2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { UserCheck, UserPlus, BookOpen, Users, Share2, Check } from 'lucide-react';
 import { Author } from '../../types';
 import { resolveAvatarUrl } from '../../utils/avatarUtils';
 import { getAuthorDisplayName } from '../../utils/authorResolver';
@@ -11,11 +11,12 @@ interface AuthorCardProps {
   onFollowToggle?: (authorId: string, e: React.MouseEvent) => void;
 }
 
-export const AuthorCard: React.FC<AuthorCardProps> = ({
+export const AuthorCard: React.FC<AuthorCardProps> = React.memo(({
   author,
   onSelect,
   onFollowToggle,
 }) => {
+  const [sharedCopied, setSharedCopied] = useState(false);
   const displayName = getAuthorDisplayName(author);
   const avatarUrl = resolveAvatarUrl(author.avatar, displayName);
 
@@ -29,6 +30,8 @@ export const AuthorCard: React.FC<AuthorCardProps> = ({
           <img
             src={avatarUrl}
             alt={displayName}
+            loading="lazy"
+            decoding="async"
             className="w-14 h-14 rounded-full object-cover ring-2 ring-[#7A284B]/20 dark:ring-[#D87591]/20 group-hover:scale-105 transition-transform"
             onError={(e) => {
               (e.target as HTMLImageElement).src = resolveAvatarUrl(null, displayName);
@@ -81,18 +84,26 @@ export const AuthorCard: React.FC<AuthorCardProps> = ({
           <button
             onClick={async (e) => {
               e.stopPropagation();
-              await shareContent({
+              const res = await shareContent({
                 contentType: 'author',
                 id: author.id,
                 title: `${displayName} - రచయిత ప్రొఫైల్ (Kathavahini)`,
                 text: author.teluguBio || `${displayName} గారి రచనలు కథావాహినిలో చదవండి`,
                 coverImage: author.avatar,
               });
+              if (res.success) {
+                setSharedCopied(true);
+                setTimeout(() => setSharedCopied(false), 2000);
+              }
             }}
-            className="p-1.5 rounded-full border border-[#E8E1DA] dark:border-[#2E2D36] text-[#6F6970] dark:text-[#AAA4AC] hover:text-[#7A284B] dark:hover:text-[#D87591] hover:bg-[#FAF7F2] dark:hover:bg-[#222229] transition-colors cursor-pointer"
-            title="రచయిత ప్రొఫైల్‌ను షేర్ చేయండి"
+            className={`p-1.5 rounded-full border transition-colors cursor-pointer ${
+              sharedCopied
+                ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30'
+                : 'border-[#E8E1DA] dark:border-[#2E2D36] text-[#6F6970] dark:text-[#AAA4AC] hover:text-[#7A284B] dark:hover:text-[#D87591] hover:bg-[#FAF7F2] dark:hover:bg-[#222229]'
+            }`}
+            title={sharedCopied ? 'ప్రొఫైల్ లింక్ కాపీ చేయబడింది!' : 'రచయిత ప్రొఫైల్‌ను షేర్ చేయండి'}
           >
-            <Share2 className="w-3.5 h-3.5" />
+            {sharedCopied ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
           </button>
 
           {onFollowToggle && (
@@ -121,4 +132,4 @@ export const AuthorCard: React.FC<AuthorCardProps> = ({
       </div>
     </div>
   );
-};
+});

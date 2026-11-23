@@ -268,8 +268,104 @@ exports.publishScheduledContentHttp = (0, https_1.onRequest)({
         });
     }
 });
+const CRAWLER_UA_LIST = [
+    'facebookexternalhit',
+    'facebot',
+    'whatsapp',
+    'twitterbot',
+    'telegrambot',
+    'linkedinbot',
+    'slackbot',
+    'discordbot',
+    'skypeuripreview',
+    'googlebot',
+    'bingbot',
+    'applebot',
+    'pinterest',
+    'redditbot',
+    'viber',
+    'vkshare',
+    'w3c_validator',
+    'metainspector',
+    'embedly',
+    'iframely',
+    'bitlybot'
+];
+function isSocialCrawlerUA(ua) {
+    if (!ua)
+        return false;
+    const lower = ua.toLowerCase();
+    return CRAWLER_UA_LIST.some(bot => lower.includes(bot));
+}
+function sanitizePublicMetaText(text) {
+    if (!text)
+        return '';
+    return text
+        .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '')
+        .replace(/(?:\+?\d[\d\s\-()]{8,}\d)/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+function detectMimeType(src) {
+    if (!src)
+        return 'image/png';
+    const match = src.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,/i);
+    if (match) {
+        const ext = match[1].toLowerCase();
+        return ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+    }
+    const lower = src.toLowerCase().split('?')[0];
+    if (lower.endsWith('.webp'))
+        return 'image/webp';
+    if (lower.endsWith('.png'))
+        return 'image/png';
+    if (lower.endsWith('.gif'))
+        return 'image/gif';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg'))
+        return 'image/jpeg';
+    if (src.includes('api.dicebear.com') && src.includes('/png'))
+        return 'image/png';
+    return 'image/jpeg';
+}
+function normalizeAvatarForCrawler(url) {
+    if (!url)
+        return '';
+    if (url.includes('api.dicebear.com') && url.includes('/svg')) {
+        const pngUrl = url.replace('/svg', '/png');
+        return pngUrl.includes('size=') ? pngUrl : `${pngUrl}${pngUrl.includes('?') ? '&' : '?'}size=512`;
+    }
+    return url;
+}
+function isCustomPhoto(src) {
+    if (typeof src !== 'string')
+        return false;
+    const trimmed = src.trim();
+    if (!trimmed || trimmed.startsWith('blob:'))
+        return false;
+    if (trimmed.startsWith('data:image/'))
+        return true;
+    if (trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
+        const lower = trimmed.toLowerCase();
+        if (lower.includes('api.dicebear.com'))
+            return false;
+        if (lower.includes('ui-avatars.com'))
+            return false;
+        if (lower.endsWith('/logo.png'))
+            return false;
+        return true;
+    }
+    return false;
+}
+function parseBase64Img(src) {
+    const match = src.match(/^data:image\/([a-zA-Z0-9+.-]+);base64,(.+)$/i);
+    if (!match)
+        return null;
+    const ext = match[1].toLowerCase();
+    const mimeType = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+    return { mimeType, buf: Buffer.from(match[2], 'base64') };
+}
 /**
- * Dynamic OpenGraph share preview endpoint for WhatsApp, Facebook, Twitter/X, Telegram crawlers
+ * Dynamic OpenGraph share preview & binary image proxy endpoint for WhatsApp, Facebook, Twitter/X, Telegram, LinkedIn crawlers
  */
 exports.sharePreview = (0, https_1.onRequest)({
     cors: true,
@@ -277,106 +373,413 @@ exports.sharePreview = (0, https_1.onRequest)({
 }, async (req, res) => {
     try {
         const url = req.url || '';
+        const reqPath = req.path || '';
         const query = req.query || {};
-        const storyId = query.story || query.episode || (url.includes('/story/') ? url.split('/story/')[1]?.split('?')[0] : null);
-        const novelId = query.novel || (url.includes('/novel/') ? url.split('/novel/')[1]?.split('?')[0] : null);
-        const authorId = query.author || query.writer || query.profile || (url.includes('/author/') ? url.split('/author/')[1]?.split('?')[0] : null);
-        let title = 'కథావాహిని — తెలుగు కథా వేదిక';
-        let description = 'తెలుగు కథలు, నవలలు, బాలవినోదిని మరియు సాహిత్య రచనల వేదిక.';
-        let image = 'https://thekathavahini.web.app/logo.png';
-        let canonicalUrl = 'https://thekathavahini.web.app';
-        if (storyId) {
-            canonicalUrl = `https://thekathavahini.web.app/?story=${storyId}`;
-            const sDoc = await db.collection('stories').doc(storyId).get();
+        const userAgent = String(req.headers['user-agent'] || '');
+        const isCrawler = isSocialCrawlerUA(userAgent);
+        const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+        const host = req.headers['x-forwarded-host'] || req.headers.host || 'thekathavahini.web.app';
+        const origin = `${proto}://${host}`.replace(/\/+$/, '');
+        const defaultLogo = `${origin}/logo.png`;
+        // 1. Public binary cover image endpoint (/api/cover/:id)
+        if (reqPath.includes('/api/cover/') || reqPath.includes('/cover/')) {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            const rawCoverId = reqPath.split('/cover/')[1]?.split('?')[0] || '';
+            const coverId = decodeURIComponent(rawCoverId).trim();
+            if (coverId) {
+                let snap = await db.collection('stories').doc(coverId).get();
+                if (!snap.exists)
+                    snap = await db.collection('novels').doc(coverId).get();
+                if (!snap.exists)
+                    snap = await db.collection('episodes').doc(coverId).get();
+                if (snap.exists) {
+                    const data = snap.data() || {};
+                    let cover = data.coverImage || data.coverImageUrl;
+                    // Episode fallback to parent novel cover
+                    if ((!cover || typeof cover !== 'string') && data.novelId) {
+                        const parentNovel = await db.collection('novels').doc(data.novelId).get();
+                        if (parentNovel.exists) {
+                            const pData = parentNovel.data() || {};
+                            cover = pData.coverImage || pData.coverImageUrl;
+                        }
+                    }
+                    if (cover && typeof cover === 'string') {
+                        const trimmed = cover.trim();
+                        if (trimmed.startsWith('data:image/')) {
+                            const parsed = parseBase64Img(trimmed);
+                            if (parsed) {
+                                res.setHeader('Content-Type', parsed.mimeType);
+                                res.setHeader('Content-Length', String(parsed.buf.length));
+                                res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800');
+                                return res.status(200).send(parsed.buf);
+                            }
+                        }
+                        else if ((trimmed.startsWith('https://') || trimmed.startsWith('http://')) && !trimmed.startsWith('blob:')) {
+                            return res.redirect(302, trimmed);
+                        }
+                    }
+                }
+            }
+            return res.redirect(302, defaultLogo);
+        }
+        // 2. Public binary writer/user avatar endpoint (/api/avatar/:id)
+        if (reqPath.includes('/api/avatar/') || reqPath.includes('/avatar/')) {
+            res.setHeader('Access-Control-Allow-Origin', '*');
+            const rawAvatarId = reqPath.split('/avatar/')[1]?.split('?')[0] || '';
+            const avatarId = decodeURIComponent(rawAvatarId).trim();
+            if (avatarId) {
+                // Parallel fetch across users, writers, authors so custom uploaded photos always take priority
+                const [uSnap, wSnap, aSnap] = await Promise.all([
+                    db.collection('users').doc(avatarId).get().catch(() => null),
+                    db.collection('writers').doc(avatarId).get().catch(() => null),
+                    db.collection('authors').doc(avatarId).get().catch(() => null),
+                ]);
+                const docs = [
+                    uSnap?.exists ? uSnap.data() : null,
+                    wSnap?.exists ? wSnap.data() : null,
+                    aSnap?.exists ? aSnap.data() : null,
+                ];
+                const candidates = [];
+                for (const d of docs) {
+                    if (!d)
+                        continue;
+                    for (const key of ['photoURL', 'profileImageURL', 'avatar', 'profileImage', 'imageUrl']) {
+                        const val = d[key];
+                        if (typeof val === 'string' && val.trim() && !val.trim().startsWith('blob:')) {
+                            candidates.push(val.trim());
+                        }
+                    }
+                }
+                const chosen = candidates.find(c => isCustomPhoto(c)) ||
+                    candidates.find(c => c.startsWith('https://') || c.startsWith('http://'));
+                if (chosen) {
+                    if (chosen.startsWith('data:image/')) {
+                        const parsed = parseBase64Img(chosen);
+                        if (parsed) {
+                            res.setHeader('Content-Type', parsed.mimeType);
+                            res.setHeader('Content-Length', String(parsed.buf.length));
+                            res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800');
+                            return res.status(200).send(parsed.buf);
+                        }
+                    }
+                    else if (chosen.startsWith('https://') || chosen.startsWith('http://')) {
+                        return res.redirect(302, normalizeAvatarForCrawler(chosen));
+                    }
+                }
+            }
+            return res.redirect(302, defaultLogo);
+        }
+        // 3. Extract Content IDs from clean paths or query params
+        const cleanPath = reqPath || url.split('?')[0] || '';
+        const rawStoryId = query.story ||
+            (cleanPath.includes('/story/') ? cleanPath.split('/story/')[1]?.split('/')[0] : null);
+        const rawEpisodeId = query.episode ||
+            (cleanPath.includes('/episode/') ? cleanPath.split('/episode/')[1]?.split('/')[0] : null);
+        const rawNovelId = query.novel ||
+            (cleanPath.includes('/novel/') ? cleanPath.split('/novel/')[1]?.split('/')[0] : null);
+        const rawAuthorId = query.author ||
+            query.writer ||
+            query.profile ||
+            query.user ||
+            (cleanPath.includes('/author/') ? cleanPath.split('/author/')[1]?.split('/')[0] : null) ||
+            (cleanPath.includes('/profile/') ? cleanPath.split('/profile/')[1]?.split('/')[0] : null);
+        const storyId = rawStoryId ? decodeURIComponent(String(rawStoryId)).trim() : null;
+        const episodeId = rawEpisodeId ? decodeURIComponent(String(rawEpisodeId)).trim() : null;
+        const novelId = rawNovelId ? decodeURIComponent(String(rawNovelId)).trim() : null;
+        const authorId = rawAuthorId ? decodeURIComponent(String(rawAuthorId)).trim() : null;
+        const isReaderMode = query.reader === 'true' || Boolean(episodeId);
+        let title = 'కథావాహిని — తెలుగు కథా వేదిక | Kathavahini';
+        let description = 'తెలుగు కథలు, నవలలు, బాలవినోదిని మరియు సాహిత్య రచనల వేదిక. మీ కథలను ప్రపంచంతో పంచుకోండి.';
+        let image = defaultLogo;
+        let imageType = 'image/png';
+        let imageWidth = 1200;
+        let imageHeight = 630;
+        let canonicalUrl = origin;
+        let appDirectUrl = origin;
+        let contentType = 'website';
+        const targetStoryOrEpId = storyId || episodeId;
+        if (targetStoryOrEpId) {
+            const encodedId = encodeURIComponent(targetStoryOrEpId);
+            canonicalUrl = isReaderMode ? `${origin}/episode/${encodedId}` : `${origin}/story/${encodedId}`;
+            appDirectUrl = isReaderMode ? `${origin}/?story=${encodedId}&reader=true` : `${origin}/?story=${encodedId}`;
+            const sDoc = await db.collection('stories').doc(targetStoryOrEpId).get();
             if (sDoc.exists) {
                 const s = sDoc.data() || {};
-                title = `${s.teluguTitle || s.title || 'తెలుగు కథ'} | కథావాహిని`;
-                description = s.teluguExcerpt || s.excerpt || `${s.teluguTitle || 'కథ'} కథావాహినిలో చదవండి.`;
-                if (s.coverImage)
-                    image = s.coverImage;
+                const isHidden = s.deleted === true ||
+                    s.status === 'deleted' ||
+                    s.status === 'draft' ||
+                    s.status === 'pending' ||
+                    s.status === 'rejected' ||
+                    s.visibility === 'hidden' ||
+                    s.visibility === 'private';
+                let isFutureScheduled = false;
+                if (s.status === 'scheduled') {
+                    const sched = s.scheduledPublishAt || s.scheduledAt;
+                    const schedMs = sched instanceof admin.firestore.Timestamp
+                        ? sched.toMillis()
+                        : new Date(sched).getTime();
+                    if (schedMs > Date.now())
+                        isFutureScheduled = true;
+                }
+                if (!isHidden && !isFutureScheduled) {
+                    const rawTitle = sanitizePublicMetaText(s.teluguTitle || s.title || 'తెలుగు కథ') || 'తెలుగు కథ';
+                    const author = sanitizePublicMetaText(s.author?.teluguName || s.author?.name || s.teluguName || s.authorName || 'కథావాహిని రచయిత') || 'కథావాహిని రచయిత';
+                    title = `${rawTitle} | రచన: ${author} | కథావాహిని`;
+                    let excerpt = sanitizePublicMetaText(s.teluguExcerpt || s.excerpt || '');
+                    if (!excerpt && Array.isArray(s.content)) {
+                        excerpt = sanitizePublicMetaText(s.content.join(' ')).slice(0, 180);
+                    }
+                    description = excerpt
+                        ? `${excerpt} - కథావాహినిలో పూర్తి కథను చదవండి.`
+                        : `కథావాహినిలో "${rawTitle}" తెలుగు కథను చదవండి. రచయిత: ${author}.`;
+                    contentType = 'article';
+                    const coverCandidate = s.coverImage || s.coverImageUrl;
+                    if (typeof coverCandidate === 'string' && coverCandidate.trim()) {
+                        const trimmed = coverCandidate.trim();
+                        if (trimmed.startsWith('data:image/')) {
+                            image = `${origin}/api/cover/${encodedId}`;
+                            imageType = detectMimeType(trimmed);
+                        }
+                        else if ((trimmed.startsWith('https://') || trimmed.startsWith('http://')) && !trimmed.startsWith('blob:')) {
+                            image = trimmed;
+                            imageType = detectMimeType(trimmed);
+                        }
+                    }
+                }
             }
             else {
                 // Check episodes collection
-                const epDoc = await db.collection('episodes').doc(storyId).get();
+                const epDoc = await db.collection('episodes').doc(targetStoryOrEpId).get();
                 if (epDoc.exists) {
                     const ep = epDoc.data() || {};
-                    title = `${ep.teluguTitle || ep.title || 'నవల అధ్యాయం'} | కథావాహిని`;
-                    description = ep.teluguExcerpt || `${ep.novelTitle || 'నవల'} భాగం కథావాహినిలో చదవండి.`;
-                    if (ep.coverImage)
-                        image = ep.coverImage;
-                    canonicalUrl = `https://thekathavahini.web.app/?story=${storyId}&reader=true`;
+                    if (ep.deleted !== true &&
+                        ep.status !== 'deleted' &&
+                        ep.status !== 'draft' &&
+                        ep.visibility !== 'hidden' &&
+                        ep.visibility !== 'private') {
+                        const epNum = ep.episodeNumber || 1;
+                        const nTitle = sanitizePublicMetaText(ep.novelTitle || 'తెలుగు నవల') || 'తెలుగు నవల';
+                        const epTitle = sanitizePublicMetaText(ep.teluguTitle || `${epNum}వ భాగం`) || `${epNum}వ భాగం`;
+                        title = `${nTitle} - ${epTitle} | కథావాహిని`;
+                        let excerpt = sanitizePublicMetaText(ep.teluguExcerpt || ep.excerpt || '');
+                        if (!excerpt && Array.isArray(ep.content)) {
+                            excerpt = sanitizePublicMetaText(ep.content.join(' ')).slice(0, 180);
+                        }
+                        description = excerpt
+                            ? `${excerpt}... కథావాహినిలో చదవండి.`
+                            : `${nTitle} ధారావాహిక నవలలోని ${epTitle} ను కథావాహినిలో చదవండి.`;
+                        canonicalUrl = `${origin}/episode/${encodedId}`;
+                        appDirectUrl = `${origin}/?story=${encodedId}&reader=true`;
+                        contentType = 'article';
+                        const epCover = ep.coverImage || ep.coverImageUrl;
+                        if (typeof epCover === 'string' && epCover.trim()) {
+                            const trimmed = epCover.trim();
+                            if (trimmed.startsWith('data:image/')) {
+                                image = `${origin}/api/cover/${encodedId}`;
+                                imageType = detectMimeType(trimmed);
+                            }
+                            else if ((trimmed.startsWith('https://') || trimmed.startsWith('http://')) && !trimmed.startsWith('blob:')) {
+                                image = trimmed;
+                                imageType = detectMimeType(trimmed);
+                            }
+                        }
+                        else if (ep.novelId) {
+                            const parentNovel = await db.collection('novels').doc(ep.novelId).get();
+                            if (parentNovel.exists) {
+                                const pData = parentNovel.data() || {};
+                                const pCover = pData.coverImage || pData.coverImageUrl;
+                                if (typeof pCover === 'string' && pCover.trim()) {
+                                    const trimmed = pCover.trim();
+                                    if (trimmed.startsWith('data:image/')) {
+                                        image = `${origin}/api/cover/${encodeURIComponent(ep.novelId)}`;
+                                        imageType = detectMimeType(trimmed);
+                                    }
+                                    else if ((trimmed.startsWith('https://') || trimmed.startsWith('http://')) && !trimmed.startsWith('blob:')) {
+                                        image = trimmed;
+                                        imageType = detectMimeType(trimmed);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
         else if (novelId) {
-            canonicalUrl = `https://thekathavahini.web.app/?novel=${novelId}`;
+            const encodedId = encodeURIComponent(novelId);
+            canonicalUrl = `${origin}/novel/${encodedId}`;
+            appDirectUrl = `${origin}/?novel=${encodedId}`;
             const nDoc = await db.collection('novels').doc(novelId).get();
             if (nDoc.exists) {
                 const n = nDoc.data() || {};
-                title = `${n.teluguTitle || n.title || 'తెలుగు నవల'} | కథావాహిని`;
-                description = n.teluguDescription || n.description || `${n.teluguTitle || 'నవల'} కథావాహినిలో చదవండి.`;
-                if (n.coverImage)
-                    image = n.coverImage;
+                if (n.deleted !== true &&
+                    n.status !== 'deleted' &&
+                    n.status !== 'draft' &&
+                    n.visibility !== 'hidden' &&
+                    n.visibility !== 'private') {
+                    const rawTitle = sanitizePublicMetaText(n.teluguTitle || n.title || 'తెలుగు నవల') || 'తెలుగు నవల';
+                    const author = sanitizePublicMetaText(n.author?.teluguName || n.author?.name || n.authorName || 'కథావాహిని రచయిత') || 'కథావాహిని రచయిత';
+                    title = `${rawTitle} | ధారావాహిక నవల | రచన: ${author} | కథావాహిని`;
+                    const desc = sanitizePublicMetaText(n.teluguDescription || n.description || '');
+                    description = desc
+                        ? `${desc} - కథావాహినిలో నవలను ఉచితంగా చదవండి.`
+                        : `కథావాహినిలో "${rawTitle}" తెలుగు ధారావాహిక నవలను చదవండి. రచయిత: ${author}.`;
+                    contentType = 'article';
+                    const coverCandidate = n.coverImage || n.coverImageUrl;
+                    if (typeof coverCandidate === 'string' && coverCandidate.trim()) {
+                        const trimmed = coverCandidate.trim();
+                        if (trimmed.startsWith('data:image/')) {
+                            image = `${origin}/api/cover/${encodedId}`;
+                            imageType = detectMimeType(trimmed);
+                        }
+                        else if ((trimmed.startsWith('https://') || trimmed.startsWith('http://')) && !trimmed.startsWith('blob:')) {
+                            image = trimmed;
+                            imageType = detectMimeType(trimmed);
+                        }
+                    }
+                }
             }
         }
         else if (authorId) {
-            canonicalUrl = `https://thekathavahini.web.app/?author=${authorId}`;
-            let aDoc = await db.collection('writers').doc(authorId).get();
-            if (!aDoc.exists)
-                aDoc = await db.collection('authors').doc(authorId).get();
-            if (!aDoc.exists)
-                aDoc = await db.collection('users').doc(authorId).get();
-            if (aDoc.exists) {
-                const a = aDoc.data() || {};
-                const aName = a.teluguName || a.displayName || a.penName || a.name || 'రచయిత';
+            const encodedId = encodeURIComponent(authorId);
+            canonicalUrl = `${origin}/author/${encodedId}`;
+            appDirectUrl = `${origin}/?author=${encodedId}`;
+            // Merge users, writers, and authors in parallel so updated custom profile photos always win
+            const [uSnap, wSnap, aSnap] = await Promise.all([
+                db.collection('users').doc(authorId).get().catch(() => null),
+                db.collection('writers').doc(authorId).get().catch(() => null),
+                db.collection('authors').doc(authorId).get().catch(() => null),
+            ]);
+            const uData = uSnap?.exists ? uSnap.data() : null;
+            const wData = wSnap?.exists ? wSnap.data() : null;
+            const aData = aSnap?.exists ? aSnap.data() : null;
+            if ((uData || wData || aData) && uData?.deleted !== true && wData?.deleted !== true) {
+                const rawName = wData?.teluguName ||
+                    uData?.teluguName ||
+                    aData?.teluguName ||
+                    wData?.penName ||
+                    uData?.penName ||
+                    uData?.displayName ||
+                    wData?.displayName ||
+                    wData?.name ||
+                    uData?.name ||
+                    aData?.name ||
+                    'కథావాహిని రచయిత';
+                const aName = sanitizePublicMetaText(rawName) || 'కథావాహిని రచయిత';
                 title = `${aName} - రచయిత ప్రొఫైల్ | కథావాహిని`;
-                description = a.teluguBio || a.bio || `${aName} గారి రచనలు కథావాహినిలో చదవండి.`;
-                if (a.photoURL || a.avatar)
-                    image = a.photoURL || a.avatar;
+                const rawBio = uData?.teluguBio ||
+                    wData?.teluguBio ||
+                    aData?.teluguBio ||
+                    uData?.bio ||
+                    wData?.bio ||
+                    aData?.bio ||
+                    '';
+                const cleanBio = sanitizePublicMetaText(rawBio).slice(0, 180);
+                description = cleanBio
+                    ? `${cleanBio} — ${aName} గారి రచనలు కథావాహినిలో చదవండి.`
+                    : `${aName} గారి రచయిత ప్రొఫైల్ మరియు తెలుగు రచనలు కథావాహినిలో చూడండి.`;
+                contentType = 'profile';
+                imageWidth = 512;
+                imageHeight = 512;
+                const docs = [uData, wData, aData];
+                const candidates = [];
+                for (const d of docs) {
+                    if (!d)
+                        continue;
+                    for (const key of ['photoURL', 'profileImageURL', 'avatar', 'profileImage', 'imageUrl']) {
+                        const val = d[key];
+                        if (typeof val === 'string' && val.trim() && !val.trim().startsWith('blob:')) {
+                            candidates.push(val.trim());
+                        }
+                    }
+                }
+                const custom = candidates.find(c => isCustomPhoto(c));
+                if (custom) {
+                    if (custom.startsWith('data:image/')) {
+                        image = `${origin}/api/avatar/${encodedId}`;
+                        imageType = detectMimeType(custom);
+                    }
+                    else {
+                        image = custom;
+                        imageType = detectMimeType(custom);
+                    }
+                }
+                else {
+                    const remote = candidates.find(c => c.startsWith('https://') || c.startsWith('http://'));
+                    if (remote) {
+                        const normalized = normalizeAvatarForCrawler(remote);
+                        image = normalized;
+                        imageType = detectMimeType(normalized);
+                    }
+                }
             }
         }
-        // Escape HTML entities
-        const escapeHtml = (str) => (str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        // Escape HTML entities safely
+        const escapeHtml = (str) => (str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         const safeTitle = escapeHtml(title);
         const safeDesc = escapeHtml(description);
         const safeImg = escapeHtml(image);
-        const safeUrl = escapeHtml(canonicalUrl);
+        const safeImgType = escapeHtml(imageType);
+        const safeCanonicalUrl = escapeHtml(canonicalUrl);
+        const safeDirectUrl = escapeHtml(appDirectUrl);
+        const ctaLabel = contentType === 'profile'
+            ? 'రచయిత ప్రొఫైల్ చూడండి (Open Profile)'
+            : 'కథను తెరవండి (Open Story)';
+        // IMPORTANT: NEVER emit <meta http-equiv="refresh">!
+        // Social crawlers (WhatsApp, Facebook, X, Telegram, LinkedIn) follow meta-refresh to /?story=... (static index.html)
+        // and discard the preview. Only human JS-capable browsers execute the script redirect below.
+        const browserRedirectScript = !isCrawler
+            ? `\n  <script>window.location.replace(${JSON.stringify(appDirectUrl)});</script>`
+            : '';
         const html = `<!DOCTYPE html>
 <html lang="te">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${safeTitle}</title>
   <meta name="description" content="${safeDesc}">
+
+  <!-- Open Graph (Facebook, WhatsApp, Telegram, LinkedIn) -->
   <meta property="og:site_name" content="కథావాహిని (Kathavahini)">
+  <meta property="og:type" content="${contentType}">
   <meta property="og:title" content="${safeTitle}">
   <meta property="og:description" content="${safeDesc}">
   <meta property="og:image" content="${safeImg}">
   <meta property="og:image:secure_url" content="${safeImg}">
-  <meta property="og:image:width" content="1200">
-  <meta property="og:image:height" content="630">
-  <meta property="og:url" content="${safeUrl}">
-  <meta property="og:type" content="article">
+  <meta property="og:image:type" content="${safeImgType}">
+  <meta property="og:image:width" content="${imageWidth}">
+  <meta property="og:image:height" content="${imageHeight}">
+  <meta property="og:image:alt" content="${safeTitle}">
+  <meta property="og:url" content="${safeCanonicalUrl}">
+
+  <!-- Twitter / X Card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:site" content="@kathavahini">
   <meta name="twitter:title" content="${safeTitle}">
   <meta name="twitter:description" content="${safeDesc}">
   <meta name="twitter:image" content="${safeImg}">
-  <link rel="canonical" href="${safeUrl}">
-  <meta http-equiv="refresh" content="0;url=${safeUrl}">
-  <script>window.location.replace('${safeUrl}');</script>
+
+  <link rel="canonical" href="${safeCanonicalUrl}">
+  <link rel="icon" type="image/png" href="/logo.png">${browserRedirectScript}
 </head>
-<body style="font-family: sans-serif; text-align: center; padding: 40px; background: #FAF7F2; color: #17151A;">
-  <p>దయచేసి వేచి ఉండండి, కథావాహిని లోకి వెళ్తున్నారు...</p>
-  <a href="${safeUrl}" style="color: #7A284B; font-weight: bold;">ఇక్కడ క్లిక్ చేయండి</a>
+<body style="font-family: system-ui, -apple-system, sans-serif; background-color: #FAF7F2; color: #17151A; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px; box-sizing: border-box; text-align: center;">
+  <div style="max-width: 520px; background: white; border: 1px solid #E8E1DA; border-radius: 24px; padding: 28px; box-shadow: 0 10px 25px rgba(0,0,0,0.05);">
+    <img src="${safeImg}" alt="${safeTitle}" style="width: 100%; max-height: 260px; object-fit: cover; border-radius: 16px; margin-bottom: 18px;" onerror="this.style.display='none'">
+    <h1 style="font-size: 20px; font-weight: 700; margin: 0 0 8px; color: #17151A;">${safeTitle}</h1>
+    <p style="font-size: 14px; line-height: 1.6; color: #6F6970; margin: 0 0 22px;">${safeDesc}</p>
+    <a href="${safeDirectUrl}" style="display: inline-block; background-color: #7A284B; color: white; padding: 12px 28px; border-radius: 9999px; text-decoration: none; font-weight: 700; font-size: 14px;">
+      ${ctaLabel}
+    </a>
+  </div>
 </body>
 </html>`;
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=600');
-        res.status(200).send(html);
+        return res.status(200).send(html);
     }
     catch (err) {
         console.error('Error generating share preview:', err);
-        res.redirect('https://thekathavahini.web.app');
+        return res.redirect(302, 'https://thekathavahini.web.app');
     }
 });
 //# sourceMappingURL=index.js.map

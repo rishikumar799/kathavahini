@@ -1,14 +1,24 @@
-import mammoth from 'mammoth';
-import * as pdfjsLib from 'pdfjs-dist';
-
-// Configure PDF.js worker safely
-try {
-  if (typeof window !== 'undefined') {
-    // Set fallback worker or use standard unpkg / cdnjs worker if local bundle isn't resolved
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '4.10.38'}/pdf.worker.min.mjs`;
+// Lazy loaders for heavy document parsing libraries so they are never bundled into the initial homepage JS
+let pdfjsLibPromise: Promise<typeof import('pdfjs-dist')> | null = null;
+async function loadPdfJs() {
+  if (!pdfjsLibPromise) {
+    pdfjsLibPromise = import('pdfjs-dist').then((lib) => {
+      try {
+        if (typeof window !== 'undefined' && lib.GlobalWorkerOptions) {
+          lib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${lib.version || '4.10.38'}/pdf.worker.min.mjs`;
+        }
+      } catch (e) {
+        console.warn('PDF.js worker setup note:', e);
+      }
+      return lib;
+    });
   }
-} catch (e) {
-  console.warn('PDF.js worker setup note:', e);
+  return pdfjsLibPromise;
+}
+
+async function loadMammoth() {
+  const mod = await import('mammoth');
+  return mod.default || mod;
 }
 
 export interface DocumentParseResult {
@@ -91,6 +101,7 @@ export class DocumentParser {
   public static async parseDocx(file: File): Promise<DocumentParseResult> {
     try {
       const arrayBuffer = await file.arrayBuffer();
+      const mammoth = await loadMammoth();
       const result = await mammoth.extractRawText({ arrayBuffer });
       const rawText = (result.value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
 
@@ -155,6 +166,7 @@ export class DocumentParser {
       const arrayBuffer = await file.arrayBuffer();
       // Try mammoth first (some .doc are misnamed .docx)
       try {
+        const mammoth = await loadMammoth();
         const result = await mammoth.extractRawText({ arrayBuffer });
         const rawText = (result.value || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
         if (rawText && rawText.length > 20) {
@@ -239,6 +251,7 @@ export class DocumentParser {
   public static async parsePdf(file: File): Promise<DocumentParseResult> {
     try {
       const arrayBuffer = await file.arrayBuffer();
+      const pdfjsLib = await loadPdfJs();
       const loadingTask = pdfjsLib.getDocument({
         data: arrayBuffer,
         useWorkerFetch: false,

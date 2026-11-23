@@ -15,8 +15,6 @@ import {
 } from 'lucide-react';
 import { HeroBannerConfig, HeroBannerSlide, Story, Novel, Episode, Joke, KnowledgeArticle, BalavinodhiniItem } from '../../types';
 import { landingPageService } from '../../services/landingPageService';
-import { balavinodhiniService } from '../../services/balavinodhiniService';
-import { adminService } from '../../services/adminService';
 
 interface EditorialHeroBannerProps {
   config: HeroBannerConfig;
@@ -56,20 +54,39 @@ export const EditorialHeroBanner: React.FC<EditorialHeroBannerProps> = ({
   const [internalBalaItems, setInternalBalaItems] = useState<BalavinodhiniItem[]>([]);
   const [internalEpisodes, setInternalEpisodes] = useState<Episode[]>([]);
 
-  // Subscribe to Balavinodhini items if not provided via props
+  // Lazily subscribe to Balavinodhini items only if hero config references balavinodhini slides
   useEffect(() => {
     if (propBalavinodhiniItems && propBalavinodhiniItems.length > 0) return;
-    const unsub = balavinodhiniService.subscribeItems((items) => {
-      setInternalBalaItems(items);
-    });
-    return () => unsub();
-  }, [propBalavinodhiniItems]);
+    const needsBala = config.slides?.some(s => s.contentType === 'balavinodhini') || config.mode === 'mixed';
+    if (!needsBala) return;
+    let unsub: (() => void) | null = null;
+    let cancelled = false;
+    import('../../services/balavinodhiniService').then(({ balavinodhiniService }) => {
+      if (cancelled) return;
+      unsub = balavinodhiniService.subscribeItems((items) => {
+        if (!cancelled) setInternalBalaItems(items);
+      });
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+      if (unsub) unsub();
+    };
+  }, [propBalavinodhiniItems, config.mode, config.slides]);
 
-  // Load episodes if not provided via props
+  // Lazily load episodes only if hero config references episode slides
   useEffect(() => {
     if (propEpisodes && propEpisodes.length > 0) return;
-    adminService.getEpisodes().then(setInternalEpisodes).catch(() => {});
-  }, [propEpisodes]);
+    const needsEpisodes = config.slides?.some(s => s.contentType === 'episode');
+    if (!needsEpisodes) return;
+    let cancelled = false;
+    import('../../services/adminService').then(({ adminService }) => {
+      if (cancelled) return;
+      adminService.getEpisodes().then(eps => {
+        if (!cancelled) setInternalEpisodes(eps);
+      }).catch(() => {});
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [propEpisodes, config.slides]);
 
   const effectiveBalaItems = propBalavinodhiniItems && propBalavinodhiniItems.length > 0 
     ? propBalavinodhiniItems 
@@ -79,7 +96,7 @@ export const EditorialHeroBanner: React.FC<EditorialHeroBannerProps> = ({
     ? propEpisodes
     : internalEpisodes;
 
-  // Compute slides dynamically based on config and data
+  // Compute slides dynamically based on config and data (without activeSlideIndex causing 5s recomputations)
   useEffect(() => {
     const compute = () => {
       const computedSlides = landingPageService.resolveHeroSlides(
@@ -92,9 +109,7 @@ export const EditorialHeroBanner: React.FC<EditorialHeroBannerProps> = ({
         effectiveEpisodes
       );
       setSlides(computedSlides);
-      if (activeSlideIndex >= computedSlides.length) {
-        setActiveSlideIndex(0);
-      }
+      setActiveSlideIndex(prev => (prev >= computedSlides.length ? 0 : prev));
     };
 
     compute();
@@ -102,7 +117,7 @@ export const EditorialHeroBanner: React.FC<EditorialHeroBannerProps> = ({
     // Re-check schedule validity every 30 seconds so expired slides automatically drop out
     const scheduleCheckTimer = setInterval(compute, 30000);
     return () => clearInterval(scheduleCheckTimer);
-  }, [config, stories, novels, jokes, knowledge, effectiveBalaItems, effectiveEpisodes, activeSlideIndex]);
+  }, [config, stories, novels, jokes, knowledge, effectiveBalaItems, effectiveEpisodes]);
 
   // Auto-rotation timer (pauses when user hovers over the card if pauseOnHover is enabled)
   useEffect(() => {
@@ -345,6 +360,8 @@ export const EditorialHeroBanner: React.FC<EditorialHeroBannerProps> = ({
                 <img
                   src={currentSlide.coverImage}
                   alt={currentSlide.title}
+                  fetchPriority="high"
+                  decoding="async"
                   className="w-full h-full object-cover transition-transform duration-700 group-hover/card:scale-105"
                 />
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { Story, Novel, Author, Chapter, Episode, StoryCategory, User, NotificationItem, ReadingHistoryItem, CreatorStats, Joke } from './types';
 import { categoryService, FormattedCategoryViewItem } from './services/categoryService';
 import { authService } from './services/authService';
@@ -9,52 +9,58 @@ import { authorService } from './services/authorService';
 import { libraryService } from './services/libraryService';
 import { userService } from './services/userService';
 
-// Global Layout Components
+// Global Layout Components (Eager for instant above-the-fold render)
 import { Navbar } from './components/common/Navbar';
 import { MobileHeader } from './components/common/MobileHeader';
 import { BottomNavigation } from './components/common/BottomNavigation';
 import { Footer } from './components/common/Footer';
-
-// Modals
-import { WriteModal } from './components/editor/WriteModal';
-import { AuthModal } from './components/modals/AuthModal';
-import { AdminContentEditorModal } from './components/admin/AdminContentEditorModal';
-import { writerService } from './services/writerService';
-import { adminService } from './services/adminService';
-
-// Views
 import { HomeView } from './views/HomeView';
-import { StoriesView } from './views/StoriesView';
-import { StoryDetailView } from './views/StoryDetailView';
-import { StoryReaderView, NovelReadingContext } from './views/StoryReaderView';
-import { NovelsView } from './views/NovelsView';
-import { NovelDetailView } from './views/NovelDetailView';
-import { JokesView } from './views/JokesView';
-import { CategoriesView } from './views/CategoriesView';
-import { AuthorsView } from './views/AuthorsView';
-import { AuthorDetailView } from './views/AuthorDetailView';
-import { LibraryView } from './views/LibraryView';
-import { SearchView } from './views/SearchView';
-import { CreatorDashboardView } from './views/CreatorDashboardView';
-import { ProfileView } from './views/ProfileView';
-import { KnowledgeView } from './views/KnowledgeView';
-import { resolveContentAuthor } from './utils/authorResolver';
-import { BalavinodhiniView } from './views/BalavinodhiniView';
-import { AboutView } from './views/AboutView';
-import { PrivacyPolicyView } from './views/PrivacyPolicyView';
-import { TermsView } from './views/TermsView';
-import { CookiePolicyView } from './views/CookiePolicyView';
-import { ContentPolicyView } from './views/ContentPolicyView';
-import { ContactView } from './views/ContactView';
-import { ReportIssueView } from './views/ReportIssueView';
-import { FaqView } from './views/FaqView';
-import { HelpView } from './views/HelpView';
-import { WriterApplicationView } from './views/WriterApplicationView';
-import { AdminDashboardView } from './views/AdminDashboardView';
-import { ResetPasswordView } from './views/ResetPasswordView';
-import { AdminTopBanner } from './components/admin/AdminTopBanner';
 import { PublicAnnouncementBanner } from './components/common/PublicAnnouncementBanner';
+import type { NovelReadingContext } from './views/StoryReaderView';
+import { resolveContentAuthor } from './utils/authorResolver';
 import { updatePageMeta } from './utils/metaTags';
+
+// Lazy-loaded Modals & Admin Ribbon (only downloaded when opened/needed)
+const WriteModal = lazy(() => import('./components/editor/WriteModal').then(m => ({ default: m.WriteModal })));
+const AuthModal = lazy(() => import('./components/modals/AuthModal').then(m => ({ default: m.AuthModal })));
+const AdminContentEditorModal = lazy(() => import('./components/admin/AdminContentEditorModal').then(m => ({ default: m.AdminContentEditorModal })));
+const AdminTopBanner = lazy(() => import('./components/admin/AdminTopBanner').then(m => ({ default: m.AdminTopBanner })));
+
+// Route-based Lazy-loaded Views (keeps initial bundle ultra-fast)
+const StoriesView = lazy(() => import('./views/StoriesView').then(m => ({ default: m.StoriesView })));
+const StoryDetailView = lazy(() => import('./views/StoryDetailView').then(m => ({ default: m.StoryDetailView })));
+const StoryReaderView = lazy(() => import('./views/StoryReaderView').then(m => ({ default: m.StoryReaderView })));
+const NovelsView = lazy(() => import('./views/NovelsView').then(m => ({ default: m.NovelsView })));
+const NovelDetailView = lazy(() => import('./views/NovelDetailView').then(m => ({ default: m.NovelDetailView })));
+const JokesView = lazy(() => import('./views/JokesView').then(m => ({ default: m.JokesView })));
+const CategoriesView = lazy(() => import('./views/CategoriesView').then(m => ({ default: m.CategoriesView })));
+const AuthorsView = lazy(() => import('./views/AuthorsView').then(m => ({ default: m.AuthorsView })));
+const AuthorDetailView = lazy(() => import('./views/AuthorDetailView').then(m => ({ default: m.AuthorDetailView })));
+const LibraryView = lazy(() => import('./views/LibraryView').then(m => ({ default: m.LibraryView })));
+const SearchView = lazy(() => import('./views/SearchView').then(m => ({ default: m.SearchView })));
+const CreatorDashboardView = lazy(() => import('./views/CreatorDashboardView').then(m => ({ default: m.CreatorDashboardView })));
+const ProfileView = lazy(() => import('./views/ProfileView').then(m => ({ default: m.ProfileView })));
+const KnowledgeView = lazy(() => import('./views/KnowledgeView').then(m => ({ default: m.KnowledgeView })));
+const BalavinodhiniView = lazy(() => import('./views/BalavinodhiniView').then(m => ({ default: m.BalavinodhiniView })));
+const AboutView = lazy(() => import('./views/AboutView').then(m => ({ default: m.AboutView })));
+const PrivacyPolicyView = lazy(() => import('./views/PrivacyPolicyView').then(m => ({ default: m.PrivacyPolicyView })));
+const TermsView = lazy(() => import('./views/TermsView').then(m => ({ default: m.TermsView })));
+const CookiePolicyView = lazy(() => import('./views/CookiePolicyView').then(m => ({ default: m.CookiePolicyView })));
+const ContentPolicyView = lazy(() => import('./views/ContentPolicyView').then(m => ({ default: m.ContentPolicyView })));
+const ContactView = lazy(() => import('./views/ContactView').then(m => ({ default: m.ContactView })));
+const ReportIssueView = lazy(() => import('./views/ReportIssueView').then(m => ({ default: m.ReportIssueView })));
+const FaqView = lazy(() => import('./views/FaqView').then(m => ({ default: m.FaqView })));
+const HelpView = lazy(() => import('./views/HelpView').then(m => ({ default: m.HelpView })));
+const WriterApplicationView = lazy(() => import('./views/WriterApplicationView').then(m => ({ default: m.WriterApplicationView })));
+const AdminDashboardView = lazy(() => import('./views/AdminDashboardView').then(m => ({ default: m.AdminDashboardView })));
+const ResetPasswordView = lazy(() => import('./views/ResetPasswordView').then(m => ({ default: m.ResetPasswordView })));
+
+const ViewLoaderFallback: React.FC = () => (
+  <div className="min-h-[55vh] flex flex-col items-center justify-center px-4 py-12 text-center">
+    <div className="w-8 h-8 border-2 border-[#7A284B] dark:border-[#D87591] border-t-transparent rounded-full animate-spin mb-3" />
+    <p className="text-xs font-medium text-[#7A7265] dark:text-[#A8A196]">లోడ్ అవుతోంది...</p>
+  </div>
+);
 
 /**
  * Synchronous initial route resolver to prevent flash of homepage on shared links
@@ -83,8 +89,8 @@ function getInitialRouteInfo(): {
     return { tab: 'reset-password', isDirectLink: false };
   }
 
-  const storyId = params.get('story') || params.get('episode') || (path.startsWith('/story/') ? path.split('/')[2] : null);
-  const isReader = params.get('reader') === 'true' || Boolean(params.get('episode'));
+  const storyId = params.get('story') || params.get('episode') || (path.startsWith('/story/') ? path.split('/')[2] : null) || (path.startsWith('/episode/') ? path.split('/')[2] : null);
+  const isReader = params.get('reader') === 'true' || Boolean(params.get('episode')) || path.startsWith('/episode/');
   const novelId = params.get('novel') || (path.startsWith('/novel/') ? path.split('/')[2] : null);
   const authorId = params.get('author') || params.get('writer') || (path.startsWith('/author/') ? path.split('/')[2] : null);
   const profileId = params.get('profile') || params.get('user') || (path.startsWith('/profile/') ? path.split('/')[2] : null);
@@ -229,7 +235,7 @@ export default function App() {
         title: selectedStory.teluguTitle || selectedStory.title,
         description: selectedStory.teluguExcerpt || selectedStory.excerpt || `${selectedStory.title} - కథావాహిని లో చదవండి`,
         image: selectedStory.coverImage,
-        url: `/?story=${selectedStory.id}`,
+        url: `/story/${selectedStory.id}`,
         type: 'article',
       });
     } else if (currentTab === 'story-reader' && selectedStory) {
@@ -237,7 +243,7 @@ export default function App() {
         title: selectedStory.teluguTitle || selectedStory.title,
         description: selectedStory.teluguExcerpt || selectedStory.excerpt || `${selectedStory.title} - కథావాహిని లో చదవండి`,
         image: selectedStory.coverImage,
-        url: `/?story=${selectedStory.id}&reader=true`,
+        url: (selectedStory.novelId || selectedStory.parentNovelId) ? `/episode/${selectedStory.id}` : `/story/${selectedStory.id}`,
         type: 'article',
       });
     } else if (currentTab === 'novel-detail' && selectedNovel) {
@@ -245,7 +251,7 @@ export default function App() {
         title: selectedNovel.teluguTitle || selectedNovel.title,
         description: selectedNovel.teluguDescription || selectedNovel.description || `${selectedNovel.title} - తెలుగు ధారావాహిక నవల`,
         image: selectedNovel.coverImage,
-        url: `/?novel=${selectedNovel.id}`,
+        url: `/novel/${selectedNovel.id}`,
         type: 'article',
       });
     } else if (currentTab === 'author-detail' && selectedAuthor) {
@@ -253,7 +259,7 @@ export default function App() {
         title: `${selectedAuthor.teluguName || selectedAuthor.name} - రచయిత ప్రొఫైల్`,
         description: selectedAuthor.teluguBio || selectedAuthor.bio || `${selectedAuthor.name} కథావాహిని రచయిత ప్రొఫైల్ మరియు రచనలు`,
         image: selectedAuthor.avatar,
-        url: `/?author=${selectedAuthor.id}`,
+        url: `/author/${selectedAuthor.id}`,
         type: 'profile',
       });
     } else if (currentTab === 'home') {
@@ -286,11 +292,12 @@ export default function App() {
       const urlPath = typeof window !== 'undefined' ? window.location.pathname : '';
       const hasDeepLink = (urlParams && (
         urlParams.has('story') || 
+        urlParams.has('episode') ||
         urlParams.has('novel') || 
         urlParams.has('author') || 
         urlParams.has('writer') || 
         urlParams.has('profile')
-      )) || urlPath.startsWith('/story/') || urlPath.startsWith('/novel/') || urlPath.startsWith('/author/');
+      )) || urlPath.startsWith('/story/') || urlPath.startsWith('/episode/') || urlPath.startsWith('/novel/') || urlPath.startsWith('/author/') || urlPath.startsWith('/profile/');
 
       if (isUserAdmin && !hasAdminRedirectedRef.current && !hasDeepLink) {
         hasAdminRedirectedRef.current = true;
@@ -342,37 +349,64 @@ export default function App() {
     }
   }, [currentTab, user?.id, user?.role, user?.status]);
 
-  // Fetch initial data from services
-  const loadData = async () => {
-    const published = await storyService.getAllPublishedStories();
-    const trending = await storyService.getTrendingStories();
-    const popular = await storyService.getPopularStoriesThisWeek();
-    const releases = await storyService.getNewReleases();
-    const allNovels = await novelService.getFeaturedNovels();
-    const allJokes = await jokeService.getJokes();
-    const allAuthors = await authorService.getAuthors();
-    const savedSt = await libraryService.getSavedStories();
-    const savedNov = await libraryService.getSavedNovels();
-    const history = await libraryService.getReadingHistory();
-    const notifs = await userService.getNotifications();
-    const stats = await userService.getCreatorStats();
+  // Parallel fetch for secondary non-subscribed data (authors + user personal data)
+  // Stories, Novels, and Jokes are populated directly via their single-query real-time subscriptions below.
+  const loadAuxiliaryData = async () => {
+    try {
+      const [allAuthors, savedSt, savedNov, history, notifs, stats] = await Promise.all([
+        authorService.getAuthors().catch(() => []),
+        libraryService.getSavedStories().catch(() => []),
+        libraryService.getSavedNovels().catch(() => []),
+        libraryService.getReadingHistory().catch(() => []),
+        userService.getNotifications().catch(() => []),
+        userService.getCreatorStats().catch(() => null),
+      ]);
+      setAuthors(allAuthors);
+      setSavedStories(savedSt);
+      setSavedNovels(savedNov);
+      setReadingHistory(history);
+      setNotifications(notifs);
+      setCreatorStats(stats);
+    } catch (e) {
+      console.warn('Auxiliary data load notice:', e);
+    }
+  };
 
-    setAllStories(published);
-    setTrendingStories(trending);
-    setPopularStories(popular);
-    setNewReleases(releases);
-    setNovels(allNovels);
-    setJokes(allJokes);
-    setAuthors(allAuthors);
-    setSavedStories(savedSt);
-    setSavedNovels(savedNov);
-    setReadingHistory(history);
-    setNotifications(notifs);
-    setCreatorStats(stats);
+  // Explicit refresh helper (used after publish/edit/login) — runs in parallel without 6x duplicate story queries
+  const loadData = async () => {
+    try {
+      storyService.invalidateCache();
+      const [published, allNovels, allJokes, allAuthors, savedSt, savedNov, history, notifs, stats] = await Promise.all([
+        storyService.getAllPublishedStories(60, true).catch(() => []),
+        novelService.getFeaturedNovels().catch(() => []),
+        jokeService.getJokes().catch(() => []),
+        authorService.getAuthors().catch(() => []),
+        libraryService.getSavedStories().catch(() => []),
+        libraryService.getSavedNovels().catch(() => []),
+        libraryService.getReadingHistory().catch(() => []),
+        userService.getNotifications().catch(() => []),
+        userService.getCreatorStats().catch(() => null),
+      ]);
+
+      setAllStories(published);
+      setTrendingStories([...published].sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0)));
+      setPopularStories([...published].sort((a, b) => (b.likeCount || 0) - (a.likeCount || 0)));
+      setNewReleases([...published].sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()));
+      setNovels(allNovels);
+      setJokes(allJokes);
+      setAuthors(allAuthors);
+      setSavedStories(savedSt);
+      setSavedNovels(savedNov);
+      setReadingHistory(history);
+      setNotifications(notifs);
+      setCreatorStats(stats);
+    } catch (e) {
+      console.warn('loadData notice:', e);
+    }
   };
 
   useEffect(() => {
-    loadData();
+    loadAuxiliaryData();
 
     // Live Real-Time Subscriptions from Firestore collections
     const unsubStories = storyService.subscribePublishedStories((published) => {
@@ -566,11 +600,11 @@ export default function App() {
         setCurrentTab('reset-password');
         setDirectRouteLoading(false);
       } else {
-        const storyId = params.get('story') || params.get('episode') || (path.startsWith('/story/') ? path.split('/')[2] : null);
-        const isReader = params.get('reader') === 'true' || Boolean(params.get('episode'));
-        const novelId = params.get('novel') || (path.startsWith('/novel/') ? path.split('/')[2] : null);
-        const authorId = params.get('author') || params.get('writer') || (path.startsWith('/author/') ? path.split('/')[2] : null);
-        const profileId = params.get('profile') || params.get('user') || (path.startsWith('/profile/') ? path.split('/')[2] : null);
+        const storyId = params.get('story') || params.get('episode') || (path.startsWith('/story/') ? decodeURIComponent(path.split('/')[2] || '') : null) || (path.startsWith('/episode/') ? decodeURIComponent(path.split('/')[2] || '') : null);
+        const isReader = params.get('reader') === 'true' || Boolean(params.get('episode')) || path.startsWith('/episode/');
+        const novelId = params.get('novel') || (path.startsWith('/novel/') ? decodeURIComponent(path.split('/')[2] || '') : null);
+        const authorId = params.get('author') || params.get('writer') || (path.startsWith('/author/') ? decodeURIComponent(path.split('/')[2] || '') : null);
+        const profileId = params.get('profile') || params.get('user') || (path.startsWith('/profile/') ? decodeURIComponent(path.split('/')[2] || '') : null);
 
         if (storyId) {
           storyService.getStoryById(storyId).then(story => {
@@ -653,17 +687,19 @@ export default function App() {
     }
 
     const handlePopState = (e: PopStateEvent) => {
+      const path = window.location.pathname;
       const params = new URLSearchParams(window.location.search);
-      const sId = params.get('story') || params.get('episode');
-      const nId = params.get('novel');
-      const aId = params.get('author') || params.get('writer') || params.get('profile') || params.get('user');
+      const sId = params.get('story') || params.get('episode') || (path.startsWith('/story/') ? decodeURIComponent(path.split('/')[2] || '') : null) || (path.startsWith('/episode/') ? decodeURIComponent(path.split('/')[2] || '') : null);
+      const isReaderRoute = params.get('reader') === 'true' || Boolean(params.get('episode')) || path.startsWith('/episode/');
+      const nId = params.get('novel') || (path.startsWith('/novel/') ? decodeURIComponent(path.split('/')[2] || '') : null);
+      const aId = params.get('author') || params.get('writer') || params.get('profile') || params.get('user') || (path.startsWith('/author/') ? decodeURIComponent(path.split('/')[2] || '') : null) || (path.startsWith('/profile/') ? decodeURIComponent(path.split('/')[2] || '') : null);
 
       if (sId) {
         setDirectRouteLoading(true);
         storyService.getStoryById(sId).then(s => {
           if (s) {
             setSelectedStory(s);
-            setCurrentTab(params.get('reader') === 'true' ? 'story-reader' : 'story-detail');
+            setCurrentTab(isReaderRoute ? 'story-reader' : 'story-detail');
           }
           setDirectRouteLoading(false);
         }).catch(() => setDirectRouteLoading(false));
@@ -720,24 +756,26 @@ export default function App() {
     setIsAuthOpen(true);
   };
 
-  // Canonical URL synchronizer
+  // Canonical URL synchronizer (uses clean paths matching Firebase Hosting rewrites)
   const updateUrl = (tab: string, entityType?: string, entityId?: string) => {
     if (typeof window === 'undefined') return;
     try {
-      const url = new URL(window.location.href);
-      url.searchParams.delete('story');
-      url.searchParams.delete('novel');
-      url.searchParams.delete('author');
-      url.searchParams.delete('profile');
-      url.searchParams.delete('reader');
-
+      let nextPath = '/';
       if (entityType && entityId) {
-        url.searchParams.set(entityType, entityId);
-        if (tab === 'story-reader') {
-          url.searchParams.set('reader', 'true');
+        const cleanId = encodeURIComponent(entityId);
+        if (entityType === 'story') {
+          nextPath = tab === 'story-reader' ? `/story/${cleanId}?reader=true` : `/story/${cleanId}`;
+        } else if (entityType === 'novel') {
+          nextPath = `/novel/${cleanId}`;
+        } else if (entityType === 'author' || entityType === 'profile') {
+          nextPath = `/author/${cleanId}`;
+        } else if (entityType === 'episode') {
+          nextPath = `/episode/${cleanId}`;
+        } else {
+          nextPath = `/?${entityType}=${cleanId}`;
         }
       }
-      window.history.pushState({ tab, entityType, entityId }, '', url.toString());
+      window.history.pushState({ tab, entityType, entityId }, '', nextPath);
     } catch {}
   };
 
@@ -848,10 +886,13 @@ export default function App() {
     try {
       const isUserAdmin = Boolean(user && (user.role === 'admin' || user.email?.toLowerCase() === 'thekathavahini@gmail.com'));
       if (isUserAdmin) {
+        const { adminService } = await import('./services/adminService');
         await adminService.deleteStory(storyId, user?.id || 'admin_uid', user?.email || 'admin@kathavahini.com');
       } else {
+        const { writerService } = await import('./services/writerService');
         await writerService.deleteStory(storyId, user?.id || 'writer_uid');
       }
+      storyService.invalidateCache();
       setAllStories(prev => prev.filter(s => s.id !== storyId));
       setTrendingStories(prev => prev.filter(s => s.id !== storyId));
       setPopularStories(prev => prev.filter(s => s.id !== storyId));
@@ -871,8 +912,10 @@ export default function App() {
     if (!editingStory) return;
     const isUserAdmin = Boolean(user && (user.role === 'admin' || user.email?.toLowerCase() === 'thekathavahini@gmail.com'));
     if (isUserAdmin) {
+      const { adminService } = await import('./services/adminService');
       await adminService.updateStory(editingStory.id, data, user?.id || 'admin_uid', user?.email || 'admin@kathavahini.com');
     } else {
+      const { writerService } = await import('./services/writerService');
       await writerService.updateStory(editingStory.id, data, user?.id || 'writer_uid');
     }
     setEditingStory(null);
@@ -1347,12 +1390,14 @@ export default function App() {
   if (isAdminView) {
     return (
       <div className="min-h-screen bg-[#FAF7F2] dark:bg-[#0E0D13] text-[#17151A] dark:text-[#F7F3EE]">
-        <AdminDashboardView
-          currentUser={user}
-          onSelectStory={handleSelectStory}
-          onBack={() => setCurrentTab('home')}
-          onViewWebsite={() => setCurrentTab('home')}
-        />
+        <Suspense fallback={<ViewLoaderFallback />}>
+          <AdminDashboardView
+            currentUser={user}
+            onSelectStory={handleSelectStory}
+            onBack={() => setCurrentTab('home')}
+            onViewWebsite={() => setCurrentTab('home')}
+          />
+        </Suspense>
       </div>
     );
   }
@@ -1361,10 +1406,12 @@ export default function App() {
     <div className="min-h-screen flex flex-col bg-[#FAF7F2] dark:bg-[#101014] text-[#17151A] dark:text-[#F7F3EE] transition-colors">
       {/* Top Banner when Admin is viewing public website */}
       {isAuthorizedAdmin && !isReaderView && (
-        <AdminTopBanner
-          currentUser={user}
-          onReturnToAdmin={() => setCurrentTab('admin')}
-        />
+        <Suspense fallback={null}>
+          <AdminTopBanner
+            currentUser={user}
+            onReturnToAdmin={() => setCurrentTab('admin')}
+          />
+        </Suspense>
       )}
 
       {/* Hide header/footer in full reader view */}
@@ -1396,7 +1443,9 @@ export default function App() {
 
       {/* Main Container */}
       <main className={`flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 ${isReaderView ? 'py-0' : 'py-6 sm:py-8'}`}>
-        {renderCurrentView()}
+        <Suspense fallback={<ViewLoaderFallback />}>
+          {renderCurrentView()}
+        </Suspense>
       </main>
 
       {!isReaderView && (
@@ -1428,60 +1477,72 @@ export default function App() {
         />
       )}
 
-      {/* Write/Publish Modal */}
-      <WriteModal
-        isOpen={isWriteOpen}
-        currentUser={user}
-        onClose={() => setIsWriteOpen(false)}
-        onPublishSuccess={() => {
-          loadData();
-          setCurrentTab('dashboard');
-        }}
-        onApplyWriter={() => {
-          setIsWriteOpen(false);
-          setCurrentTab('apply-writer');
-        }}
-        onRequireAuth={(prompt) => handleRequireAuth(prompt)}
-      />
+      {/* Write/Publish Modal — Lazy-loaded only when opened */}
+      {isWriteOpen && (
+        <Suspense fallback={null}>
+          <WriteModal
+            isOpen={isWriteOpen}
+            currentUser={user}
+            onClose={() => setIsWriteOpen(false)}
+            onPublishSuccess={() => {
+              loadData();
+              setCurrentTab('dashboard');
+            }}
+            onApplyWriter={() => {
+              setIsWriteOpen(false);
+              setCurrentTab('apply-writer');
+            }}
+            onRequireAuth={(prompt) => handleRequireAuth(prompt)}
+          />
+        </Suspense>
+      )}
 
-      {/* Authentication Modal */}
-      <AuthModal
-        isOpen={isAuthOpen}
-        onClose={() => {
-          setIsAuthOpen(false);
-          setAuthCustomPrompt(undefined);
-        }}
-        onSuccess={() => {
-          loadData();
-          const currentUserNow = authService.getCurrentUser();
-          if (currentUserNow?.role === 'admin') {
-            setCurrentTab('admin');
-          } else if (currentUserNow?.role === 'writer' && currentUserNow?.status === 'pending') {
-            // Show clear Waiting for Admin Approval state
-            setCurrentTab('apply-writer');
-          } else {
-            // Readers and Approved Writers remain on the public website
-            if (currentTab === 'admin') {
-              setCurrentTab('home');
-            }
-          }
-        }}
-        onNavigateToWriterApp={() => {
-          setIsAuthOpen(false);
-          setCurrentTab('apply-writer');
-        }}
-        customPrompt={authCustomPrompt}
-        initialMode={authInitialMode}
-      />
+      {/* Authentication Modal — Lazy-loaded only when opened */}
+      {isAuthOpen && (
+        <Suspense fallback={null}>
+          <AuthModal
+            isOpen={isAuthOpen}
+            onClose={() => {
+              setIsAuthOpen(false);
+              setAuthCustomPrompt(undefined);
+            }}
+            onSuccess={() => {
+              loadData();
+              const currentUserNow = authService.getCurrentUser();
+              if (currentUserNow?.role === 'admin') {
+                setCurrentTab('admin');
+              } else if (currentUserNow?.role === 'writer' && currentUserNow?.status === 'pending') {
+                // Show clear Waiting for Admin Approval state
+                setCurrentTab('apply-writer');
+              } else {
+                // Readers and Approved Writers remain on the public website
+                if (currentTab === 'admin') {
+                  setCurrentTab('home');
+                }
+              }
+            }}
+            onNavigateToWriterApp={() => {
+              setIsAuthOpen(false);
+              setCurrentTab('apply-writer');
+            }}
+            customPrompt={authCustomPrompt}
+            initialMode={authInitialMode}
+          />
+        </Suspense>
+      )}
 
-      {/* Universal Story Content Editor Modal for Owner & Admin */}
-      <AdminContentEditorModal
-        isOpen={Boolean(editingStory)}
-        onClose={() => setEditingStory(null)}
-        contentType="story"
-        initialData={editingStory}
-        onSave={handleSaveEditedStory}
-      />
+      {/* Universal Story Content Editor Modal — Lazy-loaded only when editing */}
+      {Boolean(editingStory) && (
+        <Suspense fallback={null}>
+          <AdminContentEditorModal
+            isOpen={Boolean(editingStory)}
+            onClose={() => setEditingStory(null)}
+            contentType="story"
+            initialData={editingStory}
+            onSave={handleSaveEditedStory}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

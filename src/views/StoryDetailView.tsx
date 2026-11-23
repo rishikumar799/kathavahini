@@ -77,8 +77,8 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
       });
 
       if (result.success) {
-        setShareFeedback(result.method === 'clipboard' ? 'కథ లింక్ కాపీ చేయబడింది!' : 'కథ విజయవంతంగా షేర్ చేయబడింది!');
-        setTimeout(() => setShareFeedback(null), 3000);
+        setShareFeedback(result.method === 'clipboard' ? 'కథ లింక్ కాపీ చేయబడింది! (ఎవరైనా లాగిన్ లేకుండానే చదువుకోవచ్చు)' : 'కథ విజయవంతంగా షేర్ చేయబడింది!');
+        setTimeout(() => setShareFeedback(null), 3500);
       }
     } catch (e) {
       console.warn('Share error:', e);

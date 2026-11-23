@@ -25,6 +25,7 @@ import {
   User 
 } from '../types';
 import { balavinodhiniService } from '../services/balavinodhiniService';
+import { shareContent } from '../utils/shareUtils';
 import { BalavinodhiniHero } from '../components/balavinodhini/BalavinodhiniHero';
 import { BalavinodhiniCategoryGrid } from '../components/balavinodhini/BalavinodhiniCategoryGrid';
 import { BalavinodhiniDailyRow } from '../components/balavinodhini/BalavinodhiniDailyRow';
@@ -119,17 +120,25 @@ export const BalavinodhiniView: React.FC<BalavinodhiniViewProps> = ({
     });
   };
 
+  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+
   // Share handler
-  const handleShare = (item: BalavinodhiniItem) => {
-    if (navigator.share) {
-      navigator.share({
+  const handleShare = async (item: BalavinodhiniItem) => {
+    try {
+      const result = await shareContent({
+        contentType: 'balavinodhini',
+        id: item.id,
         title: item.teluguTitle || item.title,
         text: `కథావాహిని బాలవినోదినిలో చదవండి: ${item.teluguTitle || item.title}`,
-        url: window.location.href,
-      }).catch(() => {});
-    } else {
-      navigator.clipboard.writeText(window.location.href);
-      alert('లింక్ కాపీ చేయబడింది!');
+        coverImage: item.coverImage,
+      });
+
+      if (result.success) {
+        setShareFeedback(result.method === 'clipboard' ? 'లింక్ కాపీ చేయబడింది! (ఎవరైనా లాగిన్ లేకుండానే చదువుకోవచ్చు)' : 'విజయవంతంగా షేర్ చేయబడింది!');
+        setTimeout(() => setShareFeedback(null), 3500);
+      }
+    } catch (e) {
+      console.warn('Share error in Balavinodhini:', e);
     }
   };
 
@@ -562,6 +571,13 @@ export const BalavinodhiniView: React.FC<BalavinodhiniViewProps> = ({
             onClose={() => setCreatorModalData(null)}
             onSelectWork={handleSelectItem}
           />
+        )}
+
+        {/* Share Feedback Toast */}
+        {shareFeedback && (
+          <div className="fixed bottom-6 right-6 z-50 bg-[#231A24] dark:bg-[#342835] text-white px-5 py-3 rounded-xl shadow-xl flex items-center space-x-2 text-sm border border-[#7A284B]/30 animate-fade-in">
+            <span>{shareFeedback}</span>
+          </div>
         )}
 
       </div>

@@ -1010,7 +1010,8 @@ class AuthService {
       return envUrl.replace(/\/$/, '');
     }
     if (typeof window !== 'undefined' && window.location && window.location.origin) {
-      return window.location.origin;
+      const origin = window.location.origin;
+      return origin.includes('ais-dev-') ? origin.replace(/ais-dev-/g, 'ais-pre-') : origin;
     }
     return 'https://kathavahini.org';
   }

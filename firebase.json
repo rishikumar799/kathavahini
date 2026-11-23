@@ -29,9 +29,48 @@
       "**/.*",
       "**/node_modules/**"
     ],
+    "headers": [
+      {
+        "source": "/assets/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=31536000, immutable"
+          }
+        ]
+      }
+    ],
     "rewrites": [
       {
+        "source": "/api/cover/**",
+        "function": "sharePreview"
+      },
+      {
+        "source": "/api/avatar/**",
+        "function": "sharePreview"
+      },
+      {
         "source": "/share/**",
+        "function": "sharePreview"
+      },
+      {
+        "source": "/story/**",
+        "function": "sharePreview"
+      },
+      {
+        "source": "/novel/**",
+        "function": "sharePreview"
+      },
+      {
+        "source": "/author/**",
+        "function": "sharePreview"
+      },
+      {
+        "source": "/profile/**",
+        "function": "sharePreview"
+      },
+      {
+        "source": "/episode/**",
         "function": "sharePreview"
       },
       {

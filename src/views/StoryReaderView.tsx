@@ -350,8 +350,8 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
         coverImage: story.coverImage,
       });
       if (result.success) {
-        setShareFeedback(result.method === 'clipboard' ? 'లింక్ కాపీ చేయబడింది!' : 'షేర్ విజయవంతమైంది!');
-        setTimeout(() => setShareFeedback(null), 3000);
+        setShareFeedback(result.method === 'clipboard' ? 'లింక్ కాపీ చేయబడింది! (ఎవరైనా లాగిన్ లేకుండానే చదువుకోవచ్చు)' : 'షేర్ విజయవంతమైంది!');
+        setTimeout(() => setShareFeedback(null), 3500);
       }
     } catch (e) {
       console.warn('Share error in reader:', e);

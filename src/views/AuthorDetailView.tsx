@@ -43,8 +43,8 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
       });
 
       if (result.success) {
-        setShareFeedback(result.method === 'clipboard' ? 'ప్రొఫైల్ లింక్ కాపీ చేయబడింది!' : 'ప్రొఫైల్ షేర్ చేయబడింది!');
-        setTimeout(() => setShareFeedback(null), 3000);
+        setShareFeedback(result.method === 'clipboard' ? 'ప్రొఫైల్ లింక్ కాపీ చేయబడింది! (ఎవరైనా లాగిన్ లేకుండానే చూడవచ్చు)' : 'ప్రొఫైల్ షేర్ చేయబడింది!');
+        setTimeout(() => setShareFeedback(null), 3500);
       }
     } catch (e) {
       console.warn('Share error:', e);

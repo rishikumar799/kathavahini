@@ -1,5 +1,5 @@
-import React from 'react';
-import { BookOpen, Star, Bookmark, Share2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { BookOpen, Star, Bookmark, Share2, Check } from 'lucide-react';
 import { Novel } from '../../types';
 import { resolveAvatarUrl } from '../../utils/avatarUtils';
 import { resolveContentAuthor, getAuthorDisplayName } from '../../utils/authorResolver';
@@ -11,11 +11,12 @@ interface NovelCardProps {
   onBookmarkToggle?: (novelId: string, e: React.MouseEvent) => void;
 }
 
-export const NovelCard: React.FC<NovelCardProps> = ({
+export const NovelCard: React.FC<NovelCardProps> = React.memo(({
   novel,
   onSelect,
   onBookmarkToggle,
 }) => {
+  const [sharedCopied, setSharedCopied] = useState(false);
   const resolvedAuthor = resolveContentAuthor(novel);
   const authorName = getAuthorDisplayName(resolvedAuthor);
   const authorAvatar = resolveAvatarUrl(resolvedAuthor.avatar, authorName);
@@ -32,6 +33,7 @@ export const NovelCard: React.FC<NovelCardProps> = ({
           alt={novel.teluguTitle}
           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           loading="lazy"
+          decoding="async"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
         
@@ -56,18 +58,26 @@ export const NovelCard: React.FC<NovelCardProps> = ({
               <button
                 onClick={async (e) => {
                   e.stopPropagation();
-                  await shareContent({
+                  const res = await shareContent({
                     contentType: 'novel',
                     id: novel.id,
                     title: novel.teluguTitle,
                     text: novel.teluguDescription,
                     coverImage: novel.coverImage,
                   });
+                  if (res.success) {
+                    setSharedCopied(true);
+                    setTimeout(() => setSharedCopied(false), 2000);
+                  }
                 }}
-                className="p-1 text-[#6F6970] hover:text-[#7A284B] dark:hover:text-[#D87591] transition-colors cursor-pointer"
-                title="నవలను షేర్ చేయండి"
+                className={`p-1 transition-colors cursor-pointer ${
+                  sharedCopied
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : 'text-[#6F6970] hover:text-[#7A284B] dark:hover:text-[#D87591]'
+                }`}
+                title={sharedCopied ? 'లింక్ కాపీ చేయబడింది!' : 'నవలను షేర్ చేయండి'}
               >
-                <Share2 className="w-3.5 h-3.5" />
+                {sharedCopied ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
               </button>
               {onBookmarkToggle && (
                 <button
@@ -95,6 +105,8 @@ export const NovelCard: React.FC<NovelCardProps> = ({
             <img
               src={authorAvatar}
               alt={authorName}
+              loading="lazy"
+              decoding="async"
               className="w-5 h-5 rounded-full object-cover ring-1 ring-black/5 dark:ring-white/10"
               onError={(e) => {
                 (e.target as HTMLImageElement).src = resolveAvatarUrl(null, authorName);
@@ -126,4 +138,4 @@ export const NovelCard: React.FC<NovelCardProps> = ({
       </div>
     </div>
   );
-};
+});

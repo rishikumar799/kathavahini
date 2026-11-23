@@ -76,8 +76,8 @@ export const NovelDetailView: React.FC<NovelDetailViewProps> = ({
       });
 
       if (result.success) {
-        setShareFeedback(result.method === 'clipboard' ? 'నవల లింక్ కాపీ చేయబడింది!' : 'నవల షేర్ చేయబడింది!');
-        setTimeout(() => setShareFeedback(null), 3000);
+        setShareFeedback(result.method === 'clipboard' ? 'నవల లింక్ కాపీ చేయబడింది! (ఎవరైనా లాగిన్ లేకుండానే చదువుకోవచ్చు)' : 'నవల షేర్ చేయబడింది!');
+        setTimeout(() => setShareFeedback(null), 3500);
       }
     } catch (e) {
       console.warn('Share error:', e);

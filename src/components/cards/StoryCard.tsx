@@ -1,5 +1,5 @@
-import React from 'react';
-import { Bookmark, Heart, Eye, Clock, Star, Share2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { Bookmark, Heart, Eye, Clock, Star, Share2, Check } from 'lucide-react';
 import { Story } from '../../types';
 import { resolveAvatarUrl } from '../../utils/avatarUtils';
 import { resolveContentAuthor, getAuthorDisplayName } from '../../utils/authorResolver';
@@ -13,13 +13,14 @@ interface StoryCardProps {
   compact?: boolean;
 }
 
-export const StoryCard: React.FC<StoryCardProps> = ({
+export const StoryCard: React.FC<StoryCardProps> = React.memo(({
   story,
   onSelect,
   onBookmarkToggle,
   onLikeToggle,
   compact = false,
 }) => {
+  const [sharedCopied, setSharedCopied] = useState(false);
   const resolvedAuthor = resolveContentAuthor(story);
   const authorName = getAuthorDisplayName(resolvedAuthor);
   const authorAvatar = resolveAvatarUrl(resolvedAuthor.avatar, authorName);
@@ -38,6 +39,7 @@ export const StoryCard: React.FC<StoryCardProps> = ({
           alt={story.teluguTitle}
           className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
           loading="lazy"
+          decoding="async"
         />
         
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent opacity-80" />
@@ -99,6 +101,8 @@ export const StoryCard: React.FC<StoryCardProps> = ({
             <img
               src={authorAvatar}
               alt={authorName}
+              loading="lazy"
+              decoding="async"
               className="w-6 h-6 rounded-full object-cover ring-1 ring-black/5 dark:ring-white/10"
               onError={(e) => {
                 (e.target as HTMLImageElement).src = resolveAvatarUrl(null, authorName);
@@ -131,22 +135,30 @@ export const StoryCard: React.FC<StoryCardProps> = ({
             <button
               onClick={async (e) => {
                 e.stopPropagation();
-                await shareContent({
+                const res = await shareContent({
                   contentType: 'story',
                   id: story.id,
                   title: story.teluguTitle,
                   text: story.teluguExcerpt,
                   coverImage: story.coverImage,
                 });
+                if (res.success) {
+                  setSharedCopied(true);
+                  setTimeout(() => setSharedCopied(false), 2000);
+                }
               }}
-              className="p-1 text-[#6F6970] dark:text-[#AAA4AC] hover:text-[#7A284B] dark:hover:text-[#D87591] transition-colors cursor-pointer"
-              title="కథను షేర్ చేయండి"
+              className={`p-1 transition-colors cursor-pointer ${
+                sharedCopied
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-[#6F6970] dark:text-[#AAA4AC] hover:text-[#7A284B] dark:hover:text-[#D87591]'
+              }`}
+              title={sharedCopied ? 'లింక్ కాపీ చేయబడింది!' : 'కథను షేర్ చేయండి'}
             >
-              <Share2 className="w-3.5 h-3.5" />
+              {sharedCopied ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
             </button>
           </div>
         </div>
       </div>
     </div>
   );
-};
+});

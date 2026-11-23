@@ -43,180 +43,226 @@ function setGuestLikedIds(ids: string[]): void {
 }
 
 class StoryService {
+  private publishedCache: { data: Story[]; timestamp: number; uid: string | undefined } | null = null;
+  private inflightPublishedPromise: Promise<Story[]> | null = null;
+  private readonly CACHE_TTL_MS = 10000;
+
+  public invalidateCache(): void {
+    this.publishedCache = null;
+  }
+
   /**
-   * Fetch all published & public stories from Firestore
+   * Map a Firestore QuerySnapshot directly to Story[] with parallel bookmark & like lookup (zero N+1 sequential waterfalls)
    */
-  public async getAllPublishedStories(maxLimit: number = 60): Promise<Story[]> {
-    try {
-      await deletionTracker.init();
-      // Query published stories
-      const q = query(
-        collection(db, 'stories'),
-        where('status', 'in', ['published', 'approved']),
-        limit(maxLimit)
-      );
-      const snap = await getDocs(q);
+  private async mapSnapshotToStories(snap: any): Promise<Story[]> {
+    const currentUid = auth.currentUser?.uid;
+    const guestLikes = getGuestLikedIds();
 
-      const currentUid = auth.currentUser?.uid;
-      const guestLikes = getGuestLikedIds();
-
-      if (!snap.empty) {
-        const stories: Story[] = [];
-
-        for (const d of snap.docs) {
-          if (deletionTracker.isDeleted(d.id)) {
-            continue;
-          }
-          const data = d.data();
-          if (data.deleted === true || data.status === 'deleted') {
-            continue;
-          }
-          const storyId = d.id;
-
-          // Strict Public Query Filter: Only published content with public visibility
-          const status = data.status || 'published';
-          const visibility = data.visibility || 'public';
-          
-          if (status !== 'published' && status !== 'approved') {
-            continue;
-          }
-          if (visibility === 'hidden' || visibility === 'private') {
-            continue;
-          }
-
-          // Check if bookmarked
-          let isBookmarked = false;
-          if (currentUid) {
-            try {
-              const bmSnap = await getDoc(doc(db, 'users', currentUid, 'bookmarks', storyId));
-              isBookmarked = bmSnap.exists();
-            } catch (e) {}
-          }
-
-          // Check if liked
-          let isLiked = false;
-          if (currentUid) {
-            try {
-              const likeSnap = await getDoc(doc(db, 'stories', storyId, 'likes', currentUid));
-              isLiked = likeSnap.exists();
-            } catch (e) {}
-          } else {
-            isLiked = guestLikes.includes(storyId);
-          }
-
-          stories.push({
-            id: storyId,
-            title: data.title || '',
-            teluguTitle: data.teluguTitle || data.title || '',
-            slug: data.slug || 'story',
-            coverImage: data.coverImage || data.coverImageUrl || 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800',
-            excerpt: data.excerpt || '',
-            teluguExcerpt: data.teluguExcerpt || data.excerpt || '',
-            content: Array.isArray(data.content) ? data.content : [data.content || ''],
-            contentType: data.contentType || 'rich_text',
-            contentBlocks: data.contentBlocks,
-            imagePages: data.imagePages,
-            sourceDocument: data.sourceDocument || (data.documentURL || data.documentUrl ? {
-              name: data.documentFileName || data.fileName || 'Story Document',
-              type: data.documentContentType || data.mimeType || 'pdf',
-              size: data.documentSize || data.fileSize || 0,
-              storageUrl: data.documentURL || data.documentUrl,
-              storagePath: data.documentStoragePath || data.storagePath,
-              isScanned: false,
-              uploadedAt: data.uploadedAt || data.documentUploadedAt || new Date().toISOString(),
-            } : undefined),
-            authorId: data.authorId || '',
-            authorName: data.authorName || data.authorPenName,
-            author: resolveContentAuthor({ id: storyId, ...data }),
-            category: data.category || data.categoryName || 'జీవితం',
-            tags: data.tags || [],
-            rating: typeof data.rating === 'number' ? Number(data.rating.toFixed(1)) : 5.0,
-            viewCount: data.viewsCount || data.viewCount || 0,
-            likeCount: data.likesCount || data.likeCount || 0,
-            bookmarkCount: data.bookmarksCount || data.bookmarkCount || 0,
-            readingTimeMinutes: data.readingTimeMinutes || 3,
-            publishedAt: data.publishedAt instanceof Timestamp ? data.publishedAt.toDate().toISOString().split('T')[0] : (data.publishedAt || new Date().toISOString().split('T')[0]),
-            status: status,
-            visibility: visibility,
-            isLiked,
-            isBookmarked,
-            submittedAt: data.submittedAt instanceof Timestamp ? data.submittedAt.toDate().toISOString() : data.submittedAt,
-            reviewedAt: data.reviewedAt instanceof Timestamp ? data.reviewedAt.toDate().toISOString() : data.reviewedAt,
-          });
-        }
-
-        // Merge with initial catalog to ensure rich initial reading experience
-        const map = new Map<string, Story>();
-        MOCK_STORIES.filter(s => !deletionTracker.isDeleted(s.id)).forEach(s => {
-          map.set(s.id, {
-            ...s,
-            isLiked: currentUid ? s.isLiked : guestLikes.includes(s.id)
-          });
-        });
-        stories.forEach(s => map.set(s.id, s));
-        return Array.from(map.values()).filter(s => !deletionTracker.isDeleted(s.id));
-      }
-    } catch (err) {
-      console.warn('Could not query published stories from Firestore, using baseline catalog:', err);
+    if (snap.empty) {
+      return MOCK_STORIES
+        .filter(s => !deletionTracker.isDeleted(s.id))
+        .map(s => ({
+          ...s,
+          isLiked: guestLikes.includes(s.id)
+        }));
     }
 
-    const guestLikes = getGuestLikedIds();
-    return MOCK_STORIES
-      .filter(s => !deletionTracker.isDeleted(s.id))
-      .map(s => ({
+    // Filter visible, published docs first
+    const validDocs = snap.docs.filter((d: any) => {
+      if (deletionTracker.isDeleted(d.id)) return false;
+      const data = d.data();
+      if (data.deleted === true || data.status === 'deleted') return false;
+      const status = data.status || 'published';
+      const visibility = data.visibility || 'public';
+      if (status !== 'published' && status !== 'approved') return false;
+      if (visibility === 'hidden' || visibility === 'private') return false;
+      return true;
+    });
+
+    // Fetch user bookmarks in ONE batch query instead of N sequential getDoc calls
+    const bookmarkedIds = new Set<string>();
+    const likedIds = new Set<string>();
+
+    if (currentUid && validDocs.length > 0) {
+      try {
+        const [bmSnap, likeSnaps] = await Promise.all([
+          getDocs(collection(db, 'users', currentUid, 'bookmarks')).catch(() => null),
+          Promise.all(
+            validDocs.map((d: any) =>
+              getDoc(doc(db, 'stories', d.id, 'likes', currentUid))
+                .then(s => (s.exists() ? d.id : null))
+                .catch(() => null)
+            )
+          )
+        ]);
+        if (bmSnap) {
+          bmSnap.docs.forEach((b: any) => bookmarkedIds.add(b.id));
+        }
+        likeSnaps.forEach((id: string | null) => {
+          if (id) likedIds.add(id);
+        });
+      } catch (e) {}
+    }
+
+    const stories: Story[] = validDocs.map((d: any) => {
+      const data = d.data();
+      const storyId = d.id;
+      const status = data.status || 'published';
+      const visibility = data.visibility || 'public';
+      const isBookmarked = currentUid ? bookmarkedIds.has(storyId) : false;
+      const isLiked = currentUid ? likedIds.has(storyId) : guestLikes.includes(storyId);
+
+      return {
+        id: storyId,
+        title: data.title || '',
+        teluguTitle: data.teluguTitle || data.title || '',
+        slug: data.slug || 'story',
+        coverImage: data.coverImage || data.coverImageUrl || 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800',
+        excerpt: data.excerpt || '',
+        teluguExcerpt: data.teluguExcerpt || data.excerpt || '',
+        content: Array.isArray(data.content) ? data.content : [data.content || ''],
+        contentType: data.contentType || 'rich_text',
+        contentBlocks: data.contentBlocks,
+        imagePages: data.imagePages,
+        sourceDocument: data.sourceDocument || (data.documentURL || data.documentUrl ? {
+          name: data.documentFileName || data.fileName || 'Story Document',
+          type: data.documentContentType || data.mimeType || 'pdf',
+          size: data.documentSize || data.fileSize || 0,
+          storageUrl: data.documentURL || data.documentUrl,
+          storagePath: data.documentStoragePath || data.storagePath,
+          isScanned: false,
+          uploadedAt: data.uploadedAt || data.documentUploadedAt || new Date().toISOString(),
+        } : undefined),
+        authorId: data.authorId || '',
+        authorName: data.authorName || data.authorPenName,
+        author: resolveContentAuthor({ id: storyId, ...data }),
+        category: data.category || data.categoryName || 'జీవితం',
+        tags: data.tags || [],
+        rating: typeof data.rating === 'number' ? Number(data.rating.toFixed(1)) : 5.0,
+        viewCount: data.viewsCount || data.viewCount || 0,
+        likeCount: data.likesCount || data.likeCount || 0,
+        bookmarkCount: data.bookmarksCount || data.bookmarkCount || 0,
+        readingTimeMinutes: data.readingTimeMinutes || 3,
+        publishedAt: data.publishedAt instanceof Timestamp ? data.publishedAt.toDate().toISOString().split('T')[0] : (data.publishedAt || new Date().toISOString().split('T')[0]),
+        status: status,
+        visibility: visibility,
+        isLiked,
+        isBookmarked,
+        submittedAt: data.submittedAt instanceof Timestamp ? data.submittedAt.toDate().toISOString() : data.submittedAt,
+        reviewedAt: data.reviewedAt instanceof Timestamp ? data.reviewedAt.toDate().toISOString() : data.reviewedAt,
+      };
+    });
+
+    // Merge with initial catalog to ensure rich initial reading experience
+    const map = new Map<string, Story>();
+    MOCK_STORIES.filter(s => !deletionTracker.isDeleted(s.id)).forEach(s => {
+      map.set(s.id, {
         ...s,
-        isLiked: guestLikes.includes(s.id)
-      }));
+        isLiked: currentUid ? likedIds.has(s.id) : guestLikes.includes(s.id),
+        isBookmarked: currentUid ? bookmarkedIds.has(s.id) : false,
+      });
+    });
+    stories.forEach(s => map.set(s.id, s));
+    return Array.from(map.values()).filter(s => !deletionTracker.isDeleted(s.id));
+  }
+
+  /**
+   * Fetch all published & public stories from Firestore with deduplication & short cache
+   */
+  public async getAllPublishedStories(maxLimit: number = 60, forceRefresh: boolean = false): Promise<Story[]> {
+    const currentUid = auth.currentUser?.uid;
+    if (
+      !forceRefresh &&
+      this.publishedCache &&
+      this.publishedCache.uid === currentUid &&
+      Date.now() - this.publishedCache.timestamp < this.CACHE_TTL_MS
+    ) {
+      return this.publishedCache.data;
+    }
+
+    if (!forceRefresh && this.inflightPublishedPromise) {
+      return this.inflightPublishedPromise;
+    }
+
+    const fetchPromise = (async () => {
+      try {
+        await deletionTracker.init();
+        const q = query(
+          collection(db, 'stories'),
+          where('status', 'in', ['published', 'approved']),
+          limit(maxLimit)
+        );
+        const snap = await getDocs(q);
+        const result = await this.mapSnapshotToStories(snap);
+        this.publishedCache = { data: result, timestamp: Date.now(), uid: currentUid };
+        return result;
+      } catch (err) {
+        console.warn('Could not query published stories from Firestore, using baseline catalog:', err);
+        const guestLikes = getGuestLikedIds();
+        return MOCK_STORIES
+          .filter(s => !deletionTracker.isDeleted(s.id))
+          .map(s => ({
+            ...s,
+            isLiked: guestLikes.includes(s.id)
+          }));
+      } finally {
+        this.inflightPublishedPromise = null;
+      }
+    })();
+
+    this.inflightPublishedPromise = fetchPromise;
+    return fetchPromise;
   }
 
   /**
    * Real-time subscription to published stories from Firestore.
-   * Immediately notifies whenever any story is published, updated, hidden, or deleted.
+   * Uses the onSnapshot QuerySnapshot directly so initial load + live updates perform 1 query instead of 6.
    */
   public subscribePublishedStories(callback: (stories: Story[]) => void): () => void {
-    // 1. Initial push
-    this.getAllPublishedStories().then(callback).catch(() => {});
-
     try {
       const q = query(
         collection(db, 'stories'),
         where('status', 'in', ['published', 'approved']),
-        limit(80)
+        limit(60)
       );
 
-      const unsubscribeSnapshot = onSnapshot(q, async () => {
+      let isCancelled = false;
+
+      const unsubscribeSnapshot = onSnapshot(q, async (snapshot) => {
         try {
-          const stories = await this.getAllPublishedStories();
-          callback(stories);
+          await deletionTracker.init();
+          const stories = await this.mapSnapshotToStories(snapshot);
+          if (!isCancelled) {
+            this.publishedCache = { data: stories, timestamp: Date.now(), uid: auth.currentUser?.uid };
+            callback(stories);
+          }
         } catch (e) {}
       }, (err) => {
         console.warn('Real-time story subscriber note:', err);
+        this.getAllPublishedStories().then(s => { if (!isCancelled) callback(s); }).catch(() => {});
       });
 
-      const handleStoryEvent = () => {
-        this.getAllPublishedStories().then(callback).catch(() => {});
+      const handleForceRefresh = () => {
+        this.invalidateCache();
+        this.getAllPublishedStories(60, true).then(s => { if (!isCancelled) callback(s); }).catch(() => {});
       };
 
       if (typeof window !== 'undefined') {
-        window.addEventListener('kathavahini:story-deleted', handleStoryEvent);
-        window.addEventListener('kathavahini:story-liked', handleStoryEvent);
-        window.addEventListener('kathavahini:story-rated', handleStoryEvent);
-        window.addEventListener('kathavahini:story-viewed', handleStoryEvent);
-        window.addEventListener('kathavahini:refresh-content', handleStoryEvent);
+        window.addEventListener('kathavahini:story-deleted', handleForceRefresh);
+        window.addEventListener('kathavahini:refresh-content', handleForceRefresh);
       }
 
       return () => {
+        isCancelled = true;
         unsubscribeSnapshot();
         if (typeof window !== 'undefined') {
-          window.removeEventListener('kathavahini:story-deleted', handleStoryEvent);
-          window.removeEventListener('kathavahini:story-liked', handleStoryEvent);
-          window.removeEventListener('kathavahini:story-rated', handleStoryEvent);
-          window.removeEventListener('kathavahini:story-viewed', handleStoryEvent);
-          window.removeEventListener('kathavahini:refresh-content', handleStoryEvent);
+          window.removeEventListener('kathavahini:story-deleted', handleForceRefresh);
+          window.removeEventListener('kathavahini:refresh-content', handleForceRefresh);
         }
       };
     } catch (e) {
       console.warn('Could not establish real-time stories snapshot:', e);
+      this.getAllPublishedStories().then(callback).catch(() => {});
       return () => {};
     }
   }

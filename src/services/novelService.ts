@@ -21,25 +21,96 @@ import { deletionTracker } from './deletionTracker';
 import { resolveContentAuthor } from '../utils/authorResolver';
 
 class NovelService {
+  private async mapSnapshotToNovels(snap: any): Promise<Novel[]> {
+    if (snap.empty) {
+      return MOCK_NOVELS.filter(n => !deletionTracker.isDeleted(n.id) && (n as any).status !== 'deleted' && (n as any).status !== 'archived');
+    }
+
+    const validDocs = snap.docs.filter((docSnap: any) => {
+      if (deletionTracker.isDeleted(docSnap.id)) return false;
+      const data = docSnap.data();
+      if (data.deleted === true || data.status === 'deleted') return false;
+      if (data.visibility === 'hidden' || data.visibility === 'private') return false;
+      return true;
+    });
+
+    // Fetch all chapter subcollections in parallel instead of sequentially
+    const novels: Novel[] = await Promise.all(
+      validDocs.map(async (docSnap: any) => {
+        const data = docSnap.data();
+        const novelId = docSnap.id;
+
+        const chapSnap = await getDocs(collection(db, 'novels', novelId, 'chapters')).catch(() => null);
+        const chapters: Chapter[] = chapSnap
+          ? chapSnap.docs
+              .filter(c => !deletionTracker.isDeleted(c.id) && !c.data()?.deleted && c.data()?.status !== 'deleted')
+              .map(c => {
+                const cd = c.data();
+                return {
+                  id: c.id,
+                  chapterNumber: cd.chapterNumber || 1,
+                  title: cd.title || '',
+                  teluguTitle: cd.teluguTitle || cd.title || '',
+                  content: Array.isArray(cd.content) ? cd.content : [cd.content || ''],
+                  readingTimeMinutes: cd.readingTimeMinutes || 5,
+                  publishedAt: cd.publishedAt instanceof Timestamp ? cd.publishedAt.toDate().toISOString().split('T')[0] : (cd.publishedAt || ''),
+                };
+              })
+          : [];
+
+        return {
+          id: novelId,
+          title: data.title || '',
+          teluguTitle: data.teluguTitle || data.title || '',
+          slug: data.slug || 'novel',
+          coverImage: data.coverImage || data.coverImageUrl || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=80&w=800',
+          description: data.description || '',
+          teluguDescription: data.teluguDescription || data.description || '',
+          authorId: data.authorId || '',
+          author: resolveContentAuthor({ id: novelId, ...data }),
+          category: data.category || 'కుటుంబం',
+          tags: data.tags || ['నవల'],
+          status: data.status || 'ongoing',
+          chaptersCount: chapters.length || data.chaptersCount || 1,
+          chapters: chapters.length > 0 ? chapters : (data.chapters || []),
+          rating: data.rating || 5.0,
+          viewCount: data.viewsCount || data.viewCount || 0,
+          likeCount: data.likesCount || data.likeCount || 0,
+          bookmarkCount: data.bookmarksCount || data.bookmarkCount || 0,
+          publishedAt: data.publishedAt instanceof Timestamp ? data.publishedAt.toDate().toISOString().split('T')[0] : (data.publishedAt || ''),
+          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate().toISOString().split('T')[0] : (data.updatedAt || ''),
+        };
+      })
+    );
+
+    const map = new Map<string, Novel>();
+    MOCK_NOVELS.filter(n => !deletionTracker.isDeleted(n.id)).forEach(n => map.set(n.id, n));
+    novels.forEach(n => map.set(n.id, n));
+    return Array.from(map.values())
+      .filter(n => !deletionTracker.isDeleted(n.id) && (n as any).status !== 'deleted' && (n as any).status !== 'archived')
+      .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0));
+  }
+
   /**
-   * Subscribe to real-time novel updates from Firestore
+   * Subscribe to real-time novel updates from Firestore (single initial snapshot, no duplicate fetch)
    */
   public subscribeNovels(callback: (novels: Novel[]) => void): () => void {
-    this.getFeaturedNovels().then(callback).catch(() => {});
-
     try {
-      const q = query(collection(db, 'novels'), limit(50));
-      const unsubscribe = onSnapshot(q, async () => {
+      let isCancelled = false;
+      const q = query(collection(db, 'novels'), limit(30));
+      const unsubscribe = onSnapshot(q, async (snapshot) => {
         try {
-          const novels = await this.getFeaturedNovels();
-          callback(novels);
+          await deletionTracker.init();
+          const novels = await this.mapSnapshotToNovels(snapshot);
+          if (!isCancelled) callback(novels);
         } catch (e) {}
       }, (err) => {
         console.warn('Real-time novels subscriber note:', err);
+        this.getFeaturedNovels().then(n => { if (!isCancelled) callback(n); }).catch(() => {});
       });
 
       const handleRefresh = () => {
-        this.getFeaturedNovels().then(callback).catch(() => {});
+        this.getFeaturedNovels().then(n => { if (!isCancelled) callback(n); }).catch(() => {});
       };
 
       if (typeof window !== 'undefined') {
@@ -48,6 +119,7 @@ class NovelService {
       }
 
       return () => {
+        isCancelled = true;
         unsubscribe();
         if (typeof window !== 'undefined') {
           window.removeEventListener('kathavahini:refresh-content', handleRefresh);
@@ -56,6 +128,7 @@ class NovelService {
       };
     } catch (e) {
       console.warn('Could not establish real-time novels snapshot:', e);
+      this.getFeaturedNovels().then(callback).catch(() => {});
       return () => {};
     }
   }
@@ -68,65 +141,7 @@ class NovelService {
       await deletionTracker.init();
       const q = query(collection(db, 'novels'), limit(maxLimit));
       const snap = await getDocs(q);
-
-      if (!snap.empty) {
-        const novels: Novel[] = [];
-        for (const docSnap of snap.docs) {
-          if (deletionTracker.isDeleted(docSnap.id)) continue;
-          const data = docSnap.data();
-          if (data.deleted === true || data.status === 'deleted') continue;
-          if (data.visibility === 'hidden' || data.visibility === 'private') continue;
-          const novelId = docSnap.id;
-
-          // Fetch chapters subcollection
-          const chapSnap = await getDocs(collection(db, 'novels', novelId, 'chapters'));
-          const chapters: Chapter[] = chapSnap.docs
-            .filter(c => !deletionTracker.isDeleted(c.id) && !c.data()?.deleted && c.data()?.status !== 'deleted')
-            .map(c => {
-              const cd = c.data();
-              return {
-                id: c.id,
-                chapterNumber: cd.chapterNumber || 1,
-                title: cd.title || '',
-                teluguTitle: cd.teluguTitle || cd.title || '',
-                content: Array.isArray(cd.content) ? cd.content : [cd.content || ''],
-                readingTimeMinutes: cd.readingTimeMinutes || 5,
-                publishedAt: cd.publishedAt instanceof Timestamp ? cd.publishedAt.toDate().toISOString().split('T')[0] : (cd.publishedAt || ''),
-              };
-            });
-
-          novels.push({
-            id: novelId,
-            title: data.title || '',
-            teluguTitle: data.teluguTitle || data.title || '',
-            slug: data.slug || 'novel',
-            coverImage: data.coverImage || data.coverImageUrl || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=80&w=800',
-            description: data.description || '',
-            teluguDescription: data.teluguDescription || data.description || '',
-            authorId: data.authorId || '',
-            author: resolveContentAuthor({ id: novelId, ...data }),
-            category: data.category || 'కుటుంబం',
-            tags: data.tags || ['నవల'],
-            status: data.status || 'ongoing',
-            chaptersCount: chapters.length || data.chaptersCount || 1,
-            chapters: chapters.length > 0 ? chapters : (data.chapters || []),
-            rating: data.rating || 5.0,
-            viewCount: data.viewsCount || data.viewCount || 0,
-            likeCount: data.likesCount || data.likeCount || 0,
-            bookmarkCount: data.bookmarksCount || data.bookmarkCount || 0,
-            publishedAt: data.publishedAt instanceof Timestamp ? data.publishedAt.toDate().toISOString().split('T')[0] : (data.publishedAt || ''),
-            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate().toISOString().split('T')[0] : (data.updatedAt || ''),
-          });
-        }
-
-        // Merge with mock catalog (excluding any deleted ones)
-        const map = new Map<string, Novel>();
-        MOCK_NOVELS.filter(n => !deletionTracker.isDeleted(n.id)).forEach(n => map.set(n.id, n));
-        novels.forEach(n => map.set(n.id, n));
-        return Array.from(map.values())
-          .filter(n => !deletionTracker.isDeleted(n.id) && (n as any).status !== 'deleted' && (n as any).status !== 'archived')
-          .sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0));
-      }
+      return await this.mapSnapshotToNovels(snap);
     } catch (err) {
       console.warn('Error fetching novels from Firestore:', err);
     }

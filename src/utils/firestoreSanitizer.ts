@@ -233,7 +233,7 @@ export async function safeSetDoc<T extends DocumentData = DocumentData>(
   options?: SetOptions
 ): Promise<void> {
   const cleanData = sanitizeFirestoreData(data);
-  if (process.env.NODE_ENV !== 'production') {
+  if (typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV) {
     assertNoUndefinedFirestoreValues(cleanData, `setDoc(${docRef?.path || 'unknown'})`);
   }
   if (options) {
@@ -250,7 +250,7 @@ export async function safeUpdateDoc<T extends DocumentData = DocumentData>(
   data: Partial<T>
 ): Promise<void> {
   const cleanData = sanitizeFirestoreData(data);
-  if (process.env.NODE_ENV !== 'production') {
+  if (typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV) {
     assertNoUndefinedFirestoreValues(cleanData, `updateDoc(${docRef?.path || 'unknown'})`);
   }
   return updateDoc(docRef, cleanData as any);
@@ -264,7 +264,7 @@ export async function safeAddDoc<T extends DocumentData = DocumentData>(
   data: T
 ): Promise<any> {
   const cleanData = sanitizeFirestoreData(data);
-  if (process.env.NODE_ENV !== 'production') {
+  if (typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV) {
     assertNoUndefinedFirestoreValues(cleanData, `addDoc(${collectionRef?.path || 'unknown'})`);
   }
   return addDoc(collectionRef, cleanData as any);
@@ -280,7 +280,7 @@ export function safeTransactionSet<T extends DocumentData = DocumentData>(
   options?: SetOptions
 ): Transaction {
   const cleanData = sanitizeFirestoreData(data);
-  if (process.env.NODE_ENV !== 'production') {
+  if (typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV) {
     assertNoUndefinedFirestoreValues(cleanData, `transaction.set(${docRef?.path || 'unknown'})`);
   }
   if (options) {
@@ -298,7 +298,7 @@ export function safeTransactionUpdate<T extends DocumentData = DocumentData>(
   data: Partial<T>
 ): Transaction {
   const cleanData = sanitizeFirestoreData(data);
-  if (process.env.NODE_ENV !== 'production') {
+  if (typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV) {
     assertNoUndefinedFirestoreValues(cleanData, `transaction.update(${docRef?.path || 'unknown'})`);
   }
   return transaction.update(docRef, cleanData as any);

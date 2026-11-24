@@ -94,11 +94,16 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
             <div className="space-y-2">
               <h2 className="text-xl font-bold font-serif-telugu text-[#17151A] dark:text-[#F7F3EE]">
-                పేజీ లోడ్ చేయడంలో చిన్న సమస్య ఏర్పడింది
+                పేజీ లోడ్ చేయడంలో సమస్య ఏర్పడింది
               </h2>
               <p className="text-sm text-[#6F6970] dark:text-[#AAA4AC] leading-relaxed">
-                కొత్త అప్‌డేట్ కారణంగా ఈ పేజీని మళ్ళీ లోడ్ చేయాల్సి ఉంది. దయచేసి క్రింది బటన్ నొక్కండి.
+                కొత్త అప్‌డేట్ లేదా రన్‌టైమ్ లోపం కారణంగా ఈ పేజీని మళ్ళీ లోడ్ చేయాల్సి ఉంది. దయచేసి క్రింది బటన్ నొక్కండి.
               </p>
+              {this.state.errorMessage && (
+                <p className="text-[11px] font-mono text-[#7A284B] dark:text-[#D87591] bg-[#FAF7F2] dark:bg-[#222229] border border-[#E8E1DA] dark:border-[#2E2D36] rounded-xl px-3 py-2 break-words">
+                  {this.state.errorMessage}
+                </p>
+              )}
             </div>
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">

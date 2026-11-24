@@ -4,7 +4,13 @@ import App from './App.tsx';
 import { ErrorBoundary } from './components/common/ErrorBoundary.tsx';
 import './index.css';
 
-// Recover automatically if a user's open browser tab requests an outdated JS/CSS chunk right after a live deploy
+declare global {
+  interface Window {
+    __KATHAVAHINI_MOUNTED__?: boolean;
+  }
+}
+
+// Recover automatically if an open browser tab requests an outdated JS/CSS chunk right after a live deploy
 if (typeof window !== 'undefined') {
   window.addEventListener('vite:preloadError', (event) => {
     event.preventDefault();
@@ -19,12 +25,30 @@ if (typeof window !== 'undefined') {
       window.location.reload();
     }
   });
+
+  window.addEventListener('unhandledrejection', (event) => {
+    console.error('[Kathavahini Unhandled Rejection]', event.reason);
+  });
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-  </StrictMode>,
-);
+const rootElement = document.getElementById('root');
+
+if (!rootElement) {
+  console.error('[Kathavahini Boot Failure] Root container #root not found in document.');
+} else {
+  try {
+    createRoot(rootElement).render(
+      <StrictMode>
+        <ErrorBoundary>
+          <App />
+        </ErrorBoundary>
+      </StrictMode>,
+    );
+    if (typeof window !== 'undefined') {
+      window.__KATHAVAHINI_MOUNTED__ = true;
+    }
+  } catch (err) {
+    console.error('[Kathavahini Mount Failure]', err);
+    throw err;
+  }
+}

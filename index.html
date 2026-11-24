@@ -15,7 +15,65 @@
   </head>
   <body class="bg-[#FAF7F2] text-[#17151A] antialiased selection:bg-[#7A284B] selection:text-white">
     <div id="root"></div>
+    <script>
+      (function () {
+        var shown = false;
+        function renderBootError(title, detail) {
+          if (shown || window.__KATHAVAHINI_MOUNTED__) return;
+          var root = document.getElementById('root');
+          if (!root || root.childNodes.length > 0) return;
+          shown = true;
+          console.error('[Kathavahini Boot Failure]', title, detail || '');
+          var wrap = document.createElement('div');
+          wrap.setAttribute('style', 'min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;background:#FAF7F2;color:#17151A;font-family:system-ui,-apple-system,sans-serif;');
+          var card = document.createElement('div');
+          card.setAttribute('style', 'max-width:480px;width:100%;background:#fff;border:1px solid #E8E1DA;border-radius:20px;padding:28px;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,0.06);');
+          var h = document.createElement('h2');
+          h.setAttribute('style', 'margin:0 0 10px;font-size:19px;font-weight:700;color:#7A284B;');
+          h.textContent = title;
+          var p = document.createElement('p');
+          p.setAttribute('style', 'margin:0 0 16px;font-size:13px;line-height:1.6;color:#6F6970;word-break:break-word;');
+          p.textContent = detail || 'Application scripts could not load. Please refresh the page.';
+          var btn = document.createElement('button');
+          btn.setAttribute('style', 'background:#7A284B;color:#fff;border:none;border-radius:9999px;padding:10px 24px;font-weight:700;font-size:13px;cursor:pointer;');
+          btn.textContent = 'మళ్ళీ లోడ్ చేయండి (Reload)';
+          btn.onclick = function () { window.location.reload(); };
+          card.appendChild(h);
+          card.appendChild(p);
+          card.appendChild(btn);
+          wrap.appendChild(card);
+          root.appendChild(wrap);
+        }
+
+        if (window.location.protocol === 'file:') {
+          renderBootError(
+            'Local File Protocol Unsupported',
+            'Built files cannot run directly from file://. Serve the build using "npm run preview" or a web server.'
+          );
+          return;
+        }
+
+        window.addEventListener('error', function (e) {
+          if (window.__KATHAVAHINI_MOUNTED__) return;
+          var target = e && e.target;
+          if (target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK')) {
+            var assetUrl = target.src || target.href || 'unknown asset';
+            renderBootError(
+              'అప్లికేషన్ ఫైల్ లోడ్ కాలేదు (Failed to Load Application Bundle)',
+              'Failed to load required asset: ' + assetUrl + '. Ensure the full dist/assets/ folder is deployed.'
+            );
+          } else if (e && e.message) {
+            renderBootError('ప్రారంభ లోపం (Initialization Error)', e.message);
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', function (e) {
+          if (window.__KATHAVAHINI_MOUNTED__) return;
+          var reason = e && e.reason ? (e.reason.message || String(e.reason)) : 'Unhandled startup error';
+          renderBootError('ప్రారంభ లోపం (Startup Promise Error)', reason);
+        });
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

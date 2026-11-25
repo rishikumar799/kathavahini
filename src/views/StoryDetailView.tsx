@@ -8,7 +8,8 @@ import { SectionHeader } from '../components/common/SectionHeader';
 import { StoryCard } from '../components/cards/StoryCard';
 import { StarRating } from '../components/common/StarRating';
 import { storyService } from '../services/storyService';
-import { shareContent, getCanonicalShareUrl } from '../utils/shareUtils';
+import { warmSharePreview } from '../utils/shareUtils';
+import { ShareModal, ShareModalPayload } from '../components/modals/ShareModal';
 import { resolveAvatarUrl } from '../utils/avatarUtils';
 import { resolveContentAuthor, getAuthorDisplayName } from '../utils/authorResolver';
 
@@ -43,7 +44,7 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
 }) => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [shareFeedback, setShareFeedback] = useState<{ message: string; isError?: boolean } | null>(null);
+  const [sharePayload, setSharePayload] = useState<ShareModalPayload | null>(null);
 
   // Author details resolution
   const resolvedAuthor = resolveContentAuthor(story);
@@ -61,6 +62,13 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
   ));
   const canManageStory = Boolean(isAdmin || isOwnerOrAuthor);
 
+  // Pre-warm server OG preview & cover cache immediately on story open so WhatsApp sharing is instant
+  useEffect(() => {
+    if (story?.id) {
+      warmSharePreview('story', story.id);
+    }
+  }, [story?.id]);
+
   // Genuine view tracking: wait 1.5s dwell before recording (30-min dedup handled in storyService)
   useEffect(() => {
     if (!story?.id) return;
@@ -70,40 +78,15 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
     return () => window.clearTimeout(timer);
   }, [story?.id]);
 
-  const handleShare = async () => {
-    try {
-      const shareSummary = story.teluguExcerpt || story.excerpt || '';
-      const formattedText = [
-        shareSummary,
-        authorName ? `By: ${authorName}` : '',
-        'Kathavahini — Telugu Stories',
-      ].filter(Boolean).join('\n');
-
-      const result = await shareContent({
-        contentType: 'story',
-        id: story.id,
-        title: story.teluguTitle || story.title,
-        text: formattedText,
-        coverImage: story.coverImage,
-      });
-
-      if (result.success) {
-        setShareFeedback({
-          message: result.method === 'clipboard'
-            ? 'కథ లింక్ కాపీ చేయబడింది! (ఎవరైనా లాగిన్ లేకుండానే చదువుకోవచ్చు)'
-            : 'కథ విజయవంతంగా షేర్ చేయబడింది!',
-        });
-        setTimeout(() => setShareFeedback(null), 3500);
-      } else if (result.method === 'failed') {
-        setShareFeedback({
-          message: 'లింక్ షేర్ చేయడంలో సమస్య ఏర్పడింది. మళ్లీ ప్రయత్నించండి.',
-          isError: true,
-        });
-        setTimeout(() => setShareFeedback(null), 3500);
-      }
-    } catch (e) {
-      console.warn('Share error:', e);
-    }
+  const handleShare = () => {
+    setSharePayload({
+      contentType: 'story',
+      id: story.id,
+      title: story.teluguTitle || story.title,
+      description: story.teluguExcerpt || story.excerpt || '',
+      authorName,
+      coverImage: story.coverImage,
+    });
   };
 
   const handleConfirmDelete = async () => {
@@ -316,18 +299,6 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
             >
               <Share2 className="w-5 h-5" />
             </button>
-
-            {/* Share Feedback Toast */}
-            {shareFeedback && (
-              <div
-                className={`absolute -top-10 right-0 px-4 py-1.5 rounded-full text-white text-xs font-bold shadow-lg animate-fade-in flex items-center gap-1.5 ${
-                  shareFeedback.isError ? 'bg-red-600' : 'bg-emerald-600'
-                }`}
-              >
-                <span>{shareFeedback.isError ? '!' : '✓'}</span>
-                <span>{shareFeedback.message}</span>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -449,6 +420,11 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
           </div>
         </div>
       )}
+      <ShareModal
+        isOpen={Boolean(sharePayload)}
+        payload={sharePayload}
+        onClose={() => setSharePayload(null)}
+      />
     </div>
   );
 };

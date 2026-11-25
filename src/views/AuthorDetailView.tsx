@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { ArrowLeft, Users, BookOpen, Feather, UserCheck, UserPlus, Calendar, Share2, Check } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { ArrowLeft, Users, BookOpen, Feather, UserCheck, UserPlus, Calendar, Share2 } from 'lucide-react';
 import { Author, Story, Novel } from '../types';
 import { StoryCard } from '../components/cards/StoryCard';
 import { NovelCard } from '../components/cards/NovelCard';
-import { shareContent } from '../utils/shareUtils';
+import { warmSharePreview } from '../utils/shareUtils';
+import { ShareModal, ShareModalPayload } from '../components/modals/ShareModal';
 import { resolveAvatarUrl } from '../utils/avatarUtils';
 import { getAuthorDisplayName } from '../utils/authorResolver';
 
@@ -33,43 +34,39 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
   onLikeToggle,
 }) => {
   const [activeTab, setActiveTab] = useState<'stories' | 'novels'>('stories');
-  const [shareFeedback, setShareFeedback] = useState<{ message: string; isError?: boolean } | null>(null);
+  const [sharePayload, setSharePayload] = useState<ShareModalPayload | null>(null);
 
   const resolvedName = getAuthorDisplayName(author);
   const resolvedAvatar = resolveAvatarUrl(author.avatar, resolvedName);
   const liveFollowersCount = Math.max(0, author.followersCount || 0);
   const liveStoriesCount = authorStories.length;
   const liveNovelsCount = authorNovels.length;
+  const liveTotalViews = authorStories.reduce(
+    (sum, s) => sum + Math.max(0, Number(s.viewCount || 0)),
+    0
+  );
   const isSelfAuthor = Boolean(currentUserId && author.id && currentUserId === author.id);
 
-  const handleShareProfile = async () => {
-    try {
-      const bio = author.teluguBio || author.bio || `${resolvedName} గారి తెలుగు రచనలు కథావాహినిలో చదవండి`;
-      const result = await shareContent({
-        contentType: 'author',
-        id: author.id,
-        title: resolvedName,
-        text: `${bio}\nWriter on Kathavahini.`,
-        coverImage: author.avatar,
-      });
-
-      if (result.success) {
-        setShareFeedback({
-          message: result.method === 'clipboard'
-            ? 'ప్రొఫైల్ లింక్ కాపీ చేయబడింది! (ఎవరైనా లాగిన్ లేకుండానే చూడవచ్చు)'
-            : 'ప్రొఫైల్ షేర్ చేయబడింది!',
-        });
-        setTimeout(() => setShareFeedback(null), 3500);
-      } else if (result.method === 'failed') {
-        setShareFeedback({
-          message: 'ప్రొఫైల్ లింక్ షేర్ చేయడంలో సమస్య ఏర్పడింది.',
-          isError: true,
-        });
-        setTimeout(() => setShareFeedback(null), 3500);
-      }
-    } catch (e) {
-      console.warn('Share error:', e);
+  // Pre-warm server 1200x630 Writer Banner & OG HTML as soon as profile opens
+  useEffect(() => {
+    if (author?.id) {
+      warmSharePreview('author', author.id);
     }
+  }, [author?.id]);
+
+  const handleShareProfile = () => {
+    const bio = author.teluguBio || author.bio || `${resolvedName} గారి తెలుగు రచనలు కథావాహినిలో చదవండి.`;
+    setSharePayload({
+      contentType: 'author',
+      id: author.id,
+      title: resolvedName,
+      description: bio,
+      avatarUrl: author.avatar,
+      isVerified: author.isVerified === true,
+      storiesCount: liveStoriesCount,
+      totalViews: liveTotalViews,
+      followersCount: liveFollowersCount,
+    });
   };
 
   return (
@@ -136,26 +133,11 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
 
             <button
               onClick={handleShareProfile}
-              className={`p-2.5 rounded-full border transition-colors cursor-pointer shrink-0 ${
-                shareFeedback && !shareFeedback.isError
-                  ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30'
-                  : 'border-[#E8E1DA] dark:border-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE] hover:bg-[#FAF7F2] dark:hover:bg-[#222229]'
-              }`}
+              className="p-2.5 rounded-full border border-[#E8E1DA] dark:border-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE] hover:bg-[#FAF7F2] dark:hover:bg-[#222229] transition-colors cursor-pointer shrink-0"
               title="రచయిత ప్రొఫైల్‌ను షేర్ చేయండి"
             >
-              {shareFeedback && !shareFeedback.isError ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
+              <Share2 className="w-4 h-4" />
             </button>
-
-            {shareFeedback && (
-              <div
-                className={`absolute -top-10 right-0 px-3.5 py-1 rounded-full text-white text-xs font-bold shadow-lg animate-fade-in whitespace-nowrap ${
-                  shareFeedback.isError ? 'bg-red-600' : 'bg-emerald-600'
-                }`}
-              >
-                {shareFeedback.isError ? '! ' : '✓ '}
-                {shareFeedback.message}
-              </div>
-            )}
           </div>
         </div>
 
@@ -261,6 +243,11 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
           </div>
         )}
       </div>
+      <ShareModal
+        isOpen={Boolean(sharePayload)}
+        payload={sharePayload}
+        onClose={() => setSharePayload(null)}
+      />
     </div>
   );
 };

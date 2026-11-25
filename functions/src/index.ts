@@ -748,38 +748,10 @@ export const sharePreview = onRequest(
             ? `${cleanBio} • Writer on Kathavahini.`
             : `Writer on Kathavahini. Read original Telugu stories, novels, and series by ${aName}.`;
           contentType = 'profile';
-          imageWidth = 512;
-          imageHeight = 512;
-
-          const docs = [uData, wData, aData];
-          const candidates: string[] = [];
-          for (const d of docs) {
-            if (!d) continue;
-            for (const key of ['photoURL', 'profileImageURL', 'avatar', 'profileImage', 'imageUrl']) {
-              const val = (d as any)[key];
-              if (typeof val === 'string' && val.trim() && !val.trim().startsWith('blob:')) {
-                candidates.push(val.trim());
-              }
-            }
-          }
-
-          const custom = candidates.find(c => isCustomPhoto(c));
-          if (custom) {
-            if (custom.startsWith('data:image/')) {
-              image = `${origin}/api/avatar/${encodedId}`;
-              imageType = detectMimeType(custom);
-            } else {
-              image = custom;
-              imageType = detectMimeType(custom);
-            }
-          } else {
-            const remote = candidates.find(c => c.startsWith('https://') || c.startsWith('http://'));
-            if (remote) {
-              const normalized = normalizeAvatarForCrawler(remote);
-              image = normalized;
-              imageType = detectMimeType(normalized);
-            }
-          }
+          imageWidth = 1200;
+          imageHeight = 630;
+          image = `${origin}/api/author-card/${encodedId}.jpg`;
+          imageType = 'image/jpeg';
         }
       }
 
@@ -793,6 +765,10 @@ export const sharePreview = onRequest(
       const safeImgType = escapeHtml(imageType);
       const safeCanonicalUrl = escapeHtml(canonicalUrl);
       const safeDirectUrl = escapeHtml(appDirectUrl);
+      const ogSiteName =
+        contentType === 'profile'
+          ? 'Kathavahini — తెలుగు సాహిత్య ప్రపంచం'
+          : 'Kathavahini | తెలుగు కథలు';
 
       const ctaLabel =
         contentType === 'profile'
@@ -815,7 +791,7 @@ export const sharePreview = onRequest(
   <meta name="description" content="${safeDesc}">
 
   <!-- Open Graph (Facebook, WhatsApp, Telegram, LinkedIn) -->
-  <meta property="og:site_name" content="Kathavahini — Telugu Stories">
+  <meta property="og:site_name" content="${escapeHtml(ogSiteName)}">
   <meta property="og:type" content="${contentType}">
   <meta property="og:title" content="${safeTitle}">
   <meta property="og:description" content="${safeDesc}">

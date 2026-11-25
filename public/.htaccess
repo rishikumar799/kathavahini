@@ -2,9 +2,11 @@
   RewriteEngine On
   RewriteBase /
 
-  # 1. Public binary OG image proxy endpoints for WhatsApp / Facebook / Telegram / X crawlers
+  # 1. Public binary OG image proxy & pre-warming endpoints for WhatsApp / Facebook / Telegram / X crawlers
   RewriteRule ^api/cover/(.+)$ og-share.php?mode=cover&id=$1 [L,QSA]
   RewriteRule ^api/avatar/(.+)$ og-share.php?mode=avatar&id=$1 [L,QSA]
+  RewriteRule ^api/author-card/(.+)$ og-share.php?mode=author_card&id=$1 [L,QSA]
+  RewriteRule ^api/og-warm/?$ og-share.php?mode=warm [L,QSA]
 
   # 2. Dedicated share preview endpoints (/share/story/:id, /share/novel/:id, /share/episode/:id, /share/author/:id)
   RewriteRule ^share/(story|novel|episode|author|profile)/([^/]+)/?$ og-share.php?type=$1&id=$2&share=1 [L,QSA]

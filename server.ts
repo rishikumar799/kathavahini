@@ -13,8 +13,39 @@ import {
   isCustomUploadedPhoto,
   normalizeSocialAvatarUrl
 } from './src/server/metaHandler.ts';
+import {
+  resolveWriterBannerProfile,
+  renderWriterBannerJpeg,
+  getLogoCandidates,
+} from './src/server/authorBanner.ts';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from './src/lib/firebase.ts';
+
+interface CachedBinary {
+  buf: Buffer;
+  mimeType: string;
+  ts: number;
+}
+const ogImageCache = new Map<string, CachedBinary>();
+const OG_IMAGE_CACHE_TTL_MS = 10 * 60 * 1000;
+
+function getCachedImage(key: string): CachedBinary | null {
+  const entry = ogImageCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > OG_IMAGE_CACHE_TTL_MS) {
+    ogImageCache.delete(key);
+    return null;
+  }
+  return entry;
+}
+
+function setCachedImage(key: string, buf: Buffer, mimeType: string): void {
+  if (ogImageCache.size > 120) {
+    const oldestKey = ogImageCache.keys().next().value;
+    if (oldestKey) ogImageCache.delete(oldestKey);
+  }
+  ogImageCache.set(key, { buf, mimeType, ts: Date.now() });
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -143,10 +174,20 @@ async function startServer() {
     });
   });
 
-  // 1. Public binary image endpoints for covers & avatars (WhatsApp-compatible JPEG, accessible without auth)
+  // 1. Public binary image endpoints for covers, avatars & 1200x630 writer banners (WhatsApp-compatible JPEG, accessible without auth)
   app.get('/api/cover/:id', async (req: Request, res: Response) => {
     const id = stripImageExtension(req.params.id || '');
     res.setHeader('Access-Control-Allow-Origin', '*');
+
+    const cacheKey = `cover:${id}`;
+    const cached = id ? getCachedImage(cacheKey) : null;
+    if (cached) {
+      res.setHeader('Content-Type', cached.mimeType);
+      res.setHeader('Content-Length', String(cached.buf.length));
+      res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800');
+      res.setHeader('X-Cache', 'HIT');
+      return res.status(200).send(cached.buf);
+    }
 
     try {
       if (id) {
@@ -185,6 +226,7 @@ async function startServer() {
               const parsed = parseBase64DataUrl(trimmed);
               if (parsed) {
                 const finalImg = await toSocialJpeg(parsed.buf, parsed.mimeType, 'cover');
+                setCachedImage(cacheKey, finalImg.buf, finalImg.mimeType);
                 res.setHeader('Content-Type', finalImg.mimeType);
                 res.setHeader('Content-Length', String(finalImg.buf.length));
                 res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800');
@@ -197,6 +239,7 @@ async function startServer() {
                   const rawBuf = Buffer.from(await upstream.arrayBuffer());
                   const contentType = upstream.headers.get('content-type') || 'image/jpeg';
                   const finalImg = await toSocialJpeg(rawBuf, contentType, 'cover');
+                  setCachedImage(cacheKey, finalImg.buf, finalImg.mimeType);
                   res.setHeader('Content-Type', finalImg.mimeType);
                   res.setHeader('Content-Length', String(finalImg.buf.length));
                   res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800');
@@ -213,6 +256,82 @@ async function startServer() {
     }
 
     return sendFallbackLogo(res);
+  });
+
+  // Dynamic 1200x630 Editorial Writer Profile Banner JPEG
+  app.get('/api/author-card/:id', async (req: Request, res: Response) => {
+    const id = stripImageExtension(req.params.id || '');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+
+    const cacheKey = `author-card:${id}`;
+    const cached = id ? getCachedImage(cacheKey) : null;
+    if (cached) {
+      res.setHeader('Content-Type', cached.mimeType);
+      res.setHeader('Content-Length', String(cached.buf.length));
+      res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800');
+      res.setHeader('X-Cache', 'HIT');
+      return res.status(200).send(cached.buf);
+    }
+
+    try {
+      if (id) {
+        const origin = resolveRequestOrigin(req);
+        const profile = await resolveWriterBannerProfile(id, origin);
+        if (profile) {
+          const bannerBuf = await renderWriterBannerJpeg(profile, getLogoCandidates(__dirname));
+          if (bannerBuf && bannerBuf.length > 0) {
+            setCachedImage(cacheKey, bannerBuf, 'image/jpeg');
+            res.setHeader('Content-Type', 'image/jpeg');
+            res.setHeader('Content-Length', String(bannerBuf.length));
+            res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800');
+            return res.status(200).send(bannerBuf);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Author banner generation error:', err);
+    }
+
+    return sendFallbackLogo(res);
+  });
+
+  // Instant Pre-Warm Endpoint — called silently when user opens a story/novel/episode/author page
+  app.get('/api/og-warm', async (req: Request, res: Response) => {
+    res.setHeader('Cache-Control', 'no-store');
+    const type = String(req.query.type || '').toLowerCase().trim();
+    const id = String(req.query.id || '').trim();
+    if (!type || !id) {
+      return res.status(400).json({ ok: false });
+    }
+
+    const origin = resolveRequestOrigin(req);
+    try {
+      if (type === 'author' || type === 'profile') {
+        const cacheKey = `author-card:${id}`;
+        if (!getCachedImage(cacheKey)) {
+          const profile = await resolveWriterBannerProfile(id, origin);
+          if (profile) {
+            const bannerBuf = await renderWriterBannerJpeg(profile, getLogoCandidates(__dirname));
+            if (bannerBuf && bannerBuf.length > 0) {
+              setCachedImage(cacheKey, bannerBuf, 'image/jpeg');
+            }
+          }
+        }
+        return res.status(200).json({ ok: true, type: 'author', id });
+      }
+
+      const meta = await resolveContentMeta(
+        {
+          storyId: type === 'story' ? id : null,
+          novelId: type === 'novel' ? id : null,
+          episodeId: type === 'episode' ? id : null,
+        },
+        origin
+      );
+      return res.status(200).json({ ok: true, type, id, imageUrl: meta.imageUrl });
+    } catch {
+      return res.status(200).json({ ok: false });
+    }
   });
 
   app.get('/api/avatar/:id', async (req: Request, res: Response) => {

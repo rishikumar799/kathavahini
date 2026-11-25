@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, BookOpen, Star, Bookmark, Play, Clock, Calendar, Share2, Layers } from 'lucide-react';
 import { Novel, Chapter, Episode, Author } from '../types';
 import { novelService } from '../services/novelService';
-import { shareContent } from '../utils/shareUtils';
+import { warmSharePreview } from '../utils/shareUtils';
+import { ShareModal, ShareModalPayload } from '../components/modals/ShareModal';
 import { resolveAvatarUrl } from '../utils/avatarUtils';
 import { resolveContentAuthor, getAuthorDisplayName } from '../utils/authorResolver';
 
@@ -28,7 +29,7 @@ export const NovelDetailView: React.FC<NovelDetailViewProps> = ({
 }) => {
   const [episodes, setEpisodes] = useState<(Chapter | Episode)[]>(novel.chapters || []);
   const [loadingEpisodes, setLoadingEpisodes] = useState<boolean>(true);
-  const [shareFeedback, setShareFeedback] = useState<{ message: string; isError?: boolean } | null>(null);
+  const [sharePayload, setSharePayload] = useState<ShareModalPayload | null>(null);
 
   const resolvedAuthor = resolveContentAuthor(novel);
   const authorAvatar = resolveAvatarUrl(resolvedAuthor.avatar, resolvedAuthor.teluguName || resolvedAuthor.name);
@@ -65,71 +66,35 @@ export const NovelDetailView: React.FC<NovelDetailViewProps> = ({
     };
   }, [novel.id, novel.chapters]);
 
-  const showShareToast = (message: string, isError = false) => {
-    setShareFeedback({ message, isError });
-    setTimeout(() => setShareFeedback(null), 3500);
-  };
-
-  const handleShare = async () => {
-    try {
-      const formattedText = [
-        novel.teluguDescription || novel.description || '',
-        authorName ? `By: ${authorName}` : '',
-        'Kathavahini — Telugu Stories',
-      ].filter(Boolean).join('\n');
-
-      const result = await shareContent({
-        contentType: 'novel',
-        id: novel.id,
-        title: novel.teluguTitle || novel.title,
-        text: formattedText,
-        coverImage: novel.coverImage,
-      });
-
-      if (result.success) {
-        showShareToast(
-          result.method === 'clipboard'
-            ? 'నవల లింక్ కాపీ చేయబడింది! (ఎవరైనా లాగిన్ లేకుండానే చదువుకోవచ్చు)'
-            : 'నవల షేర్ చేయబడింది!'
-        );
-      } else if (result.method === 'failed') {
-        showShareToast('నవల లింక్ షేర్ చేయడంలో సమస్య ఏర్పడింది.', true);
-      }
-    } catch (e) {
-      console.warn('Share error:', e);
+  useEffect(() => {
+    if (novel?.id) {
+      warmSharePreview('novel', novel.id);
     }
+  }, [novel?.id]);
+
+  const handleShare = () => {
+    setSharePayload({
+      contentType: 'novel',
+      id: novel.id,
+      title: novel.teluguTitle || novel.title,
+      description: novel.teluguDescription || novel.description || '',
+      authorName,
+      coverImage: novel.coverImage,
+    });
   };
 
-  const handleShareEpisode = async (ep: Chapter | Episode, epNum: number, e: React.MouseEvent) => {
+  const handleShareEpisode = (ep: Chapter | Episode, epNum: number, e: React.MouseEvent) => {
     e.stopPropagation();
-    try {
-      const epTitle = ep.teluguTitle || `${epNum}వ భాగం`;
-      const formattedText = [
-        novel.teluguDescription || novel.description || '',
-        authorName ? `By: ${authorName}` : '',
-        'Kathavahini — Telugu Stories',
-      ].filter(Boolean).join('\n');
-
-      const result = await shareContent({
-        contentType: 'episode',
-        id: ep.id,
-        title: `${novel.teluguTitle} - ${epTitle}`,
-        text: formattedText,
-        coverImage: novel.coverImage,
-      });
-
-      if (result.success) {
-        showShareToast(
-          result.method === 'clipboard'
-            ? `${epNum}వ భాగం లింక్ కాపీ చేయబడింది!`
-            : `${epNum}వ భాగం షేర్ చేయబడింది!`
-        );
-      } else if (result.method === 'failed') {
-        showShareToast('ఎపిసోడ్ లింక్ షేర్ చేయడంలో సమస్య ఏర్పడింది.', true);
-      }
-    } catch (err) {
-      console.warn('Episode share error:', err);
-    }
+    const epTitle = ep.teluguTitle || `${epNum}వ భాగం`;
+    warmSharePreview('episode', ep.id);
+    setSharePayload({
+      contentType: 'episode',
+      id: ep.id,
+      title: `${novel.teluguTitle} - ${epTitle}`,
+      description: novel.teluguDescription || novel.description || '',
+      authorName,
+      coverImage: novel.coverImage,
+    });
   };
 
   const getEpisodeNumber = (item: Chapter | Episode, index: number): number => {
@@ -242,17 +207,6 @@ export const NovelDetailView: React.FC<NovelDetailViewProps> = ({
             >
               <Share2 className="w-5 h-5" />
             </button>
-
-            {shareFeedback && (
-              <div
-                className={`absolute -top-10 left-1/2 md:left-48 -translate-x-1/2 md:translate-x-0 px-3.5 py-1 rounded-full text-white text-xs font-bold shadow-lg animate-fade-in whitespace-nowrap ${
-                  shareFeedback.isError ? 'bg-red-600' : 'bg-emerald-600'
-                }`}
-              >
-                {shareFeedback.isError ? '! ' : '✓ '}
-                {shareFeedback.message}
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -321,6 +275,11 @@ export const NovelDetailView: React.FC<NovelDetailViewProps> = ({
           </div>
         )}
       </section>
+      <ShareModal
+        isOpen={Boolean(sharePayload)}
+        payload={sharePayload}
+        onClose={() => setSharePayload(null)}
+      />
     </div>
   );
 };

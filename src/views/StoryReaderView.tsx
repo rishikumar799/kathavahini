@@ -34,7 +34,8 @@ import { storyService } from '../services/storyService';
 import { novelService } from '../services/novelService';
 import { storageService } from '../services/storageService';
 import { storySubcollectionService } from '../services/storySubcollectionService';
-import { shareContent } from '../utils/shareUtils';
+import { warmSharePreview } from '../utils/shareUtils';
+import { ShareModal, ShareModalPayload } from '../components/modals/ShareModal';
 import { resolveAvatarUrl } from '../utils/avatarUtils';
 import { resolveContentAuthor, getAuthorDisplayName } from '../utils/authorResolver';
 
@@ -89,7 +90,7 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
   const [showDocViewer, setShowDocViewer] = useState<boolean>(false);
   const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
-  const [shareFeedback, setShareFeedback] = useState<{ message: string; isError?: boolean } | null>(null);
+  const [sharePayload, setSharePayload] = useState<ShareModalPayload | null>(null);
   const [isUploadingNextPage, setIsUploadingNextPage] = useState<boolean>(false);
   const [uploadPageStatus, setUploadPageStatus] = useState<string | null>(null);
   const nextPageFileInputRef = useRef<HTMLInputElement>(null);
@@ -254,6 +255,13 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
   const hasImagePages = story.contentType === 'image_pages' && story.imagePages && story.imagePages.length > 0;
   const hasMixedBlocks = story.contentType === 'mixed' && story.contentBlocks && story.contentBlocks.length > 0;
 
+  // Pre-warm server OG preview cache as soon as reader opens
+  useEffect(() => {
+    if (!story?.id) return;
+    const isNovelEpisode = Boolean((story as any).novelId || (story as any).parentNovelId || activeCtx);
+    warmSharePreview(isNovelEpisode ? 'episode' : 'story', story.id);
+  }, [story?.id, activeCtx]);
+
   // Record genuine view after 1.5s dwell (30-min dedup handled in storyService) and fetch full reassembled story content
   useEffect(() => {
     let isMounted = true;
@@ -343,39 +351,16 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
     setCommentText('');
   };
 
-  const handleShare = async () => {
-    try {
-      const isNovelEpisode = Boolean((story as any).novelId || (story as any).parentNovelId || activeCtx);
-      const formattedText = [
-        story.teluguExcerpt || story.excerpt || '',
-        authorName ? `By: ${authorName}` : '',
-        'Kathavahini — Telugu Stories',
-      ].filter(Boolean).join('\n');
-
-      const result = await shareContent({
-        contentType: isNovelEpisode ? 'episode' : 'story',
-        id: story.id,
-        title: story.teluguTitle || story.title,
-        text: formattedText,
-        coverImage: story.coverImage,
-      });
-      if (result.success) {
-        setShareFeedback({
-          message: result.method === 'clipboard'
-            ? 'లింక్ కాపీ చేయబడింది! (ఎవరైనా లాగిన్ లేకుండానే చదువుకోవచ్చు)'
-            : 'షేర్ విజయవంతమైంది!',
-        });
-        setTimeout(() => setShareFeedback(null), 3500);
-      } else if (result.method === 'failed') {
-        setShareFeedback({
-          message: 'లింక్ షేర్ చేయడంలో సమస్య ఏర్పడింది.',
-          isError: true,
-        });
-        setTimeout(() => setShareFeedback(null), 3500);
-      }
-    } catch (e) {
-      console.warn('Share error in reader:', e);
-    }
+  const handleShare = () => {
+    const isNovelEpisode = Boolean((story as any).novelId || (story as any).parentNovelId || activeCtx);
+    setSharePayload({
+      contentType: isNovelEpisode ? 'episode' : 'story',
+      id: story.id,
+      title: story.teluguTitle || story.title,
+      description: story.teluguExcerpt || story.excerpt || '',
+      authorName,
+      coverImage: story.coverImage || activeCtx?.novel?.coverImage,
+    });
   };
 
   const handleConfirmDelete = async () => {
@@ -966,18 +951,6 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
           </div>
         </div>
 
-        {/* Fixed Share Feedback Toast (works from both ReaderToolbar and bottom share button) */}
-        {shareFeedback && (
-          <div
-            className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full text-white text-xs font-bold whitespace-nowrap shadow-xl animate-fade-in ${
-              shareFeedback.isError ? 'bg-red-600' : 'bg-emerald-600'
-            }`}
-          >
-            {shareFeedback.isError ? '! ' : '✓ '}
-            {shareFeedback.message}
-          </div>
-        )}
-
         {/* Reader Comments Section */}
         <section className="space-y-6 pt-4">
           <div className="flex items-center gap-2 text-lg font-bold font-serif-telugu">
@@ -1137,6 +1110,11 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
           </div>
         </div>
       )}
+      <ShareModal
+        isOpen={Boolean(sharePayload)}
+        payload={sharePayload}
+        onClose={() => setSharePayload(null)}
+      />
     </div>
   );
 };

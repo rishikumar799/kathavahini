@@ -246,13 +246,13 @@ export async function resolveContentMeta(
   const defaultLogo = `${fallbackOrigin}/logo.png`;
 
   const defaultMeta: ContentMeta = {
-    title: 'Kathavahini — Telugu Stories & Novels',
+    title: 'Kathavahini | తెలుగు కథలు & నవలలు',
     description: 'Read original Telugu stories, novels, episodes, Balavinodhini, and timeless literature on Kathavahini.',
     imageUrl: defaultLogo,
     imageType: 'image/png',
     url: fallbackOrigin,
     appRedirectUrl: fallbackOrigin,
-    siteName: 'Kathavahini — Telugu Stories',
+    siteName: 'Kathavahini | తెలుగు కథలు',
     type: 'website',
     imageWidth: 1200,
     imageHeight: 630
@@ -329,7 +329,7 @@ export async function resolveContentMeta(
           imageType,
           url: canonical,
           appRedirectUrl,
-          siteName: 'Kathavahini — Telugu Stories',
+          siteName: 'Kathavahini | తెలుగు కథలు',
           type: 'article',
           authorName,
           imageWidth: 1200,
@@ -393,7 +393,7 @@ export async function resolveContentMeta(
           imageType: resolvedImg.imageType,
           url: `${fallbackOrigin}/episode/${encodedId}`,
           appRedirectUrl: `${fallbackOrigin}/episode/${encodedId}`,
-          siteName: 'Kathavahini — Telugu Stories',
+          siteName: 'Kathavahini | తెలుగు కథలు',
           type: 'article',
           authorName: epAuthorName,
           imageWidth: 1200,
@@ -470,7 +470,7 @@ export async function resolveContentMeta(
           imageType,
           url: `${fallbackOrigin}/novel/${encodedId}`,
           appRedirectUrl: `${fallbackOrigin}/novel/${encodedId}`,
-          siteName: 'Kathavahini — Telugu Stories',
+          siteName: 'Kathavahini | తెలుగు కథలు',
           type: 'article',
           authorName,
           imageWidth: 1200,
@@ -559,27 +559,31 @@ export async function resolveContentMeta(
           ? `${cleanBio} • Writer on Kathavahini.`
           : `Writer on Kathavahini. Read original Telugu stories, novels, and series by ${name}.`;
 
-        // Prioritize custom uploaded profile photograph across users -> writers -> authors
-        const { imageUrl, imageType } = pickBestProfileImage(
-          [userData, writerData, authorData],
-          authorDocId,
-          fallbackOrigin,
-          defaultLogo
-        );
-
         const encodedId = encodeURIComponent(authorDocId);
+        const avatarSeed =
+          userData?.photoURL ||
+          userData?.profileImageURL ||
+          writerData?.photoURL ||
+          writerData?.profileImageURL ||
+          writerData?.avatar ||
+          '';
+        const bannerVersion = buildVersionTag(
+          `${name}|${cleanBio}|${String(avatarSeed).slice(0, 64)}|${writerData?.followersCount || userData?.followersCount || 0}|${writerData?.publishedStoriesCount || 0}`
+        );
+        const bannerImageUrl = `${fallbackOrigin}/api/author-card/${encodedId}.jpg?v=${bannerVersion}`;
+
         return {
           title: name,
           description: fullDescription,
-          imageUrl,
-          imageType,
+          imageUrl: bannerImageUrl,
+          imageType: 'image/jpeg',
           url: `${fallbackOrigin}/author/${encodedId}`,
           appRedirectUrl: `${fallbackOrigin}/author/${encodedId}`,
-          siteName: 'Kathavahini — Telugu Stories',
+          siteName: 'Kathavahini — తెలుగు సాహిత్య ప్రపంచం',
           type: 'profile',
           authorName: name,
-          imageWidth: 512,
-          imageHeight: 512
+          imageWidth: 1200,
+          imageHeight: 630
         };
       }
 

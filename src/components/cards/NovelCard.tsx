@@ -58,11 +58,16 @@ export const NovelCard: React.FC<NovelCardProps> = React.memo(({
               <button
                 onClick={async (e) => {
                   e.stopPropagation();
+                  const formattedText = [
+                    novel.teluguDescription || novel.description || '',
+                    authorName ? `By: ${authorName}` : '',
+                    'Kathavahini — Telugu Stories',
+                  ].filter(Boolean).join('\n');
                   const res = await shareContent({
                     contentType: 'novel',
                     id: novel.id,
-                    title: novel.teluguTitle,
-                    text: novel.teluguDescription,
+                    title: novel.teluguTitle || novel.title,
+                    text: formattedText,
                     coverImage: novel.coverImage,
                   });
                   if (res.success) {

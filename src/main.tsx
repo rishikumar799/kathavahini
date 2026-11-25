@@ -27,7 +27,17 @@ if (typeof window !== 'undefined') {
   });
 
   window.addEventListener('unhandledrejection', (event) => {
-    console.error('[Kathavahini Unhandled Rejection]', event.reason);
+    const reason = event.reason;
+    const message = typeof reason === 'string' ? reason : String(reason?.message || '');
+    const stack = typeof reason?.stack === 'string' ? reason.stack : '';
+    if (
+      message.includes('WebSocket closed without opened') ||
+      (stack.includes('/@vite/client') && message.toLowerCase().includes('websocket'))
+    ) {
+      event.preventDefault();
+      return;
+    }
+    console.error('[Kathavahini Unhandled Rejection]', reason);
   });
 }
 

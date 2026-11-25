@@ -133,6 +133,7 @@ export interface Story {
   category: StoryCategory;
   tags: string[];
   rating: number;
+  ratingsCount?: number;
   viewCount: number;
   likeCount: number;
   bookmarkCount: number;
@@ -214,6 +215,7 @@ export interface Novel {
   chaptersCount: number;
   chapters: Chapter[];
   rating: number;
+  ratingsCount?: number;
   viewCount: number;
   likeCount: number;
   bookmarkCount: number;
@@ -437,8 +439,9 @@ export interface CreatorStats {
   totalReads: number;
   totalLikes: number;
   totalFollowers: number;
+  totalBookmarks?: number;
   monthlyReadsTrend: { month: string; reads: number }[];
-  topStories: { id: string; title: string; reads: number; likes: number }[];
+  topStories: { id: string; title: string; reads: number; likes: number; bookmarks?: number }[];
 }
 
 export interface KnowledgeArticle {

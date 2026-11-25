@@ -85,7 +85,7 @@ export function getPublicShareOrigin(): string {
     return origin;
   }
 
-  return 'https://kathavahini-9a9c1.web.app';
+  return 'https://kathavahini.in';
 }
 
 /**

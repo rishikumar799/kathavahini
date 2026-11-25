@@ -4,12 +4,14 @@ import { AuthorCard } from '../components/cards/AuthorCard';
 
 interface AuthorsViewProps {
   authors: Author[];
+  currentUserId?: string;
   onSelectAuthor: (author: Author) => void;
   onFollowToggle: (authorId: string, e: React.MouseEvent) => void;
 }
 
 export const AuthorsView: React.FC<AuthorsViewProps> = ({
   authors,
+  currentUserId,
   onSelectAuthor,
   onFollowToggle,
 }) => {
@@ -29,6 +31,7 @@ export const AuthorsView: React.FC<AuthorsViewProps> = ({
           <AuthorCard
             key={author.id}
             author={author}
+            currentUserId={currentUserId}
             onSelect={onSelectAuthor}
             onFollowToggle={onFollowToggle}
           />

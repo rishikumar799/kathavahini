@@ -1,36 +1,47 @@
 import {
   doc,
   getDoc,
-  setDoc,
-  deleteDoc,
   getDocs,
+  runTransaction,
   collection,
   collectionGroup,
   serverTimestamp,
-  updateDoc,
-  increment,
   query,
-  orderBy
+  orderBy,
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
 
 export class FollowingService {
-  private followerCountsCache: { data: Record<string, number>; ts: number } | null = null;
-  private inflightFollowerCounts: Promise<Record<string, number>> | null = null;
-  private readonly CACHE_TTL_MS = 10_000;
+  private followerCountsCache: { data: Record<string, number>; authoritative: boolean; ts: number } | null = null;
+  private inflightFollowerCounts: Promise<{ counts: Record<string, number>; authoritative: boolean }> | null = null;
+  private inflightToggles = new Map<string, Promise<boolean>>();
+  private readonly CACHE_TTL_MS = 15_000;
 
   public invalidateFollowerCountsCache(): void {
     this.followerCountsCache = null;
   }
 
+  public isFollowerCountCacheAuthoritative(): boolean {
+    return Boolean(this.followerCountsCache?.authoritative);
+  }
+
   /**
    * Fetch accurate live follower counts for all authors via a single collectionGroup('following') query.
-   * Ensures accurate counts even if counter fields on writers/{id} were blocked by older rules or never initialized.
+   * Tracks whether the query succeeded so callers know when 0 is an authoritative count vs permission fallback.
    */
-  public async getAllFollowerCounts(forceRefresh = false): Promise<Record<string, number>> {
-    if (!forceRefresh && this.followerCountsCache && Date.now() - this.followerCountsCache.ts < this.CACHE_TTL_MS) {
-      return this.followerCountsCache.data;
+  public async getAllFollowerCountsDetailed(
+    forceRefresh = false
+  ): Promise<{ counts: Record<string, number>; authoritative: boolean }> {
+    if (
+      !forceRefresh &&
+      this.followerCountsCache &&
+      Date.now() - this.followerCountsCache.ts < this.CACHE_TTL_MS
+    ) {
+      return {
+        counts: this.followerCountsCache.data,
+        authoritative: this.followerCountsCache.authoritative,
+      };
     }
     if (!forceRefresh && this.inflightFollowerCounts) {
       return this.inflightFollowerCounts;
@@ -38,11 +49,16 @@ export class FollowingService {
 
     const fetchPromise = (async () => {
       const counts: Record<string, number> = {};
+      let authoritative = false;
       try {
         const cgSnap = await getDocs(collectionGroup(db, 'following'));
+        authoritative = true;
         cgSnap.docs.forEach(d => {
           const data = d.data();
-          const targetId = (typeof data?.authorId === 'string' && data.authorId.trim()) ? data.authorId.trim() : d.id;
+          const targetId =
+            typeof data?.authorId === 'string' && data.authorId.trim()
+              ? data.authorId.trim()
+              : d.id;
           if (targetId) {
             counts[targetId] = (counts[targetId] || 0) + 1;
           }
@@ -50,8 +66,8 @@ export class FollowingService {
       } catch (err) {
         console.warn('Error querying collectionGroup(following):', err);
       }
-      this.followerCountsCache = { data: counts, ts: Date.now() };
-      return counts;
+      this.followerCountsCache = { data: counts, authoritative, ts: Date.now() };
+      return { counts, authoritative };
     })();
 
     this.inflightFollowerCounts = fetchPromise;
@@ -62,13 +78,18 @@ export class FollowingService {
     }
   }
 
+  public async getAllFollowerCounts(forceRefresh = false): Promise<Record<string, number>> {
+    const res = await this.getAllFollowerCountsDetailed(forceRefresh);
+    return res.counts;
+  }
+
   /**
    * Check if the current user is following an author
    * Path: users/{uid}/following/{authorId}
    */
   public async isFollowing(authorId: string, uid?: string): Promise<boolean> {
     const currentUid = uid || auth.currentUser?.uid;
-    if (!currentUid) return false;
+    if (!currentUid || !authorId || currentUid === authorId) return false;
 
     try {
       const followRef = doc(db, 'users', currentUid, 'following', authorId);
@@ -81,106 +102,159 @@ export class FollowingService {
   }
 
   /**
-   * Toggle follow author
+   * Transactional, race-safe toggle follow author.
+   * Prevents self-following, duplicate follows, and negative follower counts.
    */
   public async toggleFollow(authorId: string, authorName?: string, uid?: string): Promise<boolean> {
     const currentUid = uid || auth.currentUser?.uid;
     if (!currentUid) {
       throw new Error('రచయితలను అనుసరించడానికి (Follow) ముందుగా లాగిన్ చేయండి.');
     }
+    if (!authorId) {
+      throw new Error('చెల్లుబాటు అయ్యే రచయిత ID లేదు.');
+    }
+    if (currentUid === authorId) {
+      throw new Error('మిమ్మల్ని మీరు అనుసరించలేరు.');
+    }
 
-    const followRef = doc(db, 'users', currentUid, 'following', authorId);
-    const snap = await getDoc(followRef);
+    const lockKey = `${currentUid}:${authorId}`;
+    const existing = this.inflightToggles.get(lockKey);
+    if (existing) return existing;
 
-    if (snap.exists()) {
-      // Unfollow
-      await deleteDoc(followRef);
+    const task = (async () => {
+      const followRef = doc(db, 'users', currentUid, 'following', authorId);
+      const currentUserRef = doc(db, 'users', currentUid);
+      const writerRef = doc(db, 'writers', authorId);
+      const authorRef = doc(db, 'authors', authorId);
+      const targetUserRef = doc(db, 'users', authorId);
+
+      const txResult = await runTransaction(db, async (tx) => {
+        const [followSnap, curUserSnap, writerSnap, authorSnap, targetUserSnap] = await Promise.all([
+          tx.get(followRef),
+          tx.get(currentUserRef),
+          tx.get(writerRef),
+          tx.get(authorRef),
+          tx.get(targetUserRef),
+        ]);
+
+        const currentlyFollowing = followSnap.exists();
+        const delta = currentlyFollowing ? -1 : 1;
+        const nextIsFollowing = !currentlyFollowing;
+
+        if (currentlyFollowing) {
+          tx.delete(followRef);
+        } else {
+          tx.set(followRef, sanitizeFirestoreData({
+            authorId,
+            authorName: authorName || '',
+            followerId: currentUid,
+            followedAt: serverTimestamp(),
+            createdAt: serverTimestamp(),
+          }));
+        }
+
+        if (curUserSnap.exists()) {
+          const curFollowing = typeof curUserSnap.data().followingCount === 'number'
+            ? curUserSnap.data().followingCount
+            : 0;
+          tx.update(currentUserRef, sanitizeFirestoreData({
+            followingCount: Math.max(0, curFollowing + delta),
+            updatedAt: serverTimestamp(),
+          }));
+        }
+
+        let updatedFollowersCount = 0;
+
+        if (writerSnap.exists()) {
+          const cur = typeof writerSnap.data().followersCount === 'number'
+            ? writerSnap.data().followersCount
+            : 0;
+          const next = Math.max(0, cur + delta);
+          updatedFollowersCount = Math.max(updatedFollowersCount, next);
+          tx.update(writerRef, sanitizeFirestoreData({
+            followersCount: next,
+            updatedAt: serverTimestamp(),
+          }));
+        }
+
+        if (authorSnap.exists()) {
+          const cur = typeof authorSnap.data().followersCount === 'number'
+            ? authorSnap.data().followersCount
+            : 0;
+          const next = Math.max(0, cur + delta);
+          updatedFollowersCount = Math.max(updatedFollowersCount, next);
+          tx.update(authorRef, sanitizeFirestoreData({
+            followersCount: next,
+            updatedAt: serverTimestamp(),
+          }));
+        }
+
+        if (targetUserSnap.exists()) {
+          const cur = typeof targetUserSnap.data().followersCount === 'number'
+            ? targetUserSnap.data().followersCount
+            : 0;
+          const next = Math.max(0, cur + delta);
+          updatedFollowersCount = Math.max(updatedFollowersCount, next);
+          tx.update(targetUserRef, sanitizeFirestoreData({
+            followersCount: next,
+            updatedAt: serverTimestamp(),
+          }));
+        }
+
+        return { isFollowing: nextIsFollowing, fallbackCount: updatedFollowersCount };
+      });
+
       this.invalidateFollowerCountsCache();
+      const accurateCount = await this.getAuthorFollowersCount(authorId, true);
+      const finalCount = Number.isFinite(accurateCount) ? accurateCount : txResult.fallbackCount;
 
-      // Best-effort counter updates (in parallel, never blocking)
-      await Promise.allSettled([
-        updateDoc(doc(db, 'users', currentUid), sanitizeFirestoreData({
-          followingCount: increment(-1),
-          updatedAt: serverTimestamp(),
-        })),
-        updateDoc(doc(db, 'authors', authorId), sanitizeFirestoreData({
-          followersCount: increment(-1),
-          updatedAt: serverTimestamp(),
-        })),
-        updateDoc(doc(db, 'writers', authorId), sanitizeFirestoreData({
-          followersCount: increment(-1),
-          updatedAt: serverTimestamp(),
-        })),
-        updateDoc(doc(db, 'users', authorId), sanitizeFirestoreData({
-          followersCount: increment(-1),
-          updatedAt: serverTimestamp(),
-        })),
-      ]);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('kathavahini:author-followed', {
+          detail: { authorId, isFollowing: txResult.isFollowing, followersCount: finalCount },
+        }));
+      }
 
-      return false;
-    } else {
-      // Follow
-      await setDoc(followRef, sanitizeFirestoreData({
-        authorId,
-        authorName: authorName || '',
-        followerId: currentUid,
-        followedAt: serverTimestamp(),
-        createdAt: serverTimestamp(),
-      }));
-      this.invalidateFollowerCountsCache();
+      return txResult.isFollowing;
+    })();
 
-      // Best-effort counter updates (in parallel, never blocking)
-      await Promise.allSettled([
-        updateDoc(doc(db, 'users', currentUid), sanitizeFirestoreData({
-          followingCount: increment(1),
-          updatedAt: serverTimestamp(),
-        })),
-        updateDoc(doc(db, 'authors', authorId), sanitizeFirestoreData({
-          followersCount: increment(1),
-          updatedAt: serverTimestamp(),
-        })),
-        updateDoc(doc(db, 'writers', authorId), sanitizeFirestoreData({
-          followersCount: increment(1),
-          updatedAt: serverTimestamp(),
-        })),
-        updateDoc(doc(db, 'users', authorId), sanitizeFirestoreData({
-          followersCount: increment(1),
-          updatedAt: serverTimestamp(),
-        })),
-      ]);
-
-      return true;
+    this.inflightToggles.set(lockKey, task);
+    try {
+      return await task;
+    } finally {
+      this.inflightToggles.delete(lockKey);
     }
   }
 
   /**
-   * Get accurate followers count for an author combining real follow edges and stored counters
+   * Get accurate followers count for an author.
+   * When collectionGroup('following') succeeds, returns exact live edge count (so unfollows decrement cleanly to 0).
    */
   public async getAuthorFollowersCount(authorId: string, forceRefresh = false): Promise<number> {
-    let realEdgeCount = 0;
+    if (!authorId) return 0;
+
     try {
-      const allCounts = await this.getAllFollowerCounts(forceRefresh);
-      realEdgeCount = allCounts[authorId] || 0;
+      const { counts, authoritative } = await this.getAllFollowerCountsDetailed(forceRefresh);
+      if (authoritative) {
+        return Math.max(0, counts[authorId] || 0);
+      }
     } catch {}
 
-    let storedCount = 0;
     try {
-      const [authorSnap, writerSnap, userSnap] = await Promise.all([
-        getDoc(doc(db, 'authors', authorId)).catch(() => null),
+      const [writerSnap, authorSnap, userSnap] = await Promise.all([
         getDoc(doc(db, 'writers', authorId)).catch(() => null),
+        getDoc(doc(db, 'authors', authorId)).catch(() => null),
         getDoc(doc(db, 'users', authorId)).catch(() => null),
       ]);
       const counts = [
-        authorSnap?.exists() && typeof authorSnap.data().followersCount === 'number' ? authorSnap.data().followersCount : 0,
         writerSnap?.exists() && typeof writerSnap.data().followersCount === 'number' ? writerSnap.data().followersCount : 0,
+        authorSnap?.exists() && typeof authorSnap.data().followersCount === 'number' ? authorSnap.data().followersCount : 0,
         userSnap?.exists() && typeof userSnap.data().followersCount === 'number' ? userSnap.data().followersCount : 0,
       ];
-      storedCount = Math.max(0, ...counts);
+      return Math.max(0, ...counts);
     } catch (err) {
       console.warn('Error reading author followers count:', err);
+      return 0;
     }
-
-    return Math.max(realEdgeCount, storedCount);
   }
 
   /**
@@ -197,12 +271,12 @@ export class FollowingService {
       );
       const snap = await getDocs(q);
       return snap.docs.map(d => d.id);
-    } catch (err) {
+    } catch {
       try {
         const snap = await getDocs(collection(db, 'users', currentUid, 'following'));
         return snap.docs.map(d => d.id);
       } catch (e) {
-        console.warn('Error fetching following list:', err);
+        console.warn('Error fetching following list:', e);
         return [];
       }
     }
@@ -210,3 +284,4 @@ export class FollowingService {
 }
 
 export const followingService = new FollowingService();
+

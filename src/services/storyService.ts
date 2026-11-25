@@ -6,6 +6,7 @@ import {
   setDoc,
   deleteDoc,
   updateDoc,
+  runTransaction,
   query,
   where,
   orderBy,
@@ -26,6 +27,49 @@ import { deletionTracker } from './deletionTracker';
 import { resolveContentAuthor } from '../utils/authorResolver';
 
 const GUEST_LIKES_STORAGE_KEY = 'kathavahini_guest_liked_story_ids';
+const VIEW_DEDUP_STORAGE_KEY = 'kathavahini_view_timestamps_v1';
+const VIEW_DEDUP_WINDOW_MS = 30 * 60 * 1000; // 30-minute genuine view deduplication window
+
+function readViewTimestamps(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(VIEW_DEDUP_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeViewTimestamp(key: string, ts: number): void {
+  try {
+    const map = readViewTimestamps();
+    const cutoff = ts - 24 * 60 * 60 * 1000;
+    for (const k of Object.keys(map)) {
+      if (map[k] < cutoff) delete map[k];
+    }
+    map[key] = ts;
+    localStorage.setItem(VIEW_DEDUP_STORAGE_KEY, JSON.stringify(map));
+  } catch {}
+}
+
+function parseTrueRating(data: any): { rating: number; ratingsCount: number } {
+  const count =
+    typeof data.ratingsCount === 'number'
+      ? Math.max(0, data.ratingsCount)
+      : typeof data.ratingCount === 'number'
+      ? Math.max(0, data.ratingCount)
+      : 0;
+  const avg =
+    count > 0 && typeof data.rating === 'number' && data.rating > 0 && data.rating <= 5
+      ? Number(data.rating.toFixed(1))
+      : 0;
+  return { rating: avg, ratingsCount: count };
+}
+
+function readMetricCount(primary: unknown, secondary: unknown): number {
+  const a = typeof primary === 'number' && Number.isFinite(primary) ? primary : 0;
+  const b = typeof secondary === 'number' && Number.isFinite(secondary) ? secondary : 0;
+  return Math.max(0, a, b);
+}
 
 function getGuestLikedIds(): string[] {
   try {
@@ -45,14 +89,47 @@ function setGuestLikedIds(ids: string[]): void {
 class StoryService {
   private publishedCache: { data: Story[]; timestamp: number; uid: string | undefined } | null = null;
   private inflightPublishedPromise: Promise<Story[]> | null = null;
-  private readonly CACHE_TTL_MS = 10000;
+  private inflightViews = new Set<string>();
+  private inflightLikes = new Map<string, Promise<{ isLiked: boolean; newCount: number }>>();
+  private userLikedIdsCache: { uid: string; ids: Set<string>; ts: number } | null = null;
+  private readonly CACHE_TTL_MS = 15000;
 
   public invalidateCache(): void {
     this.publishedCache = null;
   }
 
+  public invalidateUserEngagementCache(): void {
+    this.userLikedIdsCache = null;
+    this.publishedCache = null;
+  }
+
+  private async getUserLikedStoryIds(uid: string): Promise<Set<string>> {
+    if (
+      this.userLikedIdsCache &&
+      this.userLikedIdsCache.uid === uid &&
+      Date.now() - this.userLikedIdsCache.ts < 30000
+    ) {
+      return new Set(this.userLikedIdsCache.ids);
+    }
+    const ids = new Set<string>();
+    try {
+      const snap = await getDocs(collection(db, 'users', uid, 'likedStories'));
+      snap.docs.forEach(d => ids.add(d.id));
+    } catch {}
+    this.userLikedIdsCache = { uid, ids, ts: Date.now() };
+    return new Set(ids);
+  }
+
+  private updatePublishedCacheItem(storyId: string, updater: (s: Story) => Story): void {
+    if (!this.publishedCache) return;
+    this.publishedCache = {
+      ...this.publishedCache,
+      data: this.publishedCache.data.map(s => (s.id === storyId ? updater(s) : s)),
+    };
+  }
+
   /**
-   * Map a Firestore QuerySnapshot directly to Story[] with parallel bookmark & like lookup (zero N+1 sequential waterfalls)
+   * Map a Firestore QuerySnapshot directly to Story[] with 2 batched user queries total (zero N+1 waterfalls)
    */
   private async mapSnapshotToStories(snap: any): Promise<Story[]> {
     const currentUid = auth.currentUser?.uid;
@@ -79,28 +156,20 @@ class StoryService {
       return true;
     });
 
-    // Fetch user bookmarks in ONE batch query instead of N sequential getDoc calls
+    // Fetch user bookmarks and likedStories in TWO single collection queries instead of 60+ N+1 getDoc calls
     const bookmarkedIds = new Set<string>();
-    const likedIds = new Set<string>();
+    let likedIds = new Set<string>();
 
     if (currentUid && validDocs.length > 0) {
       try {
-        const [bmSnap, likeSnaps] = await Promise.all([
+        const [bmSnap, fetchedLikes] = await Promise.all([
           getDocs(collection(db, 'users', currentUid, 'bookmarks')).catch(() => null),
-          Promise.all(
-            validDocs.map((d: any) =>
-              getDoc(doc(db, 'stories', d.id, 'likes', currentUid))
-                .then(s => (s.exists() ? d.id : null))
-                .catch(() => null)
-            )
-          )
+          this.getUserLikedStoryIds(currentUid),
         ]);
         if (bmSnap) {
           bmSnap.docs.forEach((b: any) => bookmarkedIds.add(b.id));
         }
-        likeSnaps.forEach((id: string | null) => {
-          if (id) likedIds.add(id);
-        });
+        likedIds = fetchedLikes;
       } catch (e) {}
     }
 
@@ -111,13 +180,14 @@ class StoryService {
       const visibility = data.visibility || 'public';
       const isBookmarked = currentUid ? bookmarkedIds.has(storyId) : false;
       const isLiked = currentUid ? likedIds.has(storyId) : guestLikes.includes(storyId);
+      const { rating, ratingsCount } = parseTrueRating(data);
 
       return {
         id: storyId,
         title: data.title || '',
         teluguTitle: data.teluguTitle || data.title || '',
         slug: data.slug || 'story',
-        coverImage: data.coverImage || data.coverImageUrl || 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800',
+        coverImage: data.coverImage || data.coverImageUrl || data.coverImageURL || 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800',
         excerpt: data.excerpt || '',
         teluguExcerpt: data.teluguExcerpt || data.excerpt || '',
         content: Array.isArray(data.content) ? data.content : [data.content || ''],
@@ -138,10 +208,11 @@ class StoryService {
         author: resolveContentAuthor({ id: storyId, ...data }),
         category: data.category || data.categoryName || 'జీవితం',
         tags: data.tags || [],
-        rating: typeof data.rating === 'number' ? Number(data.rating.toFixed(1)) : 5.0,
-        viewCount: data.viewsCount || data.viewCount || 0,
-        likeCount: data.likesCount || data.likeCount || 0,
-        bookmarkCount: data.bookmarksCount || data.bookmarkCount || 0,
+        rating,
+        ratingsCount,
+        viewCount: readMetricCount(data.viewsCount, data.viewCount),
+        likeCount: readMetricCount(data.likesCount, data.likeCount),
+        bookmarkCount: readMetricCount(data.bookmarksCount, data.bookmarkCount),
         readingTimeMinutes: data.readingTimeMinutes || 3,
         publishedAt: data.publishedAt instanceof Timestamp ? data.publishedAt.toDate().toISOString().split('T')[0] : (data.publishedAt || new Date().toISOString().split('T')[0]),
         status: status,
@@ -288,45 +359,83 @@ class StoryService {
   }
 
   /**
-   * Record real view for a story with session deduplication
+   * Record genuine story view with 30-minute per-viewer deduplication window and atomic Firestore increment.
+   * Prevents React StrictMode double-fire, rapid refreshes, cross-tab spam, and ghost document creation.
    */
   public async recordStoryView(storyId: string): Promise<number> {
     if (!storyId || deletionTracker.isDeleted(storyId)) return 0;
 
-    const sessionKey = `kathavahini_viewed_${storyId}`;
-    const alreadyViewedInSession = typeof sessionStorage !== 'undefined' && sessionStorage.getItem(sessionKey);
-
-    if (alreadyViewedInSession) {
-      // Return existing view count without artificial inflation
-      const current = await this.getStoryById(storyId);
-      return current?.viewCount || 0;
+    const viewerKey = `${auth.currentUser?.uid || 'guest'}_${storyId}`;
+    if (this.inflightViews.has(viewerKey)) {
+      const cached = this.publishedCache?.data.find(s => s.id === storyId);
+      return cached?.viewCount || 0;
     }
 
+    const now = Date.now();
+    const viewTimestamps = readViewTimestamps();
+    const lastViewedAt = viewTimestamps[viewerKey] || 0;
+    const sessionKey = `kathavahini_viewed_${viewerKey}`;
+    const viewedInSession = typeof sessionStorage !== 'undefined' && sessionStorage.getItem(sessionKey) === '1';
+
+    if (viewedInSession || (lastViewedAt > 0 && now - lastViewedAt < VIEW_DEDUP_WINDOW_MS)) {
+      const cached = this.publishedCache?.data.find(s => s.id === storyId);
+      return cached?.viewCount || 0;
+    }
+
+    this.inflightViews.add(viewerKey);
     try {
-      if (typeof sessionStorage !== 'undefined') {
-        sessionStorage.setItem(sessionKey, 'true');
+      const storyRef = doc(db, 'stories', storyId);
+      const snap = await getDoc(storyRef);
+
+      let targetRef = storyRef;
+      let baseViews = 0;
+
+      if (snap.exists()) {
+        const d = snap.data();
+        if (d.deleted === true || d.status === 'deleted') return 0;
+        baseViews = readMetricCount(d.viewsCount, d.viewCount);
+      } else {
+        const epRef = doc(db, 'episodes', storyId);
+        const epSnap = await getDoc(epRef);
+        if (!epSnap.exists()) {
+          return 0;
+        }
+        const ed = epSnap.data();
+        if (ed.deleted === true || ed.status === 'deleted') return 0;
+        targetRef = epRef;
+        baseViews = readMetricCount(ed.viewsCount, ed.viewCount);
       }
 
-      // Persist real view increment in Firestore
-      const storyRef = doc(db, 'stories', storyId);
-      await setDoc(storyRef, sanitizeFirestoreData({
+      // Mark dedup window right before committing atomic increment
+      if (typeof sessionStorage !== 'undefined') {
+        sessionStorage.setItem(sessionKey, '1');
+      }
+      writeViewTimestamp(viewerKey, now);
+
+      await updateDoc(targetRef, sanitizeFirestoreData({
         viewCount: increment(1),
         viewsCount: increment(1),
         updatedAt: serverTimestamp(),
-      }), { merge: true });
+      }));
 
-      // Notify app in real time
+      const updatedCount = baseViews + 1;
+      this.updatePublishedCacheItem(storyId, s => ({
+        ...s,
+        viewCount: Math.max(s.viewCount || 0, updatedCount),
+      }));
+
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('kathavahini:story-viewed', {
-          detail: { storyId }
+          detail: { storyId, viewCount: updatedCount }
         }));
       }
 
-      const updated = await this.getStoryById(storyId);
-      return updated?.viewCount || 0;
+      return updatedCount;
     } catch (err) {
       console.warn('Error recording view count in Firestore:', err);
       return 0;
+    } finally {
+      this.inflightViews.delete(viewerKey);
     }
   }
 
@@ -399,6 +508,8 @@ class StoryService {
           if (subDoc) resolvedDoc = subDoc;
         }
 
+        const { rating, ratingsCount } = parseTrueRating(data);
+
         return {
           id: snap.id,
           title: data.title || '',
@@ -406,7 +517,7 @@ class StoryService {
           slug: data.slug || 'story',
           subtitle: data.subtitle || data.teluguSubtitle,
           teluguSubtitle: data.teluguSubtitle || data.subtitle,
-          coverImage: data.coverImage || data.coverImageUrl || 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800',
+          coverImage: data.coverImage || data.coverImageUrl || data.coverImageURL || 'https://images.unsplash.com/photo-1457369804613-52c61a468e7d?auto=format&fit=crop&q=80&w=800',
           excerpt: data.excerpt || '',
           teluguExcerpt: data.teluguExcerpt || data.excerpt || '',
           content: resolvedContent,
@@ -420,10 +531,11 @@ class StoryService {
           author: resolveContentAuthor({ id: data.id || id, ...data }),
           category: data.category || data.categoryName || 'జీవితం',
           tags: data.tags || [],
-          rating: typeof data.rating === 'number' ? Number(data.rating.toFixed(1)) : 5.0,
-          viewCount: data.viewsCount || data.viewCount || 0,
-          likeCount: data.likesCount || data.likeCount || 0,
-          bookmarkCount: data.bookmarksCount || data.bookmarkCount || 0,
+          rating,
+          ratingsCount,
+          viewCount: readMetricCount(data.viewsCount, data.viewCount),
+          likeCount: readMetricCount(data.likesCount, data.likeCount),
+          bookmarkCount: readMetricCount(data.bookmarksCount, data.bookmarkCount),
           readingTimeMinutes: data.readingTimeMinutes || 3,
           publishedAt: data.publishedAt instanceof Timestamp ? data.publishedAt.toDate().toISOString().split('T')[0] : (data.publishedAt || ''),
           status: data.status || 'published',
@@ -500,84 +612,127 @@ class StoryService {
   }
 
   /**
-   * Toggle Like for both authenticated and guest readers
-   * Path: stories/{storyId}/likes/{uid} or localStorage for guests
+   * Transactional, race-safe Toggle Like for both authenticated and guest readers.
+   * Prevents duplicate likes, rapid double-click corruption, and negative counts.
    */
   public async toggleLike(storyId: string): Promise<{ isLiked: boolean; newCount: number }> {
-    const user = auth.currentUser;
-    let isLiked = false;
-    let delta = 0;
+    const inflight = this.inflightLikes.get(storyId);
+    if (inflight) return inflight;
 
-    if (!user) {
-      // Real guest like handled with local deduplication + Firestore increment
-      const guestLikes = getGuestLikedIds();
-      if (guestLikes.includes(storyId)) {
-        // Unlike
-        setGuestLikedIds(guestLikes.filter(id => id !== storyId));
-        isLiked = false;
-        delta = -1;
-      } else {
-        // Like
-        guestLikes.push(storyId);
-        setGuestLikedIds(guestLikes);
-        isLiked = true;
-        delta = 1;
-      }
-    } else {
-      // Authenticated user like
-      const likeRef = doc(db, 'stories', storyId, 'likes', user.uid);
-      const likeSnap = await getDoc(likeRef);
-
-      if (likeSnap.exists()) {
-        await deleteDoc(likeRef);
-        // Also remove from user's likedStories index
-        try {
-          await deleteDoc(doc(db, 'users', user.uid, 'likedStories', storyId));
-        } catch {}
-        isLiked = false;
-        delta = -1;
-      } else {
-        await setDoc(likeRef, sanitizeFirestoreData({
-          userId: user.uid,
-          userName: user.displayName || 'పాఠకుడు',
-          likedAt: serverTimestamp(),
-        }), { merge: true });
-        // Also record in user's likedStories index
-        try {
-          await setDoc(doc(db, 'users', user.uid, 'likedStories', storyId), sanitizeFirestoreData({
-            storyId,
-            likedAt: serverTimestamp(),
-          }), { merge: true });
-        } catch {}
-        isLiked = true;
-        delta = 1;
-      }
-    }
-
-    // Save increment/decrement to Firestore story document
-    try {
+    const task = (async () => {
+      const user = auth.currentUser;
       const storyRef = doc(db, 'stories', storyId);
-      await setDoc(storyRef, sanitizeFirestoreData({
-        likesCount: increment(delta),
-        likeCount: increment(delta),
-        updatedAt: serverTimestamp(),
-      }), { merge: true });
-    } catch (e) {
-      console.warn('Silent like count update to Firestore:', e);
-    }
 
-    // Read updated like count
-    const story = await this.getStoryById(storyId);
-    const newCount = Math.max(0, story?.likeCount || 0);
+      let resultIsLiked = false;
+      let resultCount = 0;
 
-    // Broadcast real-time like event
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('kathavahini:story-liked', {
-        detail: { storyId, isLiked, newCount }
+      if (user) {
+        const likeRef = doc(db, 'stories', storyId, 'likes', user.uid);
+        const userLikedRef = doc(db, 'users', user.uid, 'likedStories', storyId);
+
+        const txResult = await runTransaction(db, async (tx) => {
+          const [storySnap, likeSnap] = await Promise.all([
+            tx.get(storyRef),
+            tx.get(likeRef),
+          ]);
+
+          const currentCount = storySnap.exists()
+            ? readMetricCount(storySnap.data().likesCount, storySnap.data().likeCount)
+            : 0;
+
+          if (likeSnap.exists()) {
+            const nextCount = Math.max(0, currentCount - 1);
+            tx.delete(likeRef);
+            tx.delete(userLikedRef);
+            if (storySnap.exists()) {
+              tx.update(storyRef, sanitizeFirestoreData({
+                likesCount: nextCount,
+                likeCount: nextCount,
+                updatedAt: serverTimestamp(),
+              }));
+            }
+            return { isLiked: false, newCount: nextCount };
+          } else {
+            const nextCount = currentCount + 1;
+            tx.set(likeRef, sanitizeFirestoreData({
+              userId: user.uid,
+              userName: user.displayName || 'పాఠకుడు',
+              likedAt: serverTimestamp(),
+            }));
+            tx.set(userLikedRef, sanitizeFirestoreData({
+              storyId,
+              likedAt: serverTimestamp(),
+            }));
+            if (storySnap.exists()) {
+              tx.update(storyRef, sanitizeFirestoreData({
+                likesCount: nextCount,
+                likeCount: nextCount,
+                updatedAt: serverTimestamp(),
+              }));
+            }
+            return { isLiked: true, newCount: nextCount };
+          }
+        });
+
+        resultIsLiked = txResult.isLiked;
+        resultCount = txResult.newCount;
+
+        if (this.userLikedIdsCache && this.userLikedIdsCache.uid === user.uid) {
+          if (resultIsLiked) this.userLikedIdsCache.ids.add(storyId);
+          else this.userLikedIdsCache.ids.delete(storyId);
+        }
+      } else {
+        const guestLikes = getGuestLikedIds();
+        const currentlyLiked = guestLikes.includes(storyId);
+        const delta = currentlyLiked ? -1 : 1;
+        resultIsLiked = !currentlyLiked;
+
+        const nextGuestLikes = currentlyLiked
+          ? guestLikes.filter(id => id !== storyId)
+          : [...guestLikes, storyId];
+        setGuestLikedIds(nextGuestLikes);
+
+        try {
+          resultCount = await runTransaction(db, async (tx) => {
+            const storySnap = await tx.get(storyRef);
+            if (!storySnap.exists()) return Math.max(0, delta);
+            const currentCount = readMetricCount(storySnap.data().likesCount, storySnap.data().likeCount);
+            const nextCount = Math.max(0, currentCount + delta);
+            tx.update(storyRef, sanitizeFirestoreData({
+              likesCount: nextCount,
+              likeCount: nextCount,
+              updatedAt: serverTimestamp(),
+            }));
+            return nextCount;
+          });
+        } catch (err) {
+          console.warn('Guest like transaction fallback:', err);
+          const cached = this.publishedCache?.data.find(s => s.id === storyId);
+          resultCount = Math.max(0, (cached?.likeCount || 0) + delta);
+        }
+      }
+
+      this.updatePublishedCacheItem(storyId, s => ({
+        ...s,
+        isLiked: resultIsLiked,
+        likeCount: resultCount,
       }));
-    }
 
-    return { isLiked, newCount };
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('kathavahini:story-liked', {
+          detail: { storyId, isLiked: resultIsLiked, newCount: resultCount }
+        }));
+      }
+
+      return { isLiked: resultIsLiked, newCount: resultCount };
+    })();
+
+    this.inflightLikes.set(storyId, task);
+    try {
+      return await task;
+    } finally {
+      this.inflightLikes.delete(storyId);
+    }
   }
 
   /**

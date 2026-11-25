@@ -43,12 +43,13 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
 }) => {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+  const [shareFeedback, setShareFeedback] = useState<{ message: string; isError?: boolean } | null>(null);
 
   // Author details resolution
   const resolvedAuthor = resolveContentAuthor(story);
   const authorAvatar = resolveAvatarUrl(resolvedAuthor.avatar, resolvedAuthor.teluguName || resolvedAuthor.name);
   const authorName = getAuthorDisplayName(resolvedAuthor);
+  const isSelfAuthor = Boolean(currentUser?.id && resolvedAuthor.id && currentUser.id === resolvedAuthor.id);
 
   // Determine if viewer can manage/edit this story (Admin or Story Author/Writer)
   const isAdmin = currentUser?.role === 'admin' || currentUser?.email?.toLowerCase() === 'thekathavahini@gmail.com';
@@ -60,24 +61,44 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
   ));
   const canManageStory = Boolean(isAdmin || isOwnerOrAuthor);
 
+  // Genuine view tracking: wait 1.5s dwell before recording (30-min dedup handled in storyService)
   useEffect(() => {
-    if (story?.id) {
+    if (!story?.id) return;
+    const timer = window.setTimeout(() => {
       storyService.recordStoryView(story.id);
-    }
+    }, 1500);
+    return () => window.clearTimeout(timer);
   }, [story?.id]);
 
   const handleShare = async () => {
     try {
+      const shareSummary = story.teluguExcerpt || story.excerpt || '';
+      const formattedText = [
+        shareSummary,
+        authorName ? `By: ${authorName}` : '',
+        'Kathavahini — Telugu Stories',
+      ].filter(Boolean).join('\n');
+
       const result = await shareContent({
         contentType: 'story',
         id: story.id,
-        title: story.teluguTitle,
-        text: story.teluguExcerpt,
+        title: story.teluguTitle || story.title,
+        text: formattedText,
         coverImage: story.coverImage,
       });
 
       if (result.success) {
-        setShareFeedback(result.method === 'clipboard' ? 'కథ లింక్ కాపీ చేయబడింది! (ఎవరైనా లాగిన్ లేకుండానే చదువుకోవచ్చు)' : 'కథ విజయవంతంగా షేర్ చేయబడింది!');
+        setShareFeedback({
+          message: result.method === 'clipboard'
+            ? 'కథ లింక్ కాపీ చేయబడింది! (ఎవరైనా లాగిన్ లేకుండానే చదువుకోవచ్చు)'
+            : 'కథ విజయవంతంగా షేర్ చేయబడింది!',
+        });
+        setTimeout(() => setShareFeedback(null), 3500);
+      } else if (result.method === 'failed') {
+        setShareFeedback({
+          message: 'లింక్ షేర్ చేయడంలో సమస్య ఏర్పడింది. మళ్లీ ప్రయత్నించండి.',
+          isError: true,
+        });
         setTimeout(() => setShareFeedback(null), 3500);
       }
     } catch (e) {
@@ -201,10 +222,20 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
 
           {/* Stats Bar */}
           <div className="flex flex-wrap items-center gap-6 text-xs text-[#6F6970] dark:text-[#AAA4AC] pt-2 border-t border-[#E8E1DA] dark:border-[#2E2D36]">
-            <div className="flex items-center gap-1.5 font-bold text-[#17151A] dark:text-[#F7F3EE]">
-              <Star className="w-4 h-4 text-[#D99A3D] fill-[#D99A3D]" />
-              <span>{story.rating.toFixed(1)} రేటింగ్</span>
-            </div>
+            {story.rating && story.rating > 0 ? (
+              <div className="flex items-center gap-1.5 font-bold text-[#17151A] dark:text-[#F7F3EE]">
+                <Star className="w-4 h-4 text-[#D99A3D] fill-[#D99A3D]" />
+                <span>
+                  {story.rating.toFixed(1)} రేటింగ్
+                  {story.ratingsCount && story.ratingsCount > 0 ? ` (${story.ratingsCount.toLocaleString()})` : ''}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 text-[#6F6970] dark:text-[#AAA4AC]">
+                <Star className="w-4 h-4 text-[#C9C2BA] dark:text-[#52505C]" />
+                <span>రేటింగ్ లేదు</span>
+              </div>
+            )}
 
             <div className="flex items-center gap-1.5">
               <Clock className="w-4 h-4" />
@@ -235,6 +266,9 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
             <StarRating
               storyId={story.id}
               initialRating={story.rating}
+              initialCount={story.ratingsCount || 0}
+              currentUserId={currentUser?.id}
+              currentUserName={currentUser?.teluguName || currentUser?.name}
               size="md"
               showSummary={true}
             />
@@ -285,9 +319,13 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
 
             {/* Share Feedback Toast */}
             {shareFeedback && (
-              <div className="absolute -top-10 right-0 px-4 py-1.5 rounded-full bg-emerald-600 text-white text-xs font-bold shadow-lg animate-fade-in flex items-center gap-1.5">
-                <span>✓</span>
-                <span>{shareFeedback}</span>
+              <div
+                className={`absolute -top-10 right-0 px-4 py-1.5 rounded-full text-white text-xs font-bold shadow-lg animate-fade-in flex items-center gap-1.5 ${
+                  shareFeedback.isError ? 'bg-red-600' : 'bg-emerald-600'
+                }`}
+              >
+                <span>{shareFeedback.isError ? '!' : '✓'}</span>
+                <span>{shareFeedback.message}</span>
               </div>
             )}
           </div>
@@ -296,13 +334,15 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
 
       {/* Author Mini Profile Section */}
       <div 
-        onClick={() => onSelectAuthor(story.author)}
+        onClick={() => onSelectAuthor(resolvedAuthor)}
         className="bg-white dark:bg-[#18181D] rounded-3xl border border-[#E8E1DA] dark:border-[#2E2D36] p-6 sm:p-8 flex flex-col sm:flex-row items-center justify-between gap-6 shadow-sm cursor-pointer hover:border-[#7A284B] transition-colors"
       >
         <div className="flex items-center gap-4 text-center sm:text-left">
           <img
             src={authorAvatar}
             alt={authorName}
+            loading="lazy"
+            decoding="async"
             className="w-16 h-16 rounded-full object-cover ring-2 ring-[#7A284B]"
           />
           <div>
@@ -310,25 +350,27 @@ export const StoryDetailView: React.FC<StoryDetailViewProps> = ({
               {authorName}
             </h3>
             <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] max-w-md font-sans-telugu mt-0.5">
-              {story.author.teluguBio || `${authorName} గారి తెలుగు రచనలు`}
+              {resolvedAuthor.teluguBio || story.author?.teluguBio || `${authorName} గారి తెలుగు రచనలు`}
             </p>
           </div>
         </div>
 
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onFollowAuthorToggle(story.author.id);
-          }}
-          className={`px-5 py-2.5 rounded-full text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-2 ${
-            story.author.isFollowing
-              ? 'bg-[#E8E1DA] dark:bg-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE]'
-              : 'bg-[#7A284B] hover:bg-[#631F3C] dark:bg-[#D87591] text-white shadow-md'
-          }`}
-        >
-          {story.author.isFollowing ? <UserCheck className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
-          <span>{story.author.isFollowing ? 'అనుసరిస్తున్నారు' : 'అనుసరించండి'}</span>
-        </button>
+        {!isSelfAuthor && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onFollowAuthorToggle(resolvedAuthor.id);
+            }}
+            className={`px-5 py-2.5 rounded-full text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-2 ${
+              resolvedAuthor.isFollowing
+                ? 'bg-[#E8E1DA] dark:bg-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE]'
+                : 'bg-[#7A284B] hover:bg-[#631F3C] dark:bg-[#D87591] text-white shadow-md'
+            }`}
+          >
+            {resolvedAuthor.isFollowing ? <UserCheck className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+            <span>{resolvedAuthor.isFollowing ? 'అనుసరిస్తున్నారు' : 'అనుసరించండి'}</span>
+          </button>
+        )}
       </div>
 
       {/* Related Stories */}

@@ -34,54 +34,46 @@ class NovelService {
       return true;
     });
 
-    // Fetch all chapter subcollections in parallel instead of sequentially
-    const novels: Novel[] = await Promise.all(
-      validDocs.map(async (docSnap: any) => {
-        const data = docSnap.data();
-        const novelId = docSnap.id;
+    // Map novels without N+1 chapter subcollection queries (chapters load on demand in NovelDetailView)
+    const novels: Novel[] = validDocs.map((docSnap: any) => {
+      const data = docSnap.data();
+      const novelId = docSnap.id;
+      const ratingsCount =
+        typeof data.ratingsCount === 'number'
+          ? Math.max(0, data.ratingsCount)
+          : typeof data.ratingCount === 'number'
+          ? Math.max(0, data.ratingCount)
+          : 0;
+      const rating =
+        ratingsCount > 0 && typeof data.rating === 'number' && data.rating > 0 && data.rating <= 5
+          ? Number(data.rating.toFixed(1))
+          : 0;
+      const inlineChapters: Chapter[] = Array.isArray(data.chapters) ? data.chapters : [];
 
-        const chapSnap = await getDocs(collection(db, 'novels', novelId, 'chapters')).catch(() => null);
-        const chapters: Chapter[] = chapSnap
-          ? chapSnap.docs
-              .filter(c => !deletionTracker.isDeleted(c.id) && !c.data()?.deleted && c.data()?.status !== 'deleted')
-              .map(c => {
-                const cd = c.data();
-                return {
-                  id: c.id,
-                  chapterNumber: cd.chapterNumber || 1,
-                  title: cd.title || '',
-                  teluguTitle: cd.teluguTitle || cd.title || '',
-                  content: Array.isArray(cd.content) ? cd.content : [cd.content || ''],
-                  readingTimeMinutes: cd.readingTimeMinutes || 5,
-                  publishedAt: cd.publishedAt instanceof Timestamp ? cd.publishedAt.toDate().toISOString().split('T')[0] : (cd.publishedAt || ''),
-                };
-              })
-          : [];
-
-        return {
-          id: novelId,
-          title: data.title || '',
-          teluguTitle: data.teluguTitle || data.title || '',
-          slug: data.slug || 'novel',
-          coverImage: data.coverImage || data.coverImageUrl || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=80&w=800',
-          description: data.description || '',
-          teluguDescription: data.teluguDescription || data.description || '',
-          authorId: data.authorId || '',
-          author: resolveContentAuthor({ id: novelId, ...data }),
-          category: data.category || 'కుటుంబం',
-          tags: data.tags || ['నవల'],
-          status: data.status || 'ongoing',
-          chaptersCount: chapters.length || data.chaptersCount || 1,
-          chapters: chapters.length > 0 ? chapters : (data.chapters || []),
-          rating: data.rating || 5.0,
-          viewCount: data.viewsCount || data.viewCount || 0,
-          likeCount: data.likesCount || data.likeCount || 0,
-          bookmarkCount: data.bookmarksCount || data.bookmarkCount || 0,
-          publishedAt: data.publishedAt instanceof Timestamp ? data.publishedAt.toDate().toISOString().split('T')[0] : (data.publishedAt || ''),
-          updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate().toISOString().split('T')[0] : (data.updatedAt || ''),
-        };
-      })
-    );
+      return {
+        id: novelId,
+        title: data.title || '',
+        teluguTitle: data.teluguTitle || data.title || '',
+        slug: data.slug || 'novel',
+        coverImage: data.coverImage || data.coverImageUrl || data.coverImageURL || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=80&w=800',
+        description: data.description || '',
+        teluguDescription: data.teluguDescription || data.description || '',
+        authorId: data.authorId || '',
+        author: resolveContentAuthor({ id: novelId, ...data }),
+        category: data.category || 'కుటుంబం',
+        tags: data.tags || ['నవల'],
+        status: data.status || 'ongoing',
+        chaptersCount: data.chaptersCount || data.episodeCount || inlineChapters.length || 1,
+        chapters: inlineChapters,
+        rating,
+        ratingsCount,
+        viewCount: Math.max(0, Number(data.viewsCount || 0), Number(data.viewCount || 0)),
+        likeCount: Math.max(0, Number(data.likesCount || 0), Number(data.likeCount || 0)),
+        bookmarkCount: Math.max(0, Number(data.bookmarksCount || 0), Number(data.bookmarkCount || 0)),
+        publishedAt: data.publishedAt instanceof Timestamp ? data.publishedAt.toDate().toISOString().split('T')[0] : (data.publishedAt || ''),
+        updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate().toISOString().split('T')[0] : (data.updatedAt || ''),
+      };
+    });
 
     const map = new Map<string, Novel>();
     MOCK_NOVELS.filter(n => !deletionTracker.isDeleted(n.id)).forEach(n => map.set(n.id, n));
@@ -165,12 +157,23 @@ class NovelService {
           publishedAt: ep.publishedAt || '',
         }));
 
+        const ratingsCount =
+          typeof data.ratingsCount === 'number'
+            ? Math.max(0, data.ratingsCount)
+            : typeof data.ratingCount === 'number'
+            ? Math.max(0, data.ratingCount)
+            : 0;
+        const rating =
+          ratingsCount > 0 && typeof data.rating === 'number' && data.rating > 0 && data.rating <= 5
+            ? Number(data.rating.toFixed(1))
+            : 0;
+
         return {
           id: snap.id,
           title: data.title || '',
           teluguTitle: data.teluguTitle || data.title || '',
           slug: data.slug || 'novel',
-          coverImage: data.coverImage || data.coverImageUrl || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=80&w=800',
+          coverImage: data.coverImage || data.coverImageUrl || data.coverImageURL || 'https://images.unsplash.com/photo-1476275466078-4007374efbbe?auto=format&fit=crop&q=80&w=800',
           description: data.description || '',
           teluguDescription: data.teluguDescription || data.description || '',
           authorId: data.authorId || '',
@@ -180,10 +183,11 @@ class NovelService {
           status: data.status || 'ongoing',
           chaptersCount: chapters.length || data.chaptersCount || 1,
           chapters: chapters.length > 0 ? chapters : (data.chapters || []),
-          rating: data.rating || 5.0,
-          viewCount: data.viewsCount || data.viewCount || 0,
-          likeCount: data.likesCount || data.likeCount || 0,
-          bookmarkCount: data.bookmarksCount || data.bookmarkCount || 0,
+          rating,
+          ratingsCount,
+          viewCount: Math.max(0, Number(data.viewsCount || 0), Number(data.viewCount || 0)),
+          likeCount: Math.max(0, Number(data.likesCount || 0), Number(data.likeCount || 0)),
+          bookmarkCount: Math.max(0, Number(data.bookmarksCount || 0), Number(data.bookmarkCount || 0)),
           publishedAt: data.publishedAt instanceof Timestamp ? data.publishedAt.toDate().toISOString().split('T')[0] : (data.publishedAt || ''),
           updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate().toISOString().split('T')[0] : (data.updatedAt || ''),
         };

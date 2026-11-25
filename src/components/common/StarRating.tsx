@@ -42,9 +42,18 @@ export const StarRating: React.FC<StarRatingProps> = ({
   });
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [showSuccessBadge, setShowSuccessBadge] = useState<boolean>(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
+    setErrorMsg(null);
+    setRatingData({
+      averageRating: initialRating > 0 && initialCount > 0 ? initialRating : 0,
+      ratingsCount: Math.max(0, initialCount),
+      userRating: 0,
+      hasRated: false,
+    });
+
     ratingService.getStoryRating(storyId, currentUserId).then(data => {
       if (isMounted) {
         setRatingData(data);
@@ -68,11 +77,12 @@ export const StarRating: React.FC<StarRatingProps> = ({
       isMounted = false;
       window.removeEventListener('kathavahini:story-rated', handleRatingEvent);
     };
-  }, [storyId, currentUserId]);
+  }, [storyId, currentUserId, initialRating, initialCount]);
 
   const handleRate = async (starValue: number) => {
     if (isSubmitting) return;
     setIsSubmitting(true);
+    setErrorMsg(null);
     try {
       const updated = await ratingService.rateStory(storyId, starValue, currentUserId, currentUserName);
       setRatingData(updated);
@@ -83,6 +93,8 @@ export const StarRating: React.FC<StarRatingProps> = ({
       setTimeout(() => setShowSuccessBadge(false), 3500);
     } catch (err) {
       console.error('Error submitting rating:', err);
+      setErrorMsg('రేటింగ్ సేవ్ చేయడంలో సమస్య ఏర్పడింది. మళ్లీ ప్రయత్నించండి.');
+      setTimeout(() => setErrorMsg(null), 4000);
     } finally {
       setIsSubmitting(false);
     }
@@ -133,6 +145,13 @@ export const StarRating: React.FC<StarRatingProps> = ({
         <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-[#3E8065]/10 text-[#3E8065] dark:bg-[#3E8065]/20 dark:text-[#52B28B] animate-fade-in">
           <CheckCircle2 className="w-3.5 h-3.5" />
           <span>మీ రేటింగ్ సేవ్ చేయబడింది! ధన్యవాదాలు.</span>
+        </div>
+      )}
+
+      {/* Error Feedback Message */}
+      {errorMsg && (
+        <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-red-500/10 text-red-600 dark:text-red-400 animate-fade-in">
+          <span>{errorMsg}</span>
         </div>
       )}
 

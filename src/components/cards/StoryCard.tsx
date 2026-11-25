@@ -135,11 +135,16 @@ export const StoryCard: React.FC<StoryCardProps> = React.memo(({
             <button
               onClick={async (e) => {
                 e.stopPropagation();
+                const formattedText = [
+                  story.teluguExcerpt || story.excerpt || '',
+                  authorName ? `By: ${authorName}` : '',
+                  'Kathavahini — Telugu Stories',
+                ].filter(Boolean).join('\n');
                 const res = await shareContent({
                   contentType: 'story',
                   id: story.id,
-                  title: story.teluguTitle,
-                  text: story.teluguExcerpt,
+                  title: story.teluguTitle || story.title,
+                  text: formattedText,
                   coverImage: story.coverImage,
                 });
                 if (res.success) {

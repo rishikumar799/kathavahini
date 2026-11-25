@@ -17,6 +17,32 @@ import { followingService } from './followingService';
 import { resolveAvatarUrl } from '../utils/avatarUtils';
 
 class AuthorService {
+  private authorsCache: { data: Author[]; uid: string | undefined; ts: number } | null = null;
+  private inflightAuthors: Promise<Author[]> | null = null;
+  private readonly CACHE_TTL_MS = 15_000;
+
+  constructor() {
+    if (typeof window !== 'undefined') {
+      window.addEventListener('kathavahini:author-followed', () => this.invalidateCache());
+    }
+  }
+
+  public invalidateCache(): void {
+    this.authorsCache = null;
+  }
+
+  private hasCustomAvatar(docData: any): boolean {
+    const candidates = [docData?.photoURL, docData?.profileImageURL, docData?.avatar];
+    return candidates.some(
+      (c): c is string =>
+        typeof c === 'string' &&
+        c.trim().length > 0 &&
+        !c.startsWith('blob:') &&
+        (c.startsWith('data:image/') ||
+          (c.startsWith('http') && !c.includes('api.dicebear.com') && !c.includes('ui-avatars.com')))
+    );
+  }
+
   private pickBestAvatar(uData: any, wData: any, aData?: any): string | undefined {
     const candidates = [
       uData?.photoURL,
@@ -37,103 +63,136 @@ class AuthorService {
   }
 
   /**
-   * Fetch all authors from top-level `writers` and `authors` collection
+   * Fetch all authors from top-level `writers` and `authors` collection with caching and dedup
    */
-  public async getAuthors(maxLimit: number = 50): Promise<Author[]> {
-    try {
-      const currentUid = auth.currentUser?.uid;
-
-      // 1. Try querying verified writers + follower counts + user following in parallel
-      const [writersSnap, followedIds, followerCounts] = await Promise.all([
-        getDocs(query(collection(db, 'writers'), limit(maxLimit))),
-        currentUid ? followingService.getUserFollowing(currentUid) : Promise.resolve([] as string[]),
-        followingService.getAllFollowerCounts(),
-      ]);
-
-      if (!writersSnap.empty) {
-        // Check companion users collection in case writer uploaded a custom profile image
-        const usersMap = new Map<string, any>();
-        try {
-          const userDocs = await Promise.all(
-            writersSnap.docs.map(d => getDoc(doc(db, 'users', d.id)).catch(() => null))
-          );
-          userDocs.forEach(ud => {
-            if (ud?.exists()) {
-              usersMap.set(ud.id, ud.data());
-            }
-          });
-        } catch (e) {
-          console.warn('Could not fetch companion user docs for writers:', e);
-        }
-
-        return writersSnap.docs.map(d => {
-          const data = d.data();
-          const authorId = d.id;
-          const uData = usersMap.get(authorId) || {};
-          const candidateAvatar = this.pickBestAvatar(uData, data);
-          const name = data.displayName || data.penName || data.name || uData.displayName || 'రచయిత';
-          const teluguName = data.teluguName || uData.teluguName || data.penName || data.displayName || data.name || 'రచయిత';
-          const realFollowers = Math.max(
-            followerCounts[authorId] || 0,
-            typeof data.followersCount === 'number' ? data.followersCount : 0,
-            typeof uData.followersCount === 'number' ? uData.followersCount : 0
-          );
-          return {
-            id: authorId,
-            name,
-            teluguName,
-            avatar: resolveAvatarUrl(candidateAvatar, teluguName || name),
-            coverImage: data.coverImage || data.coverImageUrl || uData.coverImage || uData.coverImageUrl,
-            bio: data.bio || uData.bio || 'కథావాహిని అధికారిక రచయిత',
-            teluguBio: data.teluguBio || data.bio || uData.teluguBio || uData.bio || 'కథావాహిని అధికారిక రచయిత',
-            followersCount: realFollowers,
-            storiesCount: data.publishedStoriesCount || data.storiesCount || uData.publishedStoriesCount || uData.publishedCount || 0,
-            novelsCount: data.publishedNovelsCount || data.novelsCount || 0,
-            jokesCount: data.jokesCount || 0,
-            isVerified: data.verified !== false,
-            isFollowing: followedIds.includes(authorId),
-            joinedDate: data.createdAt instanceof Timestamp ? data.createdAt.toDate().getFullYear().toString() : '2026',
-            location: data.location || uData.location || 'ఆంధ్రప్రదేశ్ / తెలంగాణ',
-          };
-        });
-      }
-
-      // 2. Fallback to authors collection
-      const snap = await getDocs(query(collection(db, 'authors'), limit(maxLimit)));
-      if (!snap.empty) {
-        return snap.docs.map(d => {
-          const data = d.data();
-          const authorId = d.id;
-          const name = data.name || data.displayName || '';
-          const teluguName = data.teluguName || data.penName || data.displayName || data.name || '';
-          const realFollowers = Math.max(
-            followerCounts[authorId] || 0,
-            typeof data.followersCount === 'number' ? data.followersCount : 0
-          );
-          return {
-            id: authorId,
-            name,
-            teluguName,
-            avatar: resolveAvatarUrl(data.photoURL || data.avatar, teluguName || name),
-            coverImage: data.coverImage || data.coverImageUrl,
-            bio: data.bio || '',
-            teluguBio: data.teluguBio || data.bio || '',
-            followersCount: realFollowers,
-            storiesCount: data.publishedStoriesCount || data.storiesCount || 0,
-            novelsCount: data.publishedNovelsCount || data.novelsCount || 0,
-            jokesCount: data.jokesCount || 0,
-            isVerified: data.isVerified !== undefined ? data.isVerified : true,
-            isFollowing: followedIds.includes(authorId),
-            joinedDate: data.createdAt instanceof Timestamp ? data.createdAt.toDate().getFullYear().toString() : '2026',
-            location: data.location || 'తెలంగాణ / ఆంధ్రప్రదేశ్',
-          };
-        });
-      }
-    } catch (err) {
-      console.warn('Error fetching authors/writers from Firestore:', err);
+  public async getAuthors(maxLimit: number = 50, forceRefresh = false): Promise<Author[]> {
+    const currentUid = auth.currentUser?.uid;
+    if (
+      !forceRefresh &&
+      this.authorsCache &&
+      this.authorsCache.uid === currentUid &&
+      Date.now() - this.authorsCache.ts < this.CACHE_TTL_MS
+    ) {
+      return this.authorsCache.data;
+    }
+    if (!forceRefresh && this.inflightAuthors) {
+      return this.inflightAuthors;
     }
 
-    return MOCK_AUTHORS;
+    const fetchPromise = (async () => {
+      try {
+        const [writersSnap, followedIds, followerResult] = await Promise.all([
+          getDocs(query(collection(db, 'writers'), limit(maxLimit))),
+          currentUid ? followingService.getUserFollowing(currentUid) : Promise.resolve([] as string[]),
+          followingService.getAllFollowerCountsDetailed(forceRefresh),
+        ]);
+        const followerCounts = followerResult.counts;
+        const countsAreAuthoritative = followerResult.authoritative;
+
+        if (!writersSnap.empty) {
+          // Only fetch companion user doc when writer doc lacks a custom avatar or teluguName
+          const usersMap = new Map<string, any>();
+          const needsUserDoc = writersSnap.docs.filter(d => {
+            const w = d.data();
+            return !this.hasCustomAvatar(w) || !w.teluguName;
+          });
+          if (needsUserDoc.length > 0) {
+            try {
+              const userDocs = await Promise.all(
+                needsUserDoc.map(d => getDoc(doc(db, 'users', d.id)).catch(() => null))
+              );
+              userDocs.forEach(ud => {
+                if (ud?.exists()) {
+                  usersMap.set(ud.id, ud.data());
+                }
+              });
+            } catch (e) {
+              console.warn('Could not fetch companion user docs for writers:', e);
+            }
+          }
+
+          const mapped = writersSnap.docs.map(d => {
+            const data = d.data();
+            const authorId = d.id;
+            const uData = usersMap.get(authorId) || {};
+            const candidateAvatar = this.pickBestAvatar(uData, data);
+            const name = data.displayName || data.penName || data.name || uData.displayName || 'రచయిత';
+            const teluguName = data.teluguName || uData.teluguName || data.penName || data.displayName || data.name || 'రచయిత';
+            const realFollowers = countsAreAuthoritative
+              ? Math.max(0, followerCounts[authorId] || 0)
+              : Math.max(
+                  0,
+                  typeof data.followersCount === 'number' ? data.followersCount : 0,
+                  typeof uData.followersCount === 'number' ? uData.followersCount : 0
+                );
+            return {
+              id: authorId,
+              name,
+              teluguName,
+              avatar: resolveAvatarUrl(candidateAvatar, teluguName || name),
+              coverImage: data.coverImage || data.coverImageUrl || uData.coverImage || uData.coverImageUrl,
+              bio: data.bio || uData.bio || 'కథావాహిని అధికారిక రచయిత',
+              teluguBio: data.teluguBio || data.bio || uData.teluguBio || uData.bio || 'కథావాహిని అధికారిక రచయిత',
+              followersCount: realFollowers,
+              storiesCount: data.publishedStoriesCount || data.storiesCount || uData.publishedStoriesCount || uData.publishedCount || 0,
+              novelsCount: data.publishedNovelsCount || data.novelsCount || 0,
+              jokesCount: data.jokesCount || 0,
+              isVerified: data.verified !== false,
+              isFollowing: followedIds.includes(authorId),
+              joinedDate: data.createdAt instanceof Timestamp ? data.createdAt.toDate().getFullYear().toString() : '2026',
+              location: data.location || uData.location || 'ఆంధ్రప్రదేశ్ / తెలంగాణ',
+            };
+          });
+
+          this.authorsCache = { data: mapped, uid: currentUid, ts: Date.now() };
+          return mapped;
+        }
+
+        // 2. Fallback to authors collection
+        const snap = await getDocs(query(collection(db, 'authors'), limit(maxLimit)));
+        if (!snap.empty) {
+          const mapped = snap.docs.map(d => {
+            const data = d.data();
+            const authorId = d.id;
+            const name = data.name || data.displayName || '';
+            const teluguName = data.teluguName || data.penName || data.displayName || data.name || '';
+            const realFollowers = countsAreAuthoritative
+              ? Math.max(0, followerCounts[authorId] || 0)
+              : Math.max(0, typeof data.followersCount === 'number' ? data.followersCount : 0);
+            return {
+              id: authorId,
+              name,
+              teluguName,
+              avatar: resolveAvatarUrl(data.photoURL || data.avatar, teluguName || name),
+              coverImage: data.coverImage || data.coverImageUrl,
+              bio: data.bio || '',
+              teluguBio: data.teluguBio || data.bio || '',
+              followersCount: realFollowers,
+              storiesCount: data.publishedStoriesCount || data.storiesCount || 0,
+              novelsCount: data.publishedNovelsCount || data.novelsCount || 0,
+              jokesCount: data.jokesCount || 0,
+              isVerified: data.isVerified !== undefined ? data.isVerified : true,
+              isFollowing: followedIds.includes(authorId),
+              joinedDate: data.createdAt instanceof Timestamp ? data.createdAt.toDate().getFullYear().toString() : '2026',
+              location: data.location || 'తెలంగాణ / ఆంధ్రప్రదేశ్',
+            };
+          });
+          this.authorsCache = { data: mapped, uid: currentUid, ts: Date.now() };
+          return mapped;
+        }
+      } catch (err) {
+        console.warn('Error fetching authors/writers from Firestore:', err);
+      }
+
+      return MOCK_AUTHORS;
+    })();
+
+    this.inflightAuthors = fetchPromise;
+    try {
+      return await fetchPromise;
+    } finally {
+      this.inflightAuthors = null;
+    }
   }
 
   /**
@@ -146,19 +205,19 @@ class AuthorService {
 
   /**
    * Get single author or user public profile by ID
-   * Merges writers/{id}, authors/{id}, and users/{id} in parallel with real follower count
+   * Merges writers/{id}, authors/{id}, and users/{id} in parallel with authoritative follower count
    */
   public async getAuthorById(id: string): Promise<Author | undefined> {
     if (!id) return undefined;
     const currentUid = auth.currentUser?.uid;
 
     try {
-      const [writerSnap, authorSnap, userSnap, isFollowed, followerCounts] = await Promise.all([
+      const [writerSnap, authorSnap, userSnap, isFollowed, followerResult] = await Promise.all([
         getDoc(doc(db, 'writers', id)).catch(() => null),
         getDoc(doc(db, 'authors', id)).catch(() => null),
         getDoc(doc(db, 'users', id)).catch(() => null),
         currentUid ? followingService.isFollowing(id, currentUid) : Promise.resolve(false),
-        followingService.getAllFollowerCounts(),
+        followingService.getAllFollowerCountsDetailed(),
       ]);
 
       const wData = writerSnap?.exists() ? writerSnap.data() : null;
@@ -188,12 +247,14 @@ class AuthorService {
           name;
 
         const candidateAvatar = this.pickBestAvatar(uData, wData, aData);
-        const realFollowers = Math.max(
-          followerCounts[id] || 0,
-          typeof wData?.followersCount === 'number' ? wData.followersCount : 0,
-          typeof aData?.followersCount === 'number' ? aData.followersCount : 0,
-          typeof uData?.followersCount === 'number' ? uData.followersCount : 0
-        );
+        const realFollowers = followerResult.authoritative
+          ? Math.max(0, followerResult.counts[id] || 0)
+          : Math.max(
+              0,
+              typeof wData?.followersCount === 'number' ? wData.followersCount : 0,
+              typeof aData?.followersCount === 'number' ? aData.followersCount : 0,
+              typeof uData?.followersCount === 'number' ? uData.followersCount : 0
+            );
 
         const createdAt = wData?.createdAt || aData?.createdAt || uData?.createdAt;
 
@@ -234,7 +295,9 @@ class AuthorService {
    * Toggle follow author
    */
   public async toggleFollow(authorId: string): Promise<boolean> {
-    return await followingService.toggleFollow(authorId);
+    const result = await followingService.toggleFollow(authorId);
+    this.invalidateCache();
+    return result;
   }
 
   /**

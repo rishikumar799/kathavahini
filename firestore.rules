@@ -58,6 +58,89 @@ service cloud.firestore {
         isContentOwner(get(/databases/$(database)/documents/novels/$(novelId)).data);
     }
 
+    // Counter integrity helpers (prevent arbitrary client counter tampering)
+    function numOrZero(data, field) {
+      return (field in data && data[field] is number) ? data[field] : 0;
+    }
+
+    function maxNum(a, b) {
+      return a >= b ? a : b;
+    }
+
+    function isValidSingleDelta(field, minDelta, maxDelta) {
+      let changed = field in request.resource.data.diff(resource.data).affectedKeys();
+      let oldVal = numOrZero(resource.data, field);
+      return !changed || (
+        request.resource.data[field] is number &&
+        request.resource.data[field] >= 0 &&
+        (request.resource.data[field] - oldVal) >= minDelta &&
+        (request.resource.data[field] - oldVal) <= maxDelta
+      );
+    }
+
+    function isValidCounterPair(fieldA, fieldB, minDelta, maxDelta) {
+      let affected = request.resource.data.diff(resource.data).affectedKeys();
+      let oldA = numOrZero(resource.data, fieldA);
+      let oldB = numOrZero(resource.data, fieldB);
+      let base = maxNum(oldA, oldB);
+      let okA = !(fieldA in affected) || (
+        request.resource.data[fieldA] is number &&
+        request.resource.data[fieldA] >= 0 && (
+          ((request.resource.data[fieldA] - oldA) >= minDelta && (request.resource.data[fieldA] - oldA) <= maxDelta) ||
+          ((request.resource.data[fieldA] - base) >= minDelta && (request.resource.data[fieldA] - base) <= maxDelta)
+        )
+      );
+      let okB = !(fieldB in affected) || (
+        request.resource.data[fieldB] is number &&
+        request.resource.data[fieldB] >= 0 && (
+          ((request.resource.data[fieldB] - oldB) >= minDelta && (request.resource.data[fieldB] - oldB) <= maxDelta) ||
+          ((request.resource.data[fieldB] - base) >= minDelta && (request.resource.data[fieldB] - base) <= maxDelta)
+        )
+      );
+      return okA && okB;
+    }
+
+    function isValidRatingFields() {
+      let affected = request.resource.data.diff(resource.data).affectedKeys();
+      let okRating = !('rating' in affected) || (
+        request.resource.data.rating is number &&
+        request.resource.data.rating >= 0 &&
+        request.resource.data.rating <= 5
+      );
+      let okSum = !('ratingsSum' in affected) || (
+        request.resource.data.ratingsSum is number &&
+        request.resource.data.ratingsSum >= 0
+      );
+      return okRating && okSum && isValidSingleDelta('ratingsCount', 0, 1);
+    }
+
+    function isSafeFollowerCounterUpdate() {
+      return isAuthenticated()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followersCount', 'updatedAt'])
+        && isValidSingleDelta('followersCount', -1, 1);
+    }
+
+    function isSafeStoryEngagementUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        'viewCount', 'viewsCount',
+        'likeCount', 'likesCount',
+        'rating', 'ratingsCount', 'ratingsSum',
+        'bookmarkCount', 'bookmarksCount',
+        'commentsCount', 'sharesCount', 'updatedAt'
+      ])
+      && isValidCounterPair('viewsCount', 'viewCount', 0, 1)
+      && isValidCounterPair('likesCount', 'likeCount', -1, 1)
+      && isValidCounterPair('bookmarksCount', 'bookmarkCount', -1, 1)
+      && isValidSingleDelta('commentsCount', -1, 1)
+      && isValidSingleDelta('sharesCount', 0, 1)
+      && isValidRatingFields();
+    }
+
+    // Collection-group read for live public follower counts across users/*/following/*
+    match /{path=**}/following/{authorId} {
+      allow read: if true;
+    }
+
     // Canonical Users collection
     match /users/{userId} {
       allow read: if true;
@@ -67,9 +150,7 @@ service cloud.firestore {
         && request.resource.data.uid == userId) || isAdmin();
       allow update: if isAdmin() || (
         isOwner(userId) && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'status', 'uid', 'createdAt']))
-      ) || (
-        isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followersCount', 'updatedAt'])
-      );
+      ) || isSafeFollowerCounterUpdate();
       allow delete: if isAdmin();
 
       // User Subcollections
@@ -77,9 +158,14 @@ service cloud.firestore {
         allow read, write: if isOwner(userId) || isAdmin();
       }
 
+      match /likedStories/{storyId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+
       match /following/{authorId} {
         allow read: if true;
-        allow write: if isOwner(userId) || isAdmin();
+        allow create, update: if (isOwner(userId) && userId != authorId) || isAdmin();
+        allow delete: if isOwner(userId) || isAdmin();
       }
 
       match /readingHistory/{storyId} {
@@ -105,9 +191,7 @@ service cloud.firestore {
     match /writers/{writerId} {
       allow read: if true;
       allow create: if isOwner(writerId) || isAdmin();
-      allow update: if isAdmin() || (isOwner(writerId) && isWriter() && request.resource.data.status == resource.data.status) || (
-        isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followersCount', 'updatedAt'])
-      );
+      allow update: if isAdmin() || (isOwner(writerId) && isWriter() && request.resource.data.status == resource.data.status) || isSafeFollowerCounterUpdate();
       allow delete: if isAdmin();
 
       // Daily Submission Limit Tracker subcollection
@@ -125,9 +209,7 @@ service cloud.firestore {
     match /authors/{authorId} {
       allow read: if true;
       allow create: if isOwner(authorId) || isAdmin();
-      allow update: if isAdmin() || (isOwner(authorId) && isWriter()) || (
-        isAuthenticated() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followersCount', 'updatedAt'])
-      );
+      allow update: if isAdmin() || (isOwner(authorId) && isWriter()) || isSafeFollowerCounterUpdate();
       allow delete: if isAdmin();
     }
 
@@ -160,15 +242,12 @@ service cloud.firestore {
         )
       );
       
-      // Update: Admin can update anything; Writer can only update their own story; Public can update counters
+      // Update: Admin can update anything; Writer can only update their own story; Public can update bounded engagement counters
       allow update: if isAdmin() || (
         isWriter()
         && isContentOwner(resource.data)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['authorId', 'writerId', 'ownerId', 'createdAt', 'approvedAt', 'approvedBy'])
-      ) || (
-        // Allow public like/view/rating/bookmark counter updates
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewCount', 'viewsCount', 'likeCount', 'likesCount', 'rating', 'ratingsCount', 'ratingsSum', 'bookmarkCount', 'bookmarksCount', 'commentsCount', 'sharesCount', 'updatedAt'])
-      );
+      ) || isSafeStoryEngagementUpdate();
       
       // Delete: Admin or Author/Writer owner only
       allow delete: if isAdmin() || (isWriter() && isContentOwner(resource.data));
@@ -220,7 +299,15 @@ service cloud.firestore {
       // Ratings subcollection
       match /ratings/{ratingUid} {
         allow read: if true;
-        allow write: if isAuthenticated() && (request.auth.uid == ratingUid || isAdmin());
+        allow create, update: if isAuthenticated() && (
+          isAdmin() || (
+            request.auth.uid == ratingUid &&
+            request.resource.data.rating is number &&
+            request.resource.data.rating >= 1 &&
+            request.resource.data.rating <= 5
+          )
+        );
+        allow delete: if isAuthenticated() && (request.auth.uid == ratingUid || isAdmin());
       }
     }
 
@@ -249,9 +336,7 @@ service cloud.firestore {
         isWriter()
         && isContentOwner(resource.data)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['authorId', 'writerId', 'ownerId', 'createdAt'])
-      ) || (
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewsCount', 'viewCount', 'likesCount', 'likeCount', 'rating', 'ratingsCount', 'bookmarkCount', 'bookmarksCount', 'updatedAt'])
-      );
+      ) || isSafeStoryEngagementUpdate();
       
       allow delete: if isAdmin() || (isWriter() && isContentOwner(resource.data));
 
@@ -280,9 +365,7 @@ service cloud.firestore {
         isWriter()
         && isContentOwner(resource.data)
         && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['authorId', 'writerId', 'ownerId', 'createdAt'])
-      ) || (
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['viewsCount', 'viewCount', 'likesCount', 'likeCount', 'rating', 'updatedAt'])
-      );
+      ) || isSafeStoryEngagementUpdate();
       
       allow delete: if isAdmin() || (isWriter() && isContentOwner(resource.data));
     }

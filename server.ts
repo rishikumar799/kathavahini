@@ -55,9 +55,30 @@ async function getSharp(): Promise<any | null> {
   return cachedSharpModule;
 }
 
+const ALLOWED_IMAGE_HOSTS = new Set([
+  'firebasestorage.googleapis.com',
+  'storage.googleapis.com',
+  'kathavahini.in',
+  'www.kathavahini.in',
+  'kathavahini-9a9c1.firebasestorage.app',
+  'kathavahini-9a9c1.appspot.com',
+  'images.unsplash.com',
+  'lh3.googleusercontent.com',
+  'api.dicebear.com',
+]);
+
+function isAllowedImageUrl(urlStr: string): boolean {
+  try {
+    const parsed = new URL(urlStr);
+    return parsed.protocol === 'https:' && ALLOWED_IMAGE_HOSTS.has(parsed.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Convert WebP / large images to WhatsApp-universal JPEG (under 250 KB, standard dimensions)
- * so WhatsApp iOS/Android, Facebook, Telegram, LinkedIn, and iMessage always render the thumbnail.
+ * Convert images to WhatsApp-universal JPEG (1200x630 cover / 512x512 avatar)
+ * so WhatsApp iOS/Android, Facebook, Telegram, LinkedIn, and iMessage always render crisp thumbnails.
  * Uses lazy sharp import so the server never crashes if native binaries are unavailable.
  */
 async function toSocialJpeg(
@@ -66,10 +87,6 @@ async function toSocialJpeg(
   kind: 'cover' | 'avatar'
 ): Promise<{ mimeType: string; buf: Buffer }> {
   try {
-    const needsConvert = mimeType !== 'image/jpeg' || buf.length > 260_000;
-    if (!needsConvert) {
-      return { mimeType, buf };
-    }
     const sharpFn = await getSharp();
     if (!sharpFn) {
       return { mimeType, buf };
@@ -77,7 +94,7 @@ async function toSocialJpeg(
     const maxW = kind === 'cover' ? 1200 : 512;
     const maxH = kind === 'cover' ? 630 : 512;
     const converted = await sharpFn(buf)
-      .resize(maxW, maxH, { fit: 'inside', withoutEnlargement: true })
+      .resize(maxW, maxH, { fit: 'cover', position: 'attention' })
       .jpeg({ quality: 84, mozjpeg: true })
       .toBuffer();
     return { mimeType: 'image/jpeg', buf: converted };
@@ -139,14 +156,26 @@ async function startServer() {
 
         if (snap.exists()) {
           const data = snap.data();
-          let cover = data.coverImage || data.coverImageUrl;
+          const isPrivate =
+            data.deleted === true ||
+            data.status === 'deleted' ||
+            data.status === 'draft' ||
+            data.status === 'pending' ||
+            data.status === 'rejected' ||
+            data.visibility === 'hidden' ||
+            data.visibility === 'private';
+          if (isPrivate) {
+            return sendFallbackLogo(res);
+          }
+
+          let cover = data.coverImage || data.coverImageUrl || data.coverImageURL;
 
           // If episode lacks its own cover, check parent novel
           if ((!cover || typeof cover !== 'string') && data.novelId) {
             const parentSnap = await getDoc(doc(db, 'novels', data.novelId));
             if (parentSnap.exists()) {
               const pData = parentSnap.data();
-              cover = pData.coverImage || pData.coverImageUrl;
+              cover = pData.coverImage || pData.coverImageUrl || pData.coverImageURL;
             }
           }
 
@@ -161,20 +190,19 @@ async function startServer() {
                 res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800');
                 return res.status(200).send(finalImg.buf);
               }
-            } else if ((trimmed.startsWith('https://') || trimmed.startsWith('http://')) && !trimmed.startsWith('blob:')) {
-              if (trimmed.toLowerCase().includes('.webp')) {
-                try {
-                  const upstream = await fetch(trimmed);
-                  if (upstream.ok) {
-                    const rawBuf = Buffer.from(await upstream.arrayBuffer());
-                    const finalImg = await toSocialJpeg(rawBuf, 'image/webp', 'cover');
-                    res.setHeader('Content-Type', finalImg.mimeType);
-                    res.setHeader('Content-Length', String(finalImg.buf.length));
-                    res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800');
-                    return res.status(200).send(finalImg.buf);
-                  }
-                } catch {}
-              }
+            } else if (isAllowedImageUrl(trimmed)) {
+              try {
+                const upstream = await fetch(trimmed, { redirect: 'manual' });
+                if (upstream.ok) {
+                  const rawBuf = Buffer.from(await upstream.arrayBuffer());
+                  const contentType = upstream.headers.get('content-type') || 'image/jpeg';
+                  const finalImg = await toSocialJpeg(rawBuf, contentType, 'cover');
+                  res.setHeader('Content-Type', finalImg.mimeType);
+                  res.setHeader('Content-Length', String(finalImg.buf.length));
+                  res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=604800');
+                  return res.status(200).send(finalImg.buf);
+                }
+              } catch {}
               return res.redirect(302, trimmed);
             }
           }

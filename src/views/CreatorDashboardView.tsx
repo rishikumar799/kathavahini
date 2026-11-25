@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Eye, Heart, Users, Feather, TrendingUp, Plus, Clock, CheckCircle2, XCircle, AlertCircle, Sparkles, ShieldCheck,
-  Edit3, Trash2, AlertTriangle, Loader2, Calendar
+  Edit3, Trash2, AlertTriangle, Loader2, Calendar, Bookmark
 } from 'lucide-react';
 import { CreatorStats, Story, User } from '../types';
 import { writerService } from '../services/writerService';
+import { followingService } from '../services/followingService';
 import { formatSafeDate, formatSafeDateTime } from '../utils/dateUtils';
 
 interface CreatorDashboardViewProps {
@@ -30,6 +31,7 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
 }) => {
   const [filterTab, setFilterTab] = useState<'all' | 'pending' | 'published' | 'scheduled' | 'rejected'>('all');
   const [writerStories, setWriterStories] = useState<Story[]>(myStories);
+  const [liveFollowers, setLiveFollowers] = useState<number>(stats.totalFollowers || 0);
   const [dailyLimit, setDailyLimit] = useState<{ canSubmit: boolean; countToday: number; reason?: string }>({
     canSubmit: true,
     countToday: 0,
@@ -53,18 +55,16 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
       if (currentUser?.id && isWriter) {
         setLoading(true);
         try {
-          const [stories, limitCheck] = await Promise.all([
+          const [stories, limitCheck, followersCount] = await Promise.all([
             writerService.getWriterStories(currentUser.id),
             writerService.checkCanSubmitToday(currentUser.id),
+            followingService.getAuthorFollowersCount(currentUser.id, true).catch(() => stats.totalFollowers || 0),
           ]);
 
           if (isMounted) {
-            if (stories.length > 0) {
-              setWriterStories(stories);
-            } else if (myStories && myStories.length > 0) {
-              setWriterStories(myStories);
-            }
+            setWriterStories(stories);
             setDailyLimit(limitCheck);
+            setLiveFollowers(followersCount);
           }
         } catch (e) {
           console.warn('Error loading creator stories:', e);
@@ -74,8 +74,45 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
       }
     }
     loadData();
+
+    const handleView = (e: any) => {
+      const { storyId, viewCount } = e.detail || {};
+      if (!storyId) return;
+      setWriterStories(prev =>
+        prev.map(s =>
+          s.id === storyId
+            ? { ...s, viewCount: typeof viewCount === 'number' ? Math.max(s.viewCount || 0, viewCount) : (s.viewCount || 0) + 1 }
+            : s
+        )
+      );
+    };
+    const handleLike = (e: any) => {
+      const { storyId, newCount } = e.detail || {};
+      if (!storyId || typeof newCount !== 'number') return;
+      setWriterStories(prev => prev.map(s => (s.id === storyId ? { ...s, likeCount: newCount } : s)));
+    };
+    const handleBookmark = (e: any) => {
+      const { storyId, bookmarkCount } = e.detail || {};
+      if (!storyId || typeof bookmarkCount !== 'number') return;
+      setWriterStories(prev => prev.map(s => (s.id === storyId ? { ...s, bookmarkCount } : s)));
+    };
+    const handleFollow = (e: any) => {
+      const { authorId, followersCount } = e.detail || {};
+      if (currentUser?.id && authorId === currentUser.id && typeof followersCount === 'number') {
+        setLiveFollowers(followersCount);
+      }
+    };
+
+    window.addEventListener('kathavahini:story-viewed', handleView);
+    window.addEventListener('kathavahini:story-liked', handleLike);
+    window.addEventListener('kathavahini:story-bookmarked', handleBookmark);
+    window.addEventListener('kathavahini:author-followed', handleFollow);
     return () => {
       isMounted = false;
+      window.removeEventListener('kathavahini:story-viewed', handleView);
+      window.removeEventListener('kathavahini:story-liked', handleLike);
+      window.removeEventListener('kathavahini:story-bookmarked', handleBookmark);
+      window.removeEventListener('kathavahini:author-followed', handleFollow);
     };
   }, [currentUser?.id, isWriter]);
 
@@ -88,6 +125,17 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
   const publishedCount = writerStories.filter(s => s.status === 'published').length;
   const scheduledCount = writerStories.filter(s => s.status === 'scheduled').length;
   const rejectedCount = writerStories.filter(s => s.status === 'rejected').length;
+
+  const liveTotals = useMemo(() => {
+    const reads = writerStories.reduce((acc, s) => acc + Math.max(0, Number(s.viewCount || 0)), 0);
+    const likes = writerStories.reduce((acc, s) => acc + Math.max(0, Number(s.likeCount || 0)), 0);
+    const bookmarks = writerStories.reduce((acc, s) => acc + Math.max(0, Number(s.bookmarkCount || 0)), 0);
+    return {
+      totalReads: writerStories.length > 0 ? reads : (stats.totalReads || 0),
+      totalLikes: writerStories.length > 0 ? likes : (stats.totalLikes || 0),
+      totalBookmarks: writerStories.length > 0 ? bookmarks : (stats.totalBookmarks || 0),
+    };
+  }, [writerStories, stats.totalReads, stats.totalLikes, stats.totalBookmarks]);
 
   return (
     <div className="space-y-8 pb-16">
@@ -195,7 +243,7 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
       )}
 
       {/* Metrics Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <div className="p-6 rounded-3xl bg-white dark:bg-[#18181D] border border-[#E8E1DA] dark:border-[#2E2D36] shadow-sm flex items-center gap-4">
           <div className="p-4 rounded-2xl bg-[#7A284B]/10 text-[#7A284B] dark:text-[#D87591]">
             <Eye className="w-6 h-6" />
@@ -203,7 +251,7 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
           <div>
             <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] font-semibold uppercase">మొత్తం చదువులు (Reads)</p>
             <p className="text-2xl sm:text-3xl font-bold font-serif-telugu text-[#17151A] dark:text-[#F7F3EE] mt-0.5">
-              {stats.totalReads.toLocaleString()}
+              {liveTotals.totalReads.toLocaleString()}
             </p>
           </div>
         </div>
@@ -215,19 +263,31 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
           <div>
             <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] font-semibold uppercase">మొత్తం లైక్‌లు (Likes)</p>
             <p className="text-2xl sm:text-3xl font-bold font-serif-telugu text-[#17151A] dark:text-[#F7F3EE] mt-0.5">
-              {stats.totalLikes.toLocaleString()}
+              {liveTotals.totalLikes.toLocaleString()}
+            </p>
+          </div>
+        </div>
+
+        <div className="p-6 rounded-3xl bg-white dark:bg-[#18181D] border border-[#E8E1DA] dark:border-[#2E2D36] shadow-sm flex items-center gap-4">
+          <div className="p-4 rounded-2xl bg-[#D99A3D]/15 text-[#D99A3D]">
+            <Bookmark className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] font-semibold uppercase">మొత్తం బుక్‌మార్క్‌లు</p>
+            <p className="text-2xl sm:text-3xl font-bold font-serif-telugu text-[#17151A] dark:text-[#F7F3EE] mt-0.5">
+              {liveTotals.totalBookmarks.toLocaleString()}
             </p>
           </div>
         </div>
 
         <div className="p-6 rounded-3xl bg-white dark:bg-[#18181D] border border-[#E8E1DA] dark:border-[#2E2D36] shadow-sm flex items-center gap-4">
           <div className="p-4 rounded-2xl bg-[#3E8065]/10 text-[#3E8065]">
-            <CheckCircle2 className="w-6 h-6" />
+            <Users className="w-6 h-6" />
           </div>
           <div>
-            <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] font-semibold uppercase">ప్రచురితమైన కథలు</p>
+            <p className="text-xs text-[#6F6970] dark:text-[#AAA4AC] font-semibold uppercase">అనుచరులు • కథలు</p>
             <p className="text-2xl sm:text-3xl font-bold font-serif-telugu text-[#17151A] dark:text-[#F7F3EE] mt-0.5">
-              {publishedCount}
+              {liveFollowers.toLocaleString()} <span className="text-xs font-normal text-[#6F6970] dark:text-[#AAA4AC]">/ {publishedCount} కథలు</span>
             </p>
           </div>
         </div>
@@ -310,6 +370,8 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
                   <img
                     src={story.coverImage}
                     alt={story.teluguTitle}
+                    loading="lazy"
+                    decoding="async"
                     className="w-16 h-16 rounded-xl object-cover shrink-0"
                   />
                   <div className="space-y-1">
@@ -358,9 +420,10 @@ export const CreatorDashboardView: React.FC<CreatorDashboardViewProps> = ({
                       </p>
                     )}
 
-                    <div className="flex items-center gap-4 text-xs text-[#6F6970]">
-                      <span><Eye className="w-3.5 h-3.5 inline mr-1" />{story.viewCount} చదువులు</span>
-                      <span><Heart className="w-3.5 h-3.5 inline mr-1" />{story.likeCount} లైక్‌లు</span>
+                    <div className="flex flex-wrap items-center gap-4 text-xs text-[#6F6970]">
+                      <span><Eye className="w-3.5 h-3.5 inline mr-1" />{(story.viewCount || 0).toLocaleString()} చదువులు</span>
+                      <span><Heart className="w-3.5 h-3.5 inline mr-1" />{(story.likeCount || 0).toLocaleString()} లైక్‌లు</span>
+                      <span><Bookmark className="w-3.5 h-3.5 inline mr-1" />{(story.bookmarkCount || 0).toLocaleString()} బుక్‌మార్క్‌లు</span>
                     </div>
                   </div>
                 </div>

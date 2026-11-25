@@ -7,18 +7,21 @@ import { shareContent } from '../../utils/shareUtils';
 
 interface AuthorCardProps {
   author: Author;
+  currentUserId?: string;
   onSelect: (author: Author) => void;
   onFollowToggle?: (authorId: string, e: React.MouseEvent) => void;
 }
 
 export const AuthorCard: React.FC<AuthorCardProps> = React.memo(({
   author,
+  currentUserId,
   onSelect,
   onFollowToggle,
 }) => {
   const [sharedCopied, setSharedCopied] = useState(false);
   const displayName = getAuthorDisplayName(author);
   const avatarUrl = resolveAvatarUrl(author.avatar, displayName);
+  const isSelfAuthor = Boolean(currentUserId && author.id && currentUserId === author.id);
 
   return (
     <div
@@ -84,11 +87,12 @@ export const AuthorCard: React.FC<AuthorCardProps> = React.memo(({
           <button
             onClick={async (e) => {
               e.stopPropagation();
+              const bio = author.teluguBio || author.bio || `${displayName} గారి రచనలు కథావాహినిలో చదవండి`;
               const res = await shareContent({
                 contentType: 'author',
                 id: author.id,
-                title: `${displayName} - రచయిత ప్రొఫైల్ (Kathavahini)`,
-                text: author.teluguBio || `${displayName} గారి రచనలు కథావాహినిలో చదవండి`,
+                title: displayName,
+                text: `${bio}\nWriter on Kathavahini.`,
                 coverImage: author.avatar,
               });
               if (res.success) {
@@ -106,7 +110,7 @@ export const AuthorCard: React.FC<AuthorCardProps> = React.memo(({
             {sharedCopied ? <Check className="w-3.5 h-3.5" /> : <Share2 className="w-3.5 h-3.5" />}
           </button>
 
-          {onFollowToggle && (
+          {onFollowToggle && !isSelfAuthor && (
             <button
               onClick={(e) => onFollowToggle(author.id, e)}
               className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer ${

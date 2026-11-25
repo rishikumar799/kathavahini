@@ -11,6 +11,7 @@ interface AuthorDetailViewProps {
   author: Author;
   authorStories: Story[];
   authorNovels: Novel[];
+  currentUserId?: string;
   onBack: () => void;
   onSelectStory: (story: Story) => void;
   onSelectNovel: (novel: Novel) => void;
@@ -23,6 +24,7 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
   author,
   authorStories,
   authorNovels,
+  currentUserId,
   onBack,
   onSelectStory,
   onSelectNovel,
@@ -31,26 +33,38 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
   onLikeToggle,
 }) => {
   const [activeTab, setActiveTab] = useState<'stories' | 'novels'>('stories');
-  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+  const [shareFeedback, setShareFeedback] = useState<{ message: string; isError?: boolean } | null>(null);
 
   const resolvedName = getAuthorDisplayName(author);
   const resolvedAvatar = resolveAvatarUrl(author.avatar, resolvedName);
   const liveFollowersCount = Math.max(0, author.followersCount || 0);
   const liveStoriesCount = authorStories.length;
   const liveNovelsCount = authorNovels.length;
+  const isSelfAuthor = Boolean(currentUserId && author.id && currentUserId === author.id);
 
   const handleShareProfile = async () => {
     try {
+      const bio = author.teluguBio || author.bio || `${resolvedName} గారి తెలుగు రచనలు కథావాహినిలో చదవండి`;
       const result = await shareContent({
         contentType: 'author',
         id: author.id,
-        title: `${resolvedName} - రచయిత ప్రొఫైల్ (Kathavahini)`,
-        text: author.teluguBio || `${resolvedName} గారి తెలుగు రచనలు కథావాహినిలో చదవండి`,
+        title: resolvedName,
+        text: `${bio}\nWriter on Kathavahini.`,
         coverImage: author.avatar,
       });
 
       if (result.success) {
-        setShareFeedback(result.method === 'clipboard' ? 'ప్రొఫైల్ లింక్ కాపీ చేయబడింది! (ఎవరైనా లాగిన్ లేకుండానే చూడవచ్చు)' : 'ప్రొఫైల్ షేర్ చేయబడింది!');
+        setShareFeedback({
+          message: result.method === 'clipboard'
+            ? 'ప్రొఫైల్ లింక్ కాపీ చేయబడింది! (ఎవరైనా లాగిన్ లేకుండానే చూడవచ్చు)'
+            : 'ప్రొఫైల్ షేర్ చేయబడింది!',
+        });
+        setTimeout(() => setShareFeedback(null), 3500);
+      } else if (result.method === 'failed') {
+        setShareFeedback({
+          message: 'ప్రొఫైల్ లింక్ షేర్ చేయడంలో సమస్య ఏర్పడింది.',
+          isError: true,
+        });
         setTimeout(() => setShareFeedback(null), 3500);
       }
     } catch (e) {
@@ -106,33 +120,40 @@ export const AuthorDetailView: React.FC<AuthorDetailViewProps> = ({
           </div>
 
           <div className="flex items-center gap-3 relative">
-            <button
-              onClick={() => onFollowToggle(author.id)}
-              className={`px-6 py-2.5 rounded-full text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-2 shrink-0 ${
-                author.isFollowing
-                  ? 'bg-[#E8E1DA] dark:bg-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE]'
-                  : 'bg-[#7A284B] hover:bg-[#631F3C] dark:bg-[#D87591] text-white shadow-md'
-              }`}
-            >
-              {author.isFollowing ? <UserCheck className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
-              <span>{author.isFollowing ? 'అనుసరిస్తున్నారు' : 'అనుసరించండి'}</span>
-            </button>
+            {!isSelfAuthor && (
+              <button
+                onClick={() => onFollowToggle(author.id)}
+                className={`px-6 py-2.5 rounded-full text-xs font-bold transition-all cursor-pointer inline-flex items-center gap-2 shrink-0 ${
+                  author.isFollowing
+                    ? 'bg-[#E8E1DA] dark:bg-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE]'
+                    : 'bg-[#7A284B] hover:bg-[#631F3C] dark:bg-[#D87591] text-white shadow-md'
+                }`}
+              >
+                {author.isFollowing ? <UserCheck className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+                <span>{author.isFollowing ? 'అనుసరిస్తున్నారు' : 'అనుసరించండి'}</span>
+              </button>
+            )}
 
             <button
               onClick={handleShareProfile}
               className={`p-2.5 rounded-full border transition-colors cursor-pointer shrink-0 ${
-                shareFeedback
+                shareFeedback && !shareFeedback.isError
                   ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30'
                   : 'border-[#E8E1DA] dark:border-[#2E2D36] text-[#17151A] dark:text-[#F7F3EE] hover:bg-[#FAF7F2] dark:hover:bg-[#222229]'
               }`}
               title="రచయిత ప్రొఫైల్‌ను షేర్ చేయండి"
             >
-              {shareFeedback ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
+              {shareFeedback && !shareFeedback.isError ? <Check className="w-4 h-4" /> : <Share2 className="w-4 h-4" />}
             </button>
 
             {shareFeedback && (
-              <div className="absolute -top-10 right-0 px-3.5 py-1 rounded-full bg-emerald-600 text-white text-xs font-bold shadow-lg animate-fade-in whitespace-nowrap">
-                ✓ {shareFeedback}
+              <div
+                className={`absolute -top-10 right-0 px-3.5 py-1 rounded-full text-white text-xs font-bold shadow-lg animate-fade-in whitespace-nowrap ${
+                  shareFeedback.isError ? 'bg-red-600' : 'bg-emerald-600'
+                }`}
+              >
+                {shareFeedback.isError ? '! ' : '✓ '}
+                {shareFeedback.message}
               </div>
             )}
           </div>

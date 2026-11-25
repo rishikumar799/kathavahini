@@ -434,14 +434,14 @@ export const sharePreview = onRequest(
 
           if (snap.exists) {
             const data = snap.data() || {};
-            let cover = data.coverImage || data.coverImageUrl;
+            let cover = data.coverImage || data.coverImageUrl || data.coverImageURL;
 
             // Episode fallback to parent novel cover
             if ((!cover || typeof cover !== 'string') && data.novelId) {
               const parentNovel = await db.collection('novels').doc(data.novelId).get();
               if (parentNovel.exists) {
                 const pData = parentNovel.data() || {};
-                cover = pData.coverImage || pData.coverImageUrl;
+                cover = pData.coverImage || pData.coverImageUrl || pData.coverImageURL;
               }
             }
 
@@ -583,22 +583,23 @@ export const sharePreview = onRequest(
             const author = sanitizePublicMetaText(
               s.author?.teluguName || s.author?.name || s.teluguName || s.authorName || 'కథావాహిని రచయిత'
             ) || 'కథావాహిని రచయిత';
-            title = `${rawTitle} | రచన: ${author} | కథావాహిని`;
+            title = rawTitle;
 
-            let excerpt = sanitizePublicMetaText(s.teluguExcerpt || s.excerpt || '');
+            let excerpt = sanitizePublicMetaText(s.teluguExcerpt || s.excerpt || s.description || '');
             if (!excerpt && Array.isArray(s.content)) {
-              excerpt = sanitizePublicMetaText(s.content.join(' ')).slice(0, 180);
+              excerpt = sanitizePublicMetaText(s.content.join(' ')).slice(0, 128);
             }
-            description = excerpt
-              ? `${excerpt} - కథావాహినిలో పూర్తి కథను చదవండి.`
-              : `కథావాహినిలో "${rawTitle}" తెలుగు కథను చదవండి. రచయిత: ${author}.`;
+            const cleanExcerpt = excerpt.slice(0, 128);
+            description = cleanExcerpt
+              ? `${cleanExcerpt} — By: ${author}`
+              : `Read "${rawTitle}" on Kathavahini — By: ${author}`;
             contentType = 'article';
 
-            const coverCandidate = s.coverImage || s.coverImageUrl;
+            const coverCandidate = s.coverImage || s.coverImageUrl || s.coverImageURL;
             if (typeof coverCandidate === 'string' && coverCandidate.trim()) {
               const trimmed = coverCandidate.trim();
               if (trimmed.startsWith('data:image/')) {
-                image = `${origin}/api/cover/${encodedId}`;
+                image = `${origin}/api/cover/${encodedId}.jpg`;
                 imageType = detectMimeType(trimmed);
               } else if ((trimmed.startsWith('https://') || trimmed.startsWith('http://')) && !trimmed.startsWith('blob:')) {
                 image = trimmed;
@@ -732,7 +733,7 @@ export const sharePreview = onRequest(
             aData?.name ||
             'కథావాహిని రచయిత';
           const aName = sanitizePublicMetaText(rawName) || 'కథావాహిని రచయిత';
-          title = `${aName} - రచయిత ప్రొఫైల్ | కథావాహిని`;
+          title = aName;
 
           const rawBio =
             uData?.teluguBio ||
@@ -742,10 +743,10 @@ export const sharePreview = onRequest(
             wData?.bio ||
             aData?.bio ||
             '';
-          const cleanBio = sanitizePublicMetaText(rawBio).slice(0, 180);
+          const cleanBio = sanitizePublicMetaText(rawBio).slice(0, 125);
           description = cleanBio
-            ? `${cleanBio} — ${aName} గారి రచనలు కథావాహినిలో చదవండి.`
-            : `${aName} గారి రచయిత ప్రొఫైల్ మరియు తెలుగు రచనలు కథావాహినిలో చూడండి.`;
+            ? `${cleanBio} • Writer on Kathavahini.`
+            : `Writer on Kathavahini. Read original Telugu stories, novels, and series by ${aName}.`;
           contentType = 'profile';
           imageWidth = 512;
           imageHeight = 512;
@@ -814,7 +815,7 @@ export const sharePreview = onRequest(
   <meta name="description" content="${safeDesc}">
 
   <!-- Open Graph (Facebook, WhatsApp, Telegram, LinkedIn) -->
-  <meta property="og:site_name" content="కథావాహిని (Kathavahini)">
+  <meta property="og:site_name" content="Kathavahini — Telugu Stories">
   <meta property="og:type" content="${contentType}">
   <meta property="og:title" content="${safeTitle}">
   <meta property="og:description" content="${safeDesc}">

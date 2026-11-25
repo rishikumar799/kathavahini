@@ -89,7 +89,7 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
   const [showDocViewer, setShowDocViewer] = useState<boolean>(false);
   const [showDeleteModal, setShowDeleteModal] = useState<boolean>(false);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
-  const [shareFeedback, setShareFeedback] = useState<string | null>(null);
+  const [shareFeedback, setShareFeedback] = useState<{ message: string; isError?: boolean } | null>(null);
   const [isUploadingNextPage, setIsUploadingNextPage] = useState<boolean>(false);
   const [uploadPageStatus, setUploadPageStatus] = useState<string | null>(null);
   const nextPageFileInputRef = useRef<HTMLInputElement>(null);
@@ -254,11 +254,14 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
   const hasImagePages = story.contentType === 'image_pages' && story.imagePages && story.imagePages.length > 0;
   const hasMixedBlocks = story.contentType === 'mixed' && story.contentBlocks && story.contentBlocks.length > 0;
 
-  // Record real view on mount and fetch full reassembled story content
+  // Record genuine view after 1.5s dwell (30-min dedup handled in storyService) and fetch full reassembled story content
   useEffect(() => {
     let isMounted = true;
+    let viewTimer: number | undefined;
     if (story?.id) {
-      storyService.recordStoryView(story.id);
+      viewTimer = window.setTimeout(() => {
+        storyService.recordStoryView(story.id);
+      }, 1500);
 
       // Seamlessly fetch full reassembled content chunks
       if (!resolvedContent || resolvedContent.length === 0 || (resolvedContent.length === 1 && !resolvedContent[0])) {
@@ -276,6 +279,7 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
     }
     return () => {
       isMounted = false;
+      if (viewTimer) window.clearTimeout(viewTimer);
     };
   }, [story?.id]);
 
@@ -342,15 +346,31 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
   const handleShare = async () => {
     try {
       const isNovelEpisode = Boolean((story as any).novelId || (story as any).parentNovelId || activeCtx);
+      const formattedText = [
+        story.teluguExcerpt || story.excerpt || '',
+        authorName ? `By: ${authorName}` : '',
+        'Kathavahini — Telugu Stories',
+      ].filter(Boolean).join('\n');
+
       const result = await shareContent({
         contentType: isNovelEpisode ? 'episode' : 'story',
         id: story.id,
-        title: story.teluguTitle,
-        text: story.teluguExcerpt || story.excerpt,
+        title: story.teluguTitle || story.title,
+        text: formattedText,
         coverImage: story.coverImage,
       });
       if (result.success) {
-        setShareFeedback(result.method === 'clipboard' ? 'లింక్ కాపీ చేయబడింది! (ఎవరైనా లాగిన్ లేకుండానే చదువుకోవచ్చు)' : 'షేర్ విజయవంతమైంది!');
+        setShareFeedback({
+          message: result.method === 'clipboard'
+            ? 'లింక్ కాపీ చేయబడింది! (ఎవరైనా లాగిన్ లేకుండానే చదువుకోవచ్చు)'
+            : 'షేర్ విజయవంతమైంది!',
+        });
+        setTimeout(() => setShareFeedback(null), 3500);
+      } else if (result.method === 'failed') {
+        setShareFeedback({
+          message: 'లింక్ షేర్ చేయడంలో సమస్య ఏర్పడింది.',
+          isError: true,
+        });
         setTimeout(() => setShareFeedback(null), 3500);
       }
     } catch (e) {
@@ -788,6 +808,8 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
                     <img
                       src={block.imageUrl}
                       alt={block.caption || 'కథ చిత్రం'}
+                      loading="lazy"
+                      decoding="async"
                       className="rounded-2xl max-h-[600px] w-auto mx-auto object-contain shadow-md"
                     />
                     {block.caption && (
@@ -911,6 +933,7 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
             <StarRating
               storyId={story.id}
               initialRating={story.rating}
+              initialCount={story.ratingsCount || 0}
               currentUserId={currentUser?.id}
               currentUserName={currentUser?.teluguName || currentUser?.name}
               size="md"
@@ -939,14 +962,21 @@ export const StoryReaderView: React.FC<StoryReaderViewProps> = ({
                 <Share2 className="w-4 h-4" />
                 <span>షేర్</span>
               </button>
-              {shareFeedback && (
-                <div className="absolute -top-10 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-emerald-600 text-white text-xs font-bold whitespace-nowrap shadow-lg animate-fade-in">
-                  ✓ {shareFeedback}
-                </div>
-              )}
             </div>
           </div>
         </div>
+
+        {/* Fixed Share Feedback Toast (works from both ReaderToolbar and bottom share button) */}
+        {shareFeedback && (
+          <div
+            className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-full text-white text-xs font-bold whitespace-nowrap shadow-xl animate-fade-in ${
+              shareFeedback.isError ? 'bg-red-600' : 'bg-emerald-600'
+            }`}
+          >
+            {shareFeedback.isError ? '! ' : '✓ '}
+            {shareFeedback.message}
+          </div>
+        )}
 
         {/* Reader Comments Section */}
         <section className="space-y-6 pt-4">

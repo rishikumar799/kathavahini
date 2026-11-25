@@ -274,10 +274,17 @@ class AdminService {
           },
           category: data.category || 'జీవితం',
           tags: data.tags || [],
-          rating: data.rating || 5.0,
-          viewCount: data.viewCount || 0,
-          likeCount: data.likeCount || 0,
-          bookmarkCount: data.bookmarkCount || 0,
+          rating:
+            (typeof data.ratingsCount === 'number' ? data.ratingsCount : (typeof data.ratingCount === 'number' ? data.ratingCount : 0)) > 0 &&
+            typeof data.rating === 'number' &&
+            data.rating > 0 &&
+            data.rating <= 5
+              ? Number(data.rating.toFixed(1))
+              : 0,
+          ratingsCount: typeof data.ratingsCount === 'number' ? Math.max(0, data.ratingsCount) : (typeof data.ratingCount === 'number' ? Math.max(0, data.ratingCount) : 0),
+          viewCount: Math.max(0, Number(data.viewsCount || 0), Number(data.viewCount || 0)),
+          likeCount: Math.max(0, Number(data.likesCount || 0), Number(data.likeCount || 0)),
+          bookmarkCount: Math.max(0, Number(data.bookmarksCount || 0), Number(data.bookmarkCount || 0)),
           readingTimeMinutes: data.readingTimeMinutes || 3,
           publishedAt: data.publishedAt || '',
           status: data.status || 'published',
@@ -388,10 +395,15 @@ class AdminService {
       },
       category: storyData.category || 'జీవితం',
       tags: storyData.tags || ['తెలుగు', 'కథ'],
-      rating: 5.0,
+      rating: 0,
+      ratingsCount: 0,
+      ratingsSum: 0,
       viewCount: 0,
+      viewsCount: 0,
       likeCount: 0,
+      likesCount: 0,
       bookmarkCount: 0,
+      bookmarksCount: 0,
       publishedAt: status === 'published' ? todayString : '',
       status,
       visibility,
@@ -865,7 +877,8 @@ class AdminService {
       chaptersCount: 0,
       episodeCount: 0,
       chapters: [],
-      rating: 5.0,
+      rating: 0,
+      ratingsCount: 0,
       viewCount: 0,
       likeCount: 0,
       bookmarkCount: 0,

@@ -10,24 +10,28 @@ interface LibraryViewProps {
   savedStories: Story[];
   savedNovels: Novel[];
   readingHistory: ReadingHistoryItem[];
+  likedStories?: Story[];
   onSelectStory: (story: Story) => void;
   onSelectNovel: (novel: Novel) => void;
   onSelectTab: (tab: string) => void;
   onBookmarkToggle: (storyId: string, e: React.MouseEvent) => void;
+  onLikeToggle?: (storyId: string, e: React.MouseEvent) => void;
 }
 
 export const LibraryView: React.FC<LibraryViewProps> = ({
   savedStories,
   savedNovels,
   readingHistory,
+  likedStories: propLikedStories,
   onSelectStory,
   onSelectNovel,
   onSelectTab,
   onBookmarkToggle,
+  onLikeToggle,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'saved' | 'history' | 'liked'>('saved');
 
-  const likedStories = savedStories.filter(s => s.isLiked);
+  const likedStories = propLikedStories ?? savedStories.filter(s => s.isLiked);
 
   return (
     <div className="space-y-8 pb-12">
@@ -105,6 +109,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                     story={story}
                     onSelect={onSelectStory}
                     onBookmarkToggle={onBookmarkToggle}
+                    onLikeToggle={onLikeToggle}
                   />
                 ))}
               </div>
@@ -175,6 +180,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                   story={story}
                   onSelect={onSelectStory}
                   onBookmarkToggle={onBookmarkToggle}
+                  onLikeToggle={onLikeToggle}
                 />
               ))}
             </div>

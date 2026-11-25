@@ -378,11 +378,25 @@ export default function App() {
   }, [currentTab, user?.id, user?.role, user?.status]);
 
   // Parallel fetch for secondary non-subscribed data (authors + user personal data)
-  // Stories, Novels, and Jokes are populated directly via their single-query real-time subscriptions below.
-  const loadAuxiliaryData = async () => {
+  // Skips private user queries when logged out to eliminate wasted Firestore reads for guests.
+  const loadAuxiliaryData = async (activeUid?: string | null) => {
     try {
+      const uid = activeUid !== undefined ? activeUid : authService.getCurrentUser()?.id;
+      const allAuthorsPromise = authorService.getAuthors().catch(() => []);
+
+      if (!uid) {
+        const allAuthors = await allAuthorsPromise;
+        setAuthors(allAuthors);
+        setSavedStories([]);
+        setSavedNovels([]);
+        setReadingHistory([]);
+        setNotifications([]);
+        setCreatorStats(null);
+        return;
+      }
+
       const [allAuthors, savedSt, savedNov, history, notifs, stats] = await Promise.all([
-        authorService.getAuthors().catch(() => []),
+        allAuthorsPromise,
         libraryService.getSavedStories().catch(() => []),
         libraryService.getSavedNovels().catch(() => []),
         libraryService.getReadingHistory().catch(() => []),
@@ -400,20 +414,22 @@ export default function App() {
     }
   };
 
-  // Explicit refresh helper (used after publish/edit/login) — runs in parallel without 6x duplicate story queries
+  // Explicit refresh helper (used after publish/edit/login) — runs in parallel without duplicate story queries
   const loadData = async () => {
     try {
       storyService.invalidateCache();
+      authorService.invalidateCache();
+      const uid = authService.getCurrentUser()?.id;
       const [published, allNovels, allJokes, allAuthors, savedSt, savedNov, history, notifs, stats] = await Promise.all([
         storyService.getAllPublishedStories(60, true).catch(() => []),
         novelService.getFeaturedNovels().catch(() => []),
         jokeService.getJokes().catch(() => []),
-        authorService.getAuthors().catch(() => []),
-        libraryService.getSavedStories().catch(() => []),
-        libraryService.getSavedNovels().catch(() => []),
-        libraryService.getReadingHistory().catch(() => []),
-        userService.getNotifications().catch(() => []),
-        userService.getCreatorStats().catch(() => null),
+        authorService.getAuthors(50, true).catch(() => []),
+        uid ? libraryService.getSavedStories().catch(() => []) : Promise.resolve([]),
+        uid ? libraryService.getSavedNovels().catch(() => []) : Promise.resolve([]),
+        uid ? libraryService.getReadingHistory().catch(() => []) : Promise.resolve([]),
+        uid ? userService.getNotifications().catch(() => []) : Promise.resolve([]),
+        uid ? userService.getCreatorStats().catch(() => null) : Promise.resolve(null),
       ]);
 
       setAllStories(published);
@@ -433,6 +449,31 @@ export default function App() {
     }
   };
 
+  // Re-sync private user data (bookmarks, likes, reading history, following flags) whenever user signs in or out
+  const lastAuthUidRef = React.useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (authLoading) return;
+    const currentUid = user?.id || null;
+    if (lastAuthUidRef.current === currentUid) return;
+    const isInitialAuthResolution = lastAuthUidRef.current === undefined;
+    lastAuthUidRef.current = currentUid;
+
+    if (!isInitialAuthResolution || currentUid) {
+      storyService.invalidateCache();
+      authorService.invalidateCache();
+      loadAuxiliaryData(currentUid);
+      // Re-hydrate per-user like/bookmark flags on visible stories
+      storyService.getAllPublishedStories(60, true).then((published) => {
+        if (published.length > 0) {
+          setAllStories(published);
+          setTrendingStories([...published].sort((a, b) => (b.viewCount || 0) - (a.viewCount || 0)));
+          setPopularStories([...published].sort((a, b) => (b.likeCount || 0) - (a.likeCount || 0)));
+          setNewReleases([...published].sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime()));
+        }
+      }).catch(() => {});
+    }
+  }, [user?.id, authLoading]);
+
   useEffect(() => {
     loadAuxiliaryData();
 
@@ -450,7 +491,11 @@ export default function App() {
           curr.teluguTitle === exists.teluguTitle &&
           curr.likeCount === exists.likeCount &&
           curr.viewCount === exists.viewCount &&
+          curr.bookmarkCount === exists.bookmarkCount &&
           curr.rating === exists.rating &&
+          curr.ratingsCount === exists.ratingsCount &&
+          curr.isLiked === exists.isLiked &&
+          curr.isBookmarked === exists.isBookmarked &&
           curr.coverImage === exists.coverImage &&
           curr.status === exists.status
         ) {
@@ -534,28 +579,107 @@ export default function App() {
     };
 
     const handleStoryRated = (e: any) => {
-      const { storyId, rating } = e.detail || {};
+      const { storyId, rating, ratingsCount } = e.detail || {};
       if (!storyId) return;
       const updateStoryRating = (list: Story[]) =>
-        list.map(s => s.id === storyId ? { ...s, rating } : s);
+        list.map(s =>
+          s.id === storyId
+            ? { ...s, rating, ...(typeof ratingsCount === 'number' ? { ratingsCount } : {}) }
+            : s
+        );
       setAllStories(updateStoryRating);
       setTrendingStories(updateStoryRating);
       setPopularStories(updateStoryRating);
       setNewReleases(updateStoryRating);
       setSavedStories(updateStoryRating);
-      setSelectedStory(curr => (curr && curr.id === storyId ? { ...curr, rating } : curr));
+      setSelectedStory(curr =>
+        curr && curr.id === storyId
+          ? { ...curr, rating, ...(typeof ratingsCount === 'number' ? { ratingsCount } : {}) }
+          : curr
+      );
     };
 
     const handleStoryViewed = (e: any) => {
-      const { storyId } = e.detail || {};
+      const { storyId, viewCount } = e.detail || {};
       if (!storyId) return;
-      const updateView = (list: Story[]) =>
-        list.map(s => s.id === storyId ? { ...s, viewCount: (s.viewCount || 0) + 1 } : s);
+      const applyView = (s: Story) => {
+        if (s.id !== storyId) return s;
+        const nextCount = typeof viewCount === 'number'
+          ? Math.max(s.viewCount || 0, viewCount)
+          : (s.viewCount || 0) + 1;
+        return { ...s, viewCount: nextCount };
+      };
+      const updateView = (list: Story[]) => list.map(applyView);
       setAllStories(updateView);
       setTrendingStories(updateView);
       setPopularStories(updateView);
       setNewReleases(updateView);
-      setSelectedStory(curr => (curr && curr.id === storyId ? { ...curr, viewCount: (curr.viewCount || 0) + 1 } : curr));
+      setSelectedStory(curr => (curr && curr.id === storyId ? applyView(curr) : curr));
+    };
+
+    const handleStoryBookmarked = (e: any) => {
+      const { storyId, isBookmarked, bookmarkCount } = e.detail || {};
+      if (!storyId) return;
+      const updateBm = (list: Story[]) =>
+        list.map(s =>
+          s.id === storyId
+            ? {
+                ...s,
+                isBookmarked: Boolean(isBookmarked),
+                ...(typeof bookmarkCount === 'number' ? { bookmarkCount } : {}),
+              }
+            : s
+        );
+      setAllStories(updateBm);
+      setTrendingStories(updateBm);
+      setPopularStories(updateBm);
+      setNewReleases(updateBm);
+      setSelectedStory(curr =>
+        curr && curr.id === storyId
+          ? {
+              ...curr,
+              isBookmarked: Boolean(isBookmarked),
+              ...(typeof bookmarkCount === 'number' ? { bookmarkCount } : {}),
+            }
+          : curr
+      );
+    };
+
+    const handleAuthorFollowed = (e: any) => {
+      const { authorId, isFollowing, followersCount } = e.detail || {};
+      if (!authorId) return;
+      setAuthors(prev =>
+        prev.map(a =>
+          a.id === authorId
+            ? {
+                ...a,
+                isFollowing: Boolean(isFollowing),
+                ...(typeof followersCount === 'number' ? { followersCount } : {}),
+              }
+            : a
+        )
+      );
+      setSelectedAuthor(curr =>
+        curr && curr.id === authorId
+          ? {
+              ...curr,
+              isFollowing: Boolean(isFollowing),
+              ...(typeof followersCount === 'number' ? { followersCount } : {}),
+            }
+          : curr
+      );
+      setSelectedStory(curr =>
+        curr && (curr.authorId === authorId || curr.author?.id === authorId) && curr.author
+          ? {
+              ...curr,
+              author: {
+                ...curr.author,
+                isFollowing: Boolean(isFollowing),
+                ...(typeof followersCount === 'number' ? { followersCount } : {}),
+              },
+            }
+          : curr
+      );
     };
 
     window.addEventListener('kathavahini:story-deleted', handleStoryDeleted);
@@ -564,6 +688,8 @@ export default function App() {
     window.addEventListener('kathavahini:story-liked', handleStoryLiked);
     window.addEventListener('kathavahini:story-rated', handleStoryRated);
     window.addEventListener('kathavahini:story-viewed', handleStoryViewed);
+    window.addEventListener('kathavahini:story-bookmarked', handleStoryBookmarked);
+    window.addEventListener('kathavahini:author-followed', handleAuthorFollowed);
 
     // Event listeners for novel and episode navigation across views
     const handleNavigateEpisode = (e: any) => {
@@ -771,6 +897,8 @@ export default function App() {
       window.removeEventListener('kathavahini:story-liked', handleStoryLiked);
       window.removeEventListener('kathavahini:story-rated', handleStoryRated);
       window.removeEventListener('kathavahini:story-viewed', handleStoryViewed);
+      window.removeEventListener('kathavahini:story-bookmarked', handleStoryBookmarked);
+      window.removeEventListener('kathavahini:author-followed', handleAuthorFollowed);
       window.removeEventListener('kathavahini:navigate-episode', handleNavigateEpisode);
       window.removeEventListener('kathavahini:open-novel-detail', handleOpenNovelDetail);
     };
@@ -906,6 +1034,9 @@ export default function App() {
       handleRequireAuth('రచయితలను అనుసరించడానికి (Follow) ముందుగా లాగిన్ చేయండి.', 'login');
       return;
     }
+    if (user.id === authorId) {
+      return;
+    }
 
     // Optimistic update for instant UI feedback across author cards, AuthorDetailView, and StoryDetailView
     const existing = authors.find(a => a.id === authorId) || (selectedAuthor?.id === authorId ? selectedAuthor : null);
@@ -1026,8 +1157,20 @@ export default function App() {
   };
 
   const creatorStudioStories = React.useMemo(() => {
-    return trendingStories.slice(0, 5);
-  }, [trendingStories]);
+    if (!user?.id) return [];
+    return allStories.filter(s => doesContentBelongToAuthor(s, user.id));
+  }, [allStories, user?.id, doesContentBelongToAuthor]);
+
+  const likedStoriesForLibrary = React.useMemo(() => {
+    const byId = new Map<string, Story>();
+    for (const s of allStories) {
+      if (s.isLiked) byId.set(s.id, s);
+    }
+    for (const s of savedStories) {
+      if (s.isLiked && !byId.has(s.id)) byId.set(s.id, s);
+    }
+    return Array.from(byId.values());
+  }, [allStories, savedStories]);
 
   const relatedStoriesForSelected = React.useMemo(() => {
     if (!selectedStory) return [];
@@ -1253,6 +1396,7 @@ export default function App() {
         return (
           <AuthorsView
             authors={authorsWithStats}
+            currentUserId={user?.id}
             onSelectAuthor={handleSelectAuthor}
             onFollowToggle={handleFollowAuthorToggle}
           />
@@ -1285,6 +1429,7 @@ export default function App() {
             author={activeAuthor}
             authorStories={matchedAuthorStories}
             authorNovels={matchedAuthorNovels}
+            currentUserId={user?.id}
             onBack={() => setCurrentTab('authors')}
             onSelectStory={handleSelectStory}
             onSelectNovel={handleSelectNovel}
@@ -1311,10 +1456,12 @@ export default function App() {
             savedStories={savedStories}
             savedNovels={savedNovels}
             readingHistory={readingHistory}
+            likedStories={likedStoriesForLibrary}
             onSelectStory={handleSelectStory}
             onSelectNovel={handleSelectNovel}
             onSelectTab={setCurrentTab}
             onBookmarkToggle={handleBookmarkToggle}
+            onLikeToggle={handleLikeToggle}
           />
         );
 
@@ -1367,9 +1514,9 @@ export default function App() {
             />
           );
         }
-        return creatorStats ? (
+        return (
           <CreatorDashboardView
-            stats={creatorStats}
+            stats={creatorStats || { totalReads: 0, totalLikes: 0, totalFollowers: 0, totalBookmarks: 0, monthlyReadsTrend: [], topStories: [] }}
             currentUser={user}
             myStories={creatorStudioStories}
             onOpenWrite={() => setIsWriteOpen(true)}
@@ -1378,7 +1525,7 @@ export default function App() {
             onEditStory={handleEditStory}
             onDeleteStory={handleDeleteStory}
           />
-        ) : null;
+        );
       }
 
       case 'apply-writer':

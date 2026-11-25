@@ -1,16 +1,11 @@
-import { 
-  doc, 
-  getDoc, 
-  setDoc, 
-  updateDoc, 
-  increment, 
+import {
+  doc,
+  getDoc,
+  runTransaction,
   serverTimestamp,
-  collection,
-  getDocs
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { sanitizeFirestoreData } from '../utils/firestoreSanitizer';
-import { MOCK_STORIES } from './mockData';
 
 export interface StoryRatingData {
   averageRating: number;
@@ -22,9 +17,8 @@ export interface StoryRatingData {
 const GUEST_RATINGS_STORAGE_KEY = 'kathavahini_guest_story_ratings';
 
 class RatingService {
-  /**
-   * Get the guest ratings dictionary from localStorage
-   */
+  private inflightRatings = new Map<string, Promise<StoryRatingData>>();
+
   private getGuestRatings(): Record<string, number> {
     try {
       const stored = localStorage.getItem(GUEST_RATINGS_STORAGE_KEY);
@@ -34,9 +28,6 @@ class RatingService {
     }
   }
 
-  /**
-   * Save a guest rating to localStorage
-   */
   private saveGuestRating(storyId: string, rating: number): void {
     try {
       const current = this.getGuestRatings();
@@ -46,206 +37,177 @@ class RatingService {
   }
 
   /**
-   * Fetch current rating details for a story, including the current user's rating
+   * Fetch accurate rating details for a story. Never defaults unrated stories to 5.0.
    */
   public async getStoryRating(storyId: string, customUid?: string): Promise<StoryRatingData> {
     const currentUid = customUid || auth.currentUser?.uid;
     let userRating = 0;
 
-    // Check user's individual rating
     if (currentUid) {
       try {
         const ratingDoc = await getDoc(doc(db, 'stories', storyId, 'ratings', currentUid));
         if (ratingDoc.exists()) {
-          userRating = ratingDoc.data().rating || 0;
+          const val = Number(ratingDoc.data().rating || 0);
+          userRating = val >= 1 && val <= 5 ? val : 0;
         }
       } catch (err) {
         console.warn('Error fetching user rating:', err);
       }
     } else {
       const guestRatings = this.getGuestRatings();
-      userRating = guestRatings[storyId] || 0;
+      const val = Number(guestRatings[storyId] || 0);
+      userRating = val >= 1 && val <= 5 ? val : 0;
     }
 
-    // Read overall story rating stats from Firestore
     try {
       const storyDoc = await getDoc(doc(db, 'stories', storyId));
       if (storyDoc.exists()) {
         const data = storyDoc.data();
-        const ratingsCount = typeof data.ratingsCount === 'number' 
-          ? data.ratingsCount 
-          : (typeof data.ratingCount === 'number' ? data.ratingCount : 0);
-        const averageRating = ratingsCount > 0 && typeof data.rating === 'number' && data.rating > 0
-          ? Number(data.rating.toFixed(1)) 
-          : 0;
+        const ratingsCount =
+          typeof data.ratingsCount === 'number'
+            ? Math.max(0, data.ratingsCount)
+            : typeof data.ratingCount === 'number'
+            ? Math.max(0, data.ratingCount)
+            : 0;
+        const averageRating =
+          ratingsCount > 0 && typeof data.rating === 'number' && data.rating > 0 && data.rating <= 5
+            ? Number(data.rating.toFixed(1))
+            : 0;
         return {
           averageRating,
           ratingsCount,
           userRating,
-          hasRated: userRating > 0
+          hasRated: userRating > 0,
         };
       }
     } catch (err) {
       console.warn('Error fetching story rating from Firestore:', err);
     }
 
-    // Fallback to baseline story if present
-    const baseline = MOCK_STORIES.find(s => s.id === storyId);
     return {
-      averageRating: baseline?.rating && baseline.rating > 0 ? baseline.rating : 0,
-      ratingsCount: baseline?.rating && baseline.rating > 0 ? 1 : 0,
+      averageRating: 0,
+      ratingsCount: 0,
       userRating,
-      hasRated: userRating > 0
+      hasRated: userRating > 0,
     };
   }
 
   /**
-   * Rate a story (1 to 5 stars)
-   * Saves to Firestore with exact mathematical averaging and persists user rating.
+   * Rate a story (1 to 5 stars) atomically via Firestore transaction.
+   * Preserves existing historical rating records, never seeds fake 15-vote averages,
+   * and updates cleanly if a reader revises their rating.
    */
   public async rateStory(
-    storyId: string, 
-    ratingValue: number, 
-    customUid?: string, 
+    storyId: string,
+    ratingValue: number,
+    customUid?: string,
     customName?: string
   ): Promise<StoryRatingData> {
+    const existing = this.inflightRatings.get(storyId);
+    if (existing) return existing;
+
     const rating = Math.max(1, Math.min(5, Math.round(ratingValue)));
     const currentUid = customUid || auth.currentUser?.uid;
     const currentUserName = customName || auth.currentUser?.displayName || 'పాఠకుడు';
 
-    let prevUserRating = 0;
-
-    // 1. Check if user previously rated
-    if (currentUid) {
-      try {
-        const existingRatingSnap = await getDoc(doc(db, 'stories', storyId, 'ratings', currentUid));
-        if (existingRatingSnap.exists()) {
-          prevUserRating = existingRatingSnap.data().rating || 0;
-        }
-      } catch (err) {
-        console.warn('Error reading existing rating:', err);
-      }
-    } else {
-      const guestRatings = this.getGuestRatings();
-      prevUserRating = guestRatings[storyId] || 0;
-      this.saveGuestRating(storyId, rating);
-    }
-
-    // 2. Fetch current story document to recalculate sum and count safely
-    let currentCount = 0;
-    let currentSum = 0;
-    let baselineData: any = null;
-
-    try {
+    const task = (async () => {
       const storyRef = doc(db, 'stories', storyId);
-      const storySnap = await getDoc(storyRef);
+      const guestPrevRating = !currentUid ? Number(this.getGuestRatings()[storyId] || 0) : 0;
 
-      if (storySnap.exists()) {
-        const data = storySnap.data();
-        currentCount = data.ratingsCount || (data.rating ? 15 : 1);
-        currentSum = data.ratingsSum || (currentCount * (data.rating || 5.0));
-      } else {
-        // Find baseline story data to seed document
-        const baseline = MOCK_STORIES.find(s => s.id === storyId);
-        if (baseline) {
-          baselineData = baseline;
-          currentCount = 15;
-          currentSum = baseline.rating * currentCount;
+      const txResult = await runTransaction(db, async (tx) => {
+        const storySnap = await tx.get(storyRef);
+        if (!storySnap.exists()) {
+          throw new Error('కథ కనుగొనబడలేదు. రేటింగ్ సేవ్ చేయలేకపోయాము.');
         }
-      }
 
-      // Calculate new metrics
-      let newCount = currentCount;
-      let newSum = currentSum;
+        let prevUserRating = guestPrevRating;
+        const userRatingRef = currentUid ? doc(db, 'stories', storyId, 'ratings', currentUid) : null;
+        if (userRatingRef) {
+          const existingRatingSnap = await tx.get(userRatingRef);
+          if (existingRatingSnap.exists()) {
+            const val = Number(existingRatingSnap.data().rating || 0);
+            prevUserRating = val >= 1 && val <= 5 ? val : 0;
+          }
+        }
 
-      if (prevUserRating > 0) {
-        // User is updating their previous rating
-        newSum = currentSum - prevUserRating + rating;
-      } else {
-        // Brand new rating from this user
-        newCount = currentCount + 1;
-        newSum = currentSum + rating;
-      }
+        const data = storySnap.data();
+        const rawCount =
+          typeof data.ratingsCount === 'number'
+            ? Math.max(0, data.ratingsCount)
+            : typeof data.ratingCount === 'number'
+            ? Math.max(0, data.ratingCount)
+            : 0;
+        const rawAvg = typeof data.rating === 'number' && data.rating > 0 && data.rating <= 5 ? data.rating : 0;
+        const currentCount = rawCount;
+        const currentSum =
+          typeof data.ratingsSum === 'number' && data.ratingsSum >= 0 && currentCount > 0
+            ? data.ratingsSum
+            : currentCount > 0
+            ? Number((currentCount * rawAvg).toFixed(2))
+            : 0;
 
-      const newAverage = Number((newSum / Math.max(1, newCount)).toFixed(1));
+        let newCount = currentCount;
+        let newSum = currentSum;
 
-      // 3. Save to story document in Firestore
-      const updatePayload: any = {
-        rating: newAverage,
-        ratingsCount: newCount,
-        ratingsSum: newSum,
-        updatedAt: serverTimestamp(),
-      };
+        if (prevUserRating > 0 && currentCount > 0) {
+          newSum = Math.max(1, currentSum - prevUserRating + rating);
+        } else {
+          newCount = currentCount + 1;
+          newSum = currentSum + rating;
+        }
 
-      if (baselineData && !storySnap.exists()) {
-        Object.assign(updatePayload, {
-          title: baselineData.title,
-          teluguTitle: baselineData.teluguTitle,
-          coverImage: baselineData.coverImage,
-          category: baselineData.category,
-          authorId: baselineData.authorId,
-          publishedAt: baselineData.publishedAt,
-          status: 'published',
-          visibility: 'public',
-        });
-      }
+        const newAverage = Number(Math.min(5, Math.max(1, newSum / Math.max(1, newCount))).toFixed(1));
 
-      await setDoc(storyRef, sanitizeFirestoreData(updatePayload), { merge: true });
-
-      // 4. Save individual user rating subcollection if logged in
-      if (currentUid) {
-        await setDoc(doc(db, 'stories', storyId, 'ratings', currentUid), sanitizeFirestoreData({
-          userId: currentUid,
-          userName: currentUserName,
-          rating,
+        tx.update(storyRef, sanitizeFirestoreData({
+          rating: newAverage,
+          ratingsCount: newCount,
+          ratingsSum: Number(newSum.toFixed(2)),
           updatedAt: serverTimestamp(),
-        }), { merge: true });
-      }
-
-      const result: StoryRatingData = {
-        averageRating: newAverage,
-        ratingsCount: newCount,
-        userRating: rating,
-        hasRated: true
-      };
-
-      // 5. Broadcast real-time event across the application
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('kathavahini:story-rated', {
-          detail: {
-            storyId,
-            rating: newAverage,
-            ratingsCount: newCount,
-            userRating: rating
-          }
         }));
-      }
 
-      return result;
-    } catch (err) {
-      console.error('Failed to save rating to Firestore:', err);
-      // Fallback local update
-      const result: StoryRatingData = {
-        averageRating: rating,
-        ratingsCount: (currentCount || 15) + (prevUserRating > 0 ? 0 : 1),
-        userRating: rating,
-        hasRated: true
-      };
-
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('kathavahini:story-rated', {
-          detail: {
-            storyId,
+        if (userRatingRef && currentUid) {
+          tx.set(userRatingRef, sanitizeFirestoreData({
+            userId: currentUid,
+            userName: currentUserName,
             rating,
-            ratingsCount: result.ratingsCount,
-            userRating: rating
-          }
+            updatedAt: serverTimestamp(),
+          }), { merge: true });
+        }
+
+        return {
+          averageRating: newAverage,
+          ratingsCount: newCount,
+          userRating: rating,
+          hasRated: true,
+        };
+      });
+
+      if (!currentUid) {
+        this.saveGuestRating(storyId, rating);
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('kathavahini:story-rated', {
+          detail: {
+            storyId,
+            rating: txResult.averageRating,
+            ratingsCount: txResult.ratingsCount,
+            userRating: txResult.userRating,
+          },
         }));
       }
 
-      return result;
+      return txResult;
+    })();
+
+    this.inflightRatings.set(storyId, task);
+    try {
+      return await task;
+    } finally {
+      this.inflightRatings.delete(storyId);
     }
   }
 }
 
 export const ratingService = new RatingService();
+

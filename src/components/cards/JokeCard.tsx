@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Heart, Share2, Copy, Check } from 'lucide-react';
 import { Joke } from '../../types';
+import { copyToClipboard } from '../../utils/shareUtils';
 
 interface JokeCardProps {
   joke: Joke;
@@ -10,21 +11,29 @@ interface JokeCardProps {
 export const JokeCard: React.FC<JokeCardProps> = ({ joke, onLikeToggle }) => {
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(joke.content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = async () => {
+    const ok = await copyToClipboard(joke.content);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
-  const handleShare = () => {
-    if (navigator.share) {
-      navigator.share({
-        title: 'తెలుగు హాస్యం - కథావాహిని',
-        text: joke.content,
-      }).catch(() => {});
-    } else {
-      handleCopy();
+  const handleShare = async () => {
+    if (navigator.share && typeof navigator.share === 'function') {
+      try {
+        await navigator.share({
+          title: 'తెలుగు హాస్యం - కథావాహిని',
+          text: `${joke.content}\n\nKathavahini — Telugu Stories`,
+        });
+        return;
+      } catch (err: any) {
+        if (err?.name === 'AbortError' || err?.message?.includes('abort') || err?.message?.includes('canceled')) {
+          return;
+        }
+      }
     }
+    await handleCopy();
   };
 
   return (
@@ -35,7 +44,7 @@ export const JokeCard: React.FC<JokeCardProps> = ({ joke, onLikeToggle }) => {
           {joke.category}
         </span>
         <div className="flex items-center gap-1.5 text-xs text-[#6F6970] dark:text-[#AAA4AC]">
-          <img src={joke.author.avatar} alt={joke.author.teluguName} className="w-5 h-5 rounded-full object-cover" />
+          <img src={joke.author.avatar} alt={joke.author.teluguName} loading="lazy" decoding="async" className="w-5 h-5 rounded-full object-cover" />
           <span className="font-medium text-[#17151A] dark:text-[#F7F3EE]">{joke.author.teluguName}</span>
         </div>
       </div>

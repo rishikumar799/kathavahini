@@ -122,35 +122,46 @@ export function isCustomUploadedPhoto(src: unknown): src is string {
   return false;
 }
 
+function truncateClean(text: string, maxLen: number): string {
+  const clean = sanitizePublicText(text);
+  if (!clean) return '';
+  if (clean.length <= maxLen) return clean;
+  const slice = clean.slice(0, maxLen - 1);
+  const lastSpace = slice.lastIndexOf(' ');
+  const trimmed = lastSpace > maxLen * 0.55 ? slice.slice(0, lastSpace) : slice;
+  return `${trimmed.replace(/[.,;:\-\s—]+$/, '')}…`;
+}
+
+function buildVersionTag(seed: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < seed.length; i++) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
 /**
  * Resolve a cover image string (base64 or public URL) into a crawler-accessible HTTPS URL and MIME type.
+ * Routes all story/novel covers through /api/cover/:id.jpg so WhatsApp always receives a 1200x630 JPEG.
  */
 function resolveCoverImage(
   coverCandidate: unknown,
   entityId: string,
   origin: string,
-  defaultLogo: string
+  defaultLogo: string,
+  versionSeed = ''
 ): { imageUrl: string; imageType: string } {
   if (typeof coverCandidate === 'string') {
     const trimmed = coverCandidate.trim();
-    if (trimmed.startsWith('data:image/')) {
-      return {
-        imageUrl: `${origin}/api/cover/${encodeURIComponent(entityId)}.jpg`,
-        imageType: 'image/jpeg',
-      };
-    }
-    if ((trimmed.startsWith('https://') || trimmed.startsWith('http://')) && !trimmed.startsWith('blob:')) {
-      const mime = detectImageMimeType(trimmed);
-      if (mime === 'image/webp') {
+    if (trimmed && !trimmed.startsWith('blob:')) {
+      const v = buildVersionTag(`${trimmed.slice(0, 96)}:${trimmed.length}:${versionSeed}`);
+      if (trimmed.startsWith('data:image/') || trimmed.startsWith('https://') || trimmed.startsWith('http://')) {
         return {
-          imageUrl: `${origin}/api/cover/${encodeURIComponent(entityId)}.jpg`,
+          imageUrl: `${origin}/api/cover/${encodeURIComponent(entityId)}.jpg?v=${v}`,
           imageType: 'image/jpeg',
         };
       }
-      return {
-        imageUrl: trimmed,
-        imageType: mime,
-      };
     }
   }
   return { imageUrl: defaultLogo, imageType: 'image/png' };
@@ -231,17 +242,17 @@ export async function resolveContentMeta(
   },
   origin: string
 ): Promise<ContentMeta> {
-  const fallbackOrigin = (origin || 'https://kathavahini-9a9c1.web.app').replace(/\/+$/, '');
+  const fallbackOrigin = (origin || 'https://kathavahini.in').replace(/\/+$/, '');
   const defaultLogo = `${fallbackOrigin}/logo.png`;
 
   const defaultMeta: ContentMeta = {
-    title: 'కథావాహిని — తెలుగు కథా వేదిక | Kathavahini',
-    description: 'తెలుగు కథలు, నవలలు, బాలవినోదిని మరియు సాహిత్య రచనల వేదిక. మీ కథలను ప్రపంచంతో పంచుకోండి.',
+    title: 'Kathavahini — Telugu Stories & Novels',
+    description: 'Read original Telugu stories, novels, episodes, Balavinodhini, and timeless literature on Kathavahini.',
     imageUrl: defaultLogo,
     imageType: 'image/png',
     url: fallbackOrigin,
     appRedirectUrl: fallbackOrigin,
-    siteName: 'కథావాహిని (Kathavahini)',
+    siteName: 'Kathavahini — Telugu Stories',
     type: 'website',
     imageWidth: 1200,
     imageHeight: 630
@@ -284,35 +295,41 @@ export async function resolveContentMeta(
           resolvedAuthor.teluguName || resolvedAuthor.name || data.authorName || 'కథావాహిని రచయిత'
         ) || 'కథావాహిని రచయిత';
         const rawTitle = sanitizePublicText(data.teluguTitle || data.title || 'తెలుగు కథ') || 'తెలుగు కథ';
-        const fullTitle = `${rawTitle} | రచన: ${authorName} | కథావాహిని`;
 
-        let excerpt = sanitizePublicText(data.teluguExcerpt || data.excerpt || '');
+        let excerpt = sanitizePublicText(data.teluguExcerpt || data.excerpt || data.description || '');
         if (!excerpt && Array.isArray(data.content)) {
-          excerpt = sanitizePublicText(data.content.join(' ')).slice(0, 180);
+          excerpt = sanitizePublicText(data.content.join(' '));
+        } else if (!excerpt && typeof data.content === 'string') {
+          excerpt = sanitizePublicText(data.content);
         }
-        const fullDescription = excerpt
-          ? `${excerpt} - కథావాహినిలో పూర్తి కథను చదవండి.`
-          : `కథావాహినిలో "${rawTitle}" తెలుగు కథను చదవండి. రచయిత: ${authorName}.`;
+        const shortExcerpt = truncateClean(excerpt, 128);
+        const fullDescription = shortExcerpt
+          ? `${shortExcerpt}${shortExcerpt.toLowerCase().includes(authorName.toLowerCase()) ? '' : ` — By: ${authorName}`}`
+          : `Read "${rawTitle}" on Kathavahini — By: ${authorName}`;
 
-        const coverCandidate = data.coverImage || data.coverImageUrl;
-        const { imageUrl, imageType } = resolveCoverImage(coverCandidate, storySnap.id, fallbackOrigin, defaultLogo);
+        const coverCandidate = data.coverImage || data.coverImageUrl || data.coverImageURL;
+        const { imageUrl, imageType } = resolveCoverImage(
+          coverCandidate,
+          storySnap.id,
+          fallbackOrigin,
+          defaultLogo,
+          String(data.updatedAt?.seconds || data.publishedAt || '')
+        );
 
         const encodedId = encodeURIComponent(storySnap.id);
         const canonical = isReaderMode
           ? `${fallbackOrigin}/episode/${encodedId}`
           : `${fallbackOrigin}/story/${encodedId}`;
-        const appRedirectUrl = isReaderMode
-          ? `${fallbackOrigin}/?story=${encodedId}&reader=true`
-          : `${fallbackOrigin}/?story=${encodedId}`;
+        const appRedirectUrl = canonical;
 
         return {
-          title: fullTitle,
+          title: rawTitle,
           description: fullDescription,
           imageUrl,
           imageType,
           url: canonical,
           appRedirectUrl,
-          siteName: 'కథావాహిని (Kathavahini)',
+          siteName: 'Kathavahini — Telugu Stories',
           type: 'article',
           authorName,
           imageWidth: 1200,
@@ -345,7 +362,7 @@ export async function resolveContentMeta(
         }
 
         let resolvedImg = resolveCoverImage(
-          epData.coverImage || epData.coverImageUrl,
+          epData.coverImage || epData.coverImageUrl || epData.coverImageURL,
           epSnap.id,
           fallbackOrigin,
           defaultLogo
@@ -356,7 +373,7 @@ export async function resolveContentMeta(
           if (parentNovelSnap.exists()) {
             const pData = parentNovelSnap.data();
             resolvedImg = resolveCoverImage(
-              pData.coverImage || pData.coverImageUrl,
+              pData.coverImage || pData.coverImageUrl || pData.coverImageURL,
               epData.novelId,
               fallbackOrigin,
               defaultLogo
@@ -365,18 +382,20 @@ export async function resolveContentMeta(
         }
 
         const encodedId = encodeURIComponent(epSnap.id);
+        const epAuthorName = sanitizePublicText(epData.authorName || '');
+        const shortEpExcerpt = truncateClean(excerpt, 128);
         return {
-          title: fullTitle,
-          description: excerpt
-            ? `${excerpt}... కథావాహినిలో చదవండి.`
-            : `${novelTeluguTitle} ధారావాహిక నవలలోని ${epTitle} ను కథావాహినిలో చదవండి.`,
+          title: `${novelTeluguTitle} - ${epTitle}`,
+          description: shortEpExcerpt
+            ? `${shortEpExcerpt}${epAuthorName ? ` — By: ${epAuthorName}` : ''}`
+            : `${novelTeluguTitle} — ${epTitle}${epAuthorName ? ` — By: ${epAuthorName}` : ''}`,
           imageUrl: resolvedImg.imageUrl,
           imageType: resolvedImg.imageType,
           url: `${fallbackOrigin}/episode/${encodedId}`,
-          appRedirectUrl: `${fallbackOrigin}/?story=${encodedId}&reader=true`,
-          siteName: 'కథావాహిని (Kathavahini)',
+          appRedirectUrl: `${fallbackOrigin}/episode/${encodedId}`,
+          siteName: 'Kathavahini — Telugu Stories',
           type: 'article',
-          authorName: sanitizePublicText(epData.authorName || ''),
+          authorName: epAuthorName,
           imageWidth: 1200,
           imageHeight: 630
         };
@@ -429,29 +448,29 @@ export async function resolveContentMeta(
           resolvedAuthor.teluguName || resolvedAuthor.name || data.authorName || 'కథావాహిని రచయిత'
         ) || 'కథావాహిని రచయిత';
         const rawTitle = sanitizePublicText(data.teluguTitle || data.title || 'తెలుగు నవల') || 'తెలుగు నవల';
-        const fullTitle = `${rawTitle} | ధారావాహిక నవల | రచన: ${authorName} | కథావాహిని`;
 
         const { imageUrl, imageType } = resolveCoverImage(
-          data.coverImage || data.coverImageUrl,
+          data.coverImage || data.coverImageUrl || data.coverImageURL,
           novelSnap.id,
           fallbackOrigin,
-          defaultLogo
+          defaultLogo,
+          String(data.updatedAt?.seconds || '')
         );
 
-        const desc = sanitizePublicText(data.teluguDescription || data.description || '');
+        const desc = truncateClean(data.teluguDescription || data.description || '', 128);
         const fullDescription = desc
-          ? `${desc} - కథావాహినిలో నవలను ఉచితంగా చదవండి.`
-          : `కథావాహినిలో "${rawTitle}" తెలుగు ధారావాహిక నవలను చదవండి. రచయిత: ${authorName}.`;
+          ? `${desc} — By: ${authorName}`
+          : `Read "${rawTitle}" Telugu novel on Kathavahini — By: ${authorName}`;
 
         const encodedId = encodeURIComponent(novelSnap.id);
         return {
-          title: fullTitle,
+          title: rawTitle,
           description: fullDescription,
           imageUrl,
           imageType,
           url: `${fallbackOrigin}/novel/${encodedId}`,
-          appRedirectUrl: `${fallbackOrigin}/?novel=${encodedId}`,
-          siteName: 'కథావాహిని (Kathavahini)',
+          appRedirectUrl: `${fallbackOrigin}/novel/${encodedId}`,
+          siteName: 'Kathavahini — Telugu Stories',
           type: 'article',
           authorName,
           imageWidth: 1200,
@@ -525,7 +544,6 @@ export async function resolveContentMeta(
           'కథావాహిని రచయిత';
 
         const name = sanitizePublicText(rawName) || 'కథావాహిని రచయిత';
-        const fullTitle = `${name} - రచయిత ప్రొఫైల్ | కథావాహిని`;
 
         const rawBio =
           userData?.teluguBio ||
@@ -535,11 +553,11 @@ export async function resolveContentMeta(
           writerData?.bio ||
           authorData?.bio ||
           '';
-        const cleanBio = sanitizePublicText(rawBio).slice(0, 180);
+        const cleanBio = truncateClean(rawBio, 125);
 
         const fullDescription = cleanBio
-          ? `${cleanBio} — ${name} గారి రచనలు కథావాహినిలో చదవండి.`
-          : `${name} గారి రచయిత ప్రొఫైల్ మరియు తెలుగు రచనలు కథావాహినిలో చూడండి.`;
+          ? `${cleanBio} • Writer on Kathavahini.`
+          : `Writer on Kathavahini. Read original Telugu stories, novels, and series by ${name}.`;
 
         // Prioritize custom uploaded profile photograph across users -> writers -> authors
         const { imageUrl, imageType } = pickBestProfileImage(
@@ -551,13 +569,13 @@ export async function resolveContentMeta(
 
         const encodedId = encodeURIComponent(authorDocId);
         return {
-          title: fullTitle,
+          title: name,
           description: fullDescription,
           imageUrl,
           imageType,
           url: `${fallbackOrigin}/author/${encodedId}`,
-          appRedirectUrl: `${fallbackOrigin}/?author=${encodedId}`,
-          siteName: 'కథావాహిని (Kathavahini)',
+          appRedirectUrl: `${fallbackOrigin}/author/${encodedId}`,
+          siteName: 'Kathavahini — Telugu Stories',
           type: 'profile',
           authorName: name,
           imageWidth: 512,

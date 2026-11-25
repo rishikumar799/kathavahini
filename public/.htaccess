@@ -2,17 +2,33 @@
   RewriteEngine On
   RewriteBase /
 
-  # Do not rewrite existing files or directories (including /assets/*.js, /assets/*.css, /logo.png)
+  # 1. Public binary OG image proxy endpoints for WhatsApp / Facebook / Telegram / X crawlers
+  RewriteRule ^api/cover/(.+)$ og-share.php?mode=cover&id=$1 [L,QSA]
+  RewriteRule ^api/avatar/(.+)$ og-share.php?mode=avatar&id=$1 [L,QSA]
+
+  # 2. Dedicated share preview endpoints (/share/story/:id, /share/novel/:id, /share/episode/:id, /share/author/:id)
+  RewriteRule ^share/(story|novel|episode|author|profile)/([^/]+)/?$ og-share.php?type=$1&id=$2&share=1 [L,QSA]
+
+  # 3. Serve rich server-generated Open Graph HTML to social media & messaging crawlers (HTTP 200, NO redirect)
+  RewriteCond %{HTTP_USER_AGENT} (WhatsApp|facebookexternalhit|Facebot|Meta-ExternalAgent|Twitterbot|TelegramBot|LinkedInBot|Slackbot|Discordbot|Pinterest|Applebot|Viber|SkypeUriPreview|Embedly|Iframely|vkShare|W3C_Validator|MetaInspector|Googlebot|bingbot|redditbot|bitlybot) [NC]
+  RewriteRule ^(story|novel|episode|author|profile)/([^/]+)/?$ og-share.php?type=$1&id=$2 [L,QSA]
+
+  # Support legacy query-string share links (/?story=..., /?author=..., /?novel=..., /?episode=...) for crawlers
+  RewriteCond %{HTTP_USER_AGENT} (WhatsApp|facebookexternalhit|Facebot|Meta-ExternalAgent|Twitterbot|TelegramBot|LinkedInBot|Slackbot|Discordbot|Pinterest|Applebot|Viber|SkypeUriPreview|Embedly|Iframely|vkShare|W3C_Validator|MetaInspector|Googlebot|bingbot|redditbot|bitlybot) [NC]
+  RewriteCond %{QUERY_STRING} (^|&)(story|novel|episode|author|profile)=([^&]+) [NC]
+  RewriteRule ^$ og-share.php [L,QSA]
+
+  # 4. Do not rewrite existing files or directories (including /assets/*.js, /assets/*.css, /logo.png, /og-share.php)
   RewriteCond %{REQUEST_FILENAME} -f [OR]
   RewriteCond %{REQUEST_FILENAME} -d
   RewriteRule ^ - [L]
 
-  # Never return index.html for missing static asset files or /assets/* or /api/* (return real 404)
+  # 5. Never return index.html for missing static asset files or unknown /api/* (return real 404)
   RewriteRule ^assets/ - [R=404,L]
   RewriteRule ^api/ - [R=404,L]
   RewriteRule \.(?:js|mjs|css|map|png|jpe?g|webp|gif|svg|ico|woff2?|ttf|eot|json|xml|txt|pdf)$ - [R=404,L]
 
-  # Rewrite all SPA routes (/story/*, /novel/*, /author/*, /profile/*, /episode/*) to /index.html
+  # 6. Rewrite all human browser SPA routes (/story/*, /novel/*, /author/*, /profile/*, /episode/*) to /index.html
   RewriteRule ^ index.html [L]
 </IfModule>
 
@@ -28,3 +44,8 @@
     Header set Cache-Control "public, max-age=31536000, immutable"
   </FilesMatch>
 </IfModule>
+
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript application/javascript application/json image/svg+xml
+</IfModule>
+
